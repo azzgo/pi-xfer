@@ -32,8 +32,8 @@ one-way message.
 
 ## Protocol
 
-- Unix socket at `~/pi-handoff/agents/<name>.sock`
-- Peer metadata at `~/pi-handoff/agents/<name>.json` (session name, cwd, model,
+- Unix socket at `~/.pi/xfer/<name>.sock`
+- Peer metadata at `~/.pi/xfer/<name>.json` (session name, cwd, model,
   status, pid, startedAt — refreshed by a 1s poll + status events)
 - Message: `xfer-notify` (JSON lines, one-way; target remains the xfer name)
 

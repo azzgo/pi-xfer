@@ -2,7 +2,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 /** Root directory for xfer peer sockets + peer metadata. */
-export const XFER_DIR = path.join(os.homedir(), "pi-handoff", "agents");
+export const XFER_DIR = path.join(os.homedir(), ".pi", "xfer");
 
 export const CONNECT_TIMEOUT_MS = 5_000;
 export const ACK_TIMEOUT_MS = 5_000;
