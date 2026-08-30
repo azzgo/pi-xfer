@@ -1,8 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import * as fs from "node:fs";
 import type * as net from "node:net";
+import { BridgeManager, type BridgeContext } from "./bridge.js";
 import { XFER_DIR } from "./constants.js";
 import { createServer, listenServer } from "./server.js";
+import type { InterpolationVars } from "./settings.js";
 import { XferState } from "./state.js";
 import type { XferNotifyMessage } from "./types.js";
 import { deriveName, endpointForName, metadataForName } from "./utils.js";
@@ -23,6 +25,9 @@ function tcpListenerInfo(server: net.Server): BridgeListener {
   return { host: address.address, port: address.port, server };
 }
 
+/** Hard ceiling for the fire-and-forget bridge reap at session shutdown. */
+const BRIDGE_REAP_CEILING_MS = 2_000;
+
 /**
  * Orchestrates the xfer listener lifecycle: session start, rename,
  * and shutdown. Owns the inbound socket + its delivery into the session.
@@ -33,6 +38,8 @@ export class XferController {
 
   /** Bridge-side TCP listener, when running; independent of `state.identity`. */
   private bridgeServer: net.Server | null = null;
+  /** Bridge command lifecycle (`/xfer listener setup|stop|logs`); created lazily. */
+  private bridgeManager: BridgeManager | null = null;
 
   constructor(pi: ExtensionAPI, state: XferState) {
     this.pi = pi;
@@ -171,6 +178,39 @@ export class XferController {
     ctx.ui.notify(`✅ Renamed to "${newName}"`, "info");
   }
 
+  /** UI-agnostic notify surface for the bridge (safe when no session is attached). */
+  private bridgeNotify(): BridgeContext {
+    return {
+      notify: (message, level) => {
+        try { this.state.runtimeContext?.ui.notify(message, level ?? "info"); } catch { /* session may be gone */ }
+      },
+    };
+  }
+
+  /** `/xfer listener setup`: interpolate `%p` and spawn the bridge command. */
+  async listenerSetup(tpl: string, vars?: InterpolationVars): Promise<void> {
+    if (!this.bridgeManager) this.bridgeManager = new BridgeManager({ controller: this });
+    await this.bridgeManager.setup(this.bridgeNotify(), tpl, vars);
+  }
+
+  /** `/xfer listener stop`: stop ladder + close the bridge TCP listener. */
+  async listenerStop(): Promise<void> {
+    if (this.bridgeManager) await this.bridgeManager.stop(this.bridgeNotify());
+  }
+
+  /** `/xfer listener logs`: dump the bridge output ring buffer (warning when down). */
+  listenerLogs(): void {
+    if (!this.bridgeManager) this.bridgeManager = new BridgeManager({ controller: this });
+    this.bridgeManager.logs(this.bridgeNotify());
+  }
+
+  /** Snapshot for `/xfer list` + `/xfer status`. */
+  bridgeInfo(): { up: boolean; pid?: number; port?: number; since?: number; cmd?: string } {
+    const bridge = this.bridgeManager;
+    if (!bridge || !bridge.isUp()) return { up: false };
+    return { up: true, pid: bridge.pid(), port: bridge.port(), since: bridge.upSince(), cmd: bridge.cmd() };
+  }
+
   /** `session_shutdown`: close socket, remove endpoint + metadata, stop polling. */
   shutdown(): void {
     const state = this.state;
@@ -182,5 +222,20 @@ export class XferController {
     }
     state.runtimeContext = null;
     state.identity = null;
+    // Bridge reap is fire-and-forget with a hard ceiling — never blocks exit.
+    // stop() signals the process group synchronously on its first await tick, so
+    // even an abrupt exit has delivered SIGTERM to the bridge before we stop.
+    if (this.bridgeManager) {
+      const bridge = this.bridgeManager;
+      const ctx = this.bridgeNotify();
+      void Promise.race([
+        bridge.stop(ctx),
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, BRIDGE_REAP_CEILING_MS);
+          timer.unref?.();
+        }),
+      ]).catch(() => { /* best effort */ });
+      this.bridgeManager = null;
+    }
   }
 }

@@ -20,7 +20,8 @@ import { pathToFileURL } from "node:url";
 import { after, before, describe, it } from "node:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
-import type { XferController } from "./controller.js";
+import { XferController } from "./controller.js";
+import { XferState } from "./state.js";
 import type { Identity } from "./types.js";
 
 let registerXferCommand: typeof import("./commands.js").registerXferCommand;
@@ -96,6 +97,12 @@ function harness(): {
   } as unknown as ExtensionAPI;
   const controller = {
     state: { identity: makeIdentity(), sessionName: () => undefined },
+    bridgeInfo: () => ({ up: false }),
+    listenerSetup: async () => {},
+    listenerStop: async () => {},
+    listenerLogs: () => {
+      notifications.push({ message: "bridge not running", type: "warning" });
+    },
   } as unknown as XferController;
 
   registerXferCommand(pi, controller, { settingsPath });
@@ -111,6 +118,54 @@ function harness(): {
     sent,
     notifications,
   };
+}
+
+/** Harness backed by a REAL XferController (+ XferState) for bridge-listener tests. */
+function realHarness(): {
+  handler: (args: string) => Promise<void>;
+  completions: (prefix: string) => AutocompleteItem[] | null;
+  notifications: Notification[];
+  controller: XferController;
+} {
+  const notifications: Notification[] = [];
+  let def: CapturedCommand | undefined;
+  const pi = {
+    registerCommand: (_name: string, command: CapturedCommand) => { def = command; },
+    sendUserMessage: () => {},
+    sendMessage: () => {},
+  } as unknown as ExtensionAPI;
+  const controller = new XferController(pi, new XferState());
+  controller.state.identity = makeIdentity();
+  // Bridge notifications route through state.runtimeContext.ui — wire them into the capture.
+  controller.state.runtimeContext = {
+    ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
+  } as never;
+
+  registerXferCommand(pi, controller, { settingsPath });
+  assert.ok(def, "registerCommand was not captured");
+
+  const ctx = {
+    ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
+  };
+  return {
+    handler: (args: string) => def!.handler(args, ctx as never),
+    completions: (prefix: string) => def!.getArgumentCompletions?.(prefix) ?? null,
+    notifications,
+    controller,
+  };
+}
+
+/** True when the process group no longer exists. macOS reports EPERM (not ESRCH)
+ *  for kill(-pgid, 0) once the group leader has been reaped — treat both as gone. */
+function groupGone(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ESRCH" || code === "EPERM") return true;
+    throw err;
+  }
 }
 
 describe("xfer command: peer subcommand", () => {
@@ -213,7 +268,7 @@ describe("xfer command: completions", () => {
 
   it("keeps existing completions working", () => {
     const h = harness();
-    assert.deepEqual((h.completions("li") ?? []).map((i) => i.value), ["list"]);
+    assert.deepEqual((h.completions("li") ?? []).map((i) => i.value), ["list", "listener"]);
     assert.deepEqual((h.completions("na") ?? []).map((i) => i.value), ["name"]);
   });
 
@@ -238,5 +293,93 @@ describe("xfer command: description and help text", () => {
 
     await h.handler("help");
     assert.match(h.notifications[0].message, /peer <name> <req>/);
+  });
+});
+
+describe("xfer command: listener subcommand", () => {
+  it("errors with the settings path when listen.bridge is unconfigured", async () => {
+    writeSettings(JSON.stringify({ peers: {} }));
+    const h = harness();
+
+    await h.handler("listener setup");
+
+    const note = h.notifications[0];
+    assert.equal(note.type, "error");
+    assert.match(note.message, /listen\.bridge/);
+    assert.match(note.message, /settings\.json/);
+  });
+
+  it("errors on bad subcommands and handles logs while down", async () => {
+    const h = harness();
+
+    await h.handler("listener");
+    assert.match(h.notifications[0].message, /Usage/);
+
+    await h.handler("listener logs");
+    assert.match(h.notifications[1].message, /bridge not running/);
+  });
+
+  it("sets up, shows the bridge line in list/status, then stops", async () => {
+    writeSettings(JSON.stringify({ listen: { bridge: "exec sleep 30" } }));
+    const h = realHarness();
+    try {
+      await h.handler("listener setup");
+      assert.ok(
+        h.notifications.some((n) => /Bridge up/.test(n.message)),
+        `setup should notify success, got: ${JSON.stringify(h.notifications)}`,
+      );
+      assert.ok(h.controller.bridgeInfo().up, "bridge should be up after setup");
+
+      await h.handler("list");
+      assert.match(h.notifications.at(-1)!.message, /bridge: up/);
+      assert.match(h.notifications.at(-1)!.message, /exec sleep 30/);
+
+      await h.handler("status");
+      assert.match(h.notifications.at(-1)!.message, /bridge: up/);
+    } finally {
+      await h.handler("listener stop"); // never leave a live child hanging the suite
+    }
+    assert.equal(h.controller.bridgeInfo().up, false);
+
+    await h.handler("list");
+    assert.match(h.notifications.at(-1)!.message, /bridge: down/);
+  });
+
+  it("reaps the bridge on controller shutdown without blocking", async () => {
+    writeSettings(JSON.stringify({ listen: { bridge: "exec sleep 30" } }));
+    const h = realHarness();
+    try {
+      await h.handler("listener setup");
+      const info = h.controller.bridgeInfo();
+      assert.ok(info.up && info.pid, "bridge up before shutdown");
+
+      h.controller.shutdown(); // sync, fire-and-forget reap
+
+      const deadline = Date.now() + 4_000;
+      while (Date.now() < deadline && !groupGone(info.pid!)) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      assert.ok(groupGone(info.pid!), "bridge group must be reaped");
+    } finally {
+      // Belt and braces: the reap is fire-and-forget — make sure no child survives
+      // the suite even if the assertion above failed.
+      await h.controller.listenerStop().catch(() => {});
+    }
+  });
+});
+
+describe("xfer command: listener completions", () => {
+  it("offers setup/stop/logs for the 'listener ' prefix", () => {
+    const h = harness();
+    const items = h.completions("listener ") ?? [];
+    assert.deepEqual(items.map((i) => i.value), ["setup", "stop", "logs"]);
+  });
+
+  it("offers listener and status among top-level subcommands", () => {
+    const h = harness();
+    const items = h.completions("") ?? [];
+    const values = items.map((i) => i.value);
+    assert.ok(values.includes("listener"));
+    assert.ok(values.includes("status"));
   });
 });

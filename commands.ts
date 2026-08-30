@@ -20,6 +20,31 @@ function remotePeerDescription(peer: PeerSendEntry): string {
   return head.length > 60 ? `send: ${head.slice(0, 57)}…` : `send: ${head}`;
 }
 
+/** Compact human uptime: `42s`, `3m05s`, `2h11m`. */
+function formatUptime(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+}
+
+/** Listener summary shared by `/xfer list` and `/xfer status`. */
+function listenerSection(controller: XferController): string {
+  const identity = controller.state.identity;
+  let text = "\n\n📡 Listener:";
+  text += `\n  unix socket: ${identity ? `${identity.endpoint} — name "${identity.name}"` : "(not initialised)"}`;
+  const bridge = controller.bridgeInfo();
+  if (bridge.up) {
+    const uptime = bridge.since !== undefined ? formatUptime(Date.now() - bridge.since) : "?";
+    text += `\n  bridge: up — pid ${bridge.pid}, port ${bridge.port}, uptime ${uptime}`;
+    text += `\n    cmd: \`${bridge.cmd ?? "?"}\``;
+  } else {
+    text += "\n  bridge: down (start with /xfer listener setup)";
+  }
+  return text;
+}
+
 /** Register the `/xfer` slash command. */
 export function registerXferCommand(pi: ExtensionAPI, controller: XferController, options: XferCommandOptions = {}): void {
   const settingsPath = options.settingsPath ?? DEFAULT_SETTINGS_PATH;
@@ -47,12 +72,25 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           .map(peer => ({ value: peer.name, label: peer.name, description: remotePeerDescription(peer) }));
         return items.length > 0 ? items : null;
       }
+      // `/xfer listener <TAB>` completes the listener subcommand group only.
+      if (prefix.startsWith("listener ")) {
+        const subPrefix = prefix.slice("listener ".length).replace(/^\s+/, "");
+        const items: AutocompleteItem[] = [
+          { value: "setup", label: "setup", description: "Start the bridge command from settings.json" },
+          { value: "stop", label: "stop", description: "Stop the bridge and close the TCP listener" },
+          { value: "logs", label: "logs", description: "Show recent bridge output" },
+        ].filter(i => i.value.startsWith(subPrefix));
+        return items.length > 0 ? items : null;
+      }
+
 
       const peers = listPeers(controller.state.identity?.name ?? "");
       const all: AutocompleteItem[] = [
         { value: "list", label: "list", description: "List available peers" },
         { value: "name", label: "name", description: "Show or set this agent's name" },
         { value: "peer", label: "peer", description: "Send to a remote peer from settings.json" },
+        { value: "listener", label: "listener", description: "Bridge listener: setup / stop / logs" },
+        { value: "status", label: "status", description: "Show listener status" },
         ...peers.map(peer => ({
           value: peer.xferName,
           label: peer.xferName,
@@ -74,6 +112,9 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "📡 /xfer <target> <request> — generate handoff doc\n" +
           "   /xfer list               — list peers\n" +
           "   /xfer peer <name> <req>  — send via remote peer (settings.json)\n" +
+          "   /xfer listener setup     — start bridge (listen.bridge in settings.json)\n" +
+          "   /xfer listener stop|logs — stop bridge / show its output\n" +
+          "   /xfer status             — listener status\n" +
           "   /xfer name [<name>]      — show or set name\n" +
 
           "\n" +
@@ -101,6 +142,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           ? remote.map(peer => `  ${peer.name}\n    ${remotePeerDescription(peer)}`).join("\n")
           : "  (none)");
         if (settingsError) text += `\n\n⚠️ Failed to load remote peers from ${settingsPath}: ${settingsError}`;
+        text += listenerSection(controller);
 
         ctx.ui.notify(text, "info");
         return;
@@ -186,6 +228,56 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         return;
       }
 
+
+      // ── /xfer listener setup|stop|logs (bridge transport) ──
+      if (cmd === "listener") {
+        const sub = parts[1];
+        if (sub !== "setup" && sub !== "stop" && sub !== "logs") {
+          ctx.ui.notify("Usage: /xfer listener <setup|stop|logs>", "error");
+          return;
+        }
+        if (sub === "logs") {
+          controller.listenerLogs();
+          return;
+        }
+        if (sub === "stop") {
+          await controller.listenerStop();
+          return;
+        }
+        // setup
+        if (!state.identity) {
+          ctx.ui.notify("❌ Xfer is not initialised", "error");
+          return;
+        }
+        let tpl: string | undefined;
+        try {
+          tpl = loadSettings(settingsPath).listen?.bridge;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          ctx.ui.notify(`❌ Failed to load ${settingsPath} — ${message}`, "error");
+          return;
+        }
+        if (!tpl) {
+          ctx.ui.notify(
+            `❌ No listen.bridge template in ${settingsPath} — add e.g.:\n` +
+            `  { "listen": { "bridge": "ssh -R :<remote>:127.0.0.1:%p ..." } }   (%p = local TCP port)`,
+            "error",
+          );
+          return;
+        }
+        try {
+          await controller.listenerSetup(tpl, { n: state.identity.name });
+        } catch {
+          // The bridge manager already notified the human; nothing to add.
+        }
+        return;
+      }
+
+      // ── /xfer status (listener summary) ──
+      if (cmd === "status") {
+        ctx.ui.notify(listenerSection(controller).trimStart(), "info");
+        return;
+      }
       // ── /xfer <target> <requirement...> ──
       const target = cmd;
       const requirement = parts.slice(1).join(" ");

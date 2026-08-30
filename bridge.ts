@@ -64,6 +64,8 @@ export class BridgeManager {
   private echoLines = 0;
   private echoStartedAt = 0;
   private echoTimer: NodeJS.Timeout | null = null;
+  private bridgeCmd: string | undefined;
+  private startedAtMs: number | undefined;
 
   constructor(options: BridgeManagerOptions) {
     this.controller = options.controller;
@@ -83,6 +85,16 @@ export class BridgeManager {
   /** pid of the bridge command, while up. */
   pid(): number | undefined {
     return this.childPid;
+  }
+
+  /** Interpolated bridge command, while up (for `/xfer list` / `/xfer status`). */
+  cmd(): string | undefined {
+    return this.bridgeCmd;
+  }
+
+  /** Wall-clock ms timestamp of `setup`, while up (for uptime display). */
+  upSince(): number | undefined {
+    return this.startedAtMs;
   }
 
   /**
@@ -155,6 +167,8 @@ export class BridgeManager {
 
     this.startEchoWindow();
     this.running = true;
+    this.bridgeCmd = cmd;
+    this.startedAtMs = Date.now();
     ctx.notify(`🌉 Bridge up — pid ${pid}, port ${listener.port}`, "info");
     return { pid, port: listener.port };
   }
@@ -190,6 +204,8 @@ export class BridgeManager {
     this.child = null;
     this.childPid = undefined;
     this.bridgePort = undefined;
+    this.bridgeCmd = undefined;
+    this.startedAtMs = undefined;
     this.ring = [];
     this.stopping = true;
     try {
