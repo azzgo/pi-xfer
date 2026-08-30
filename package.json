@@ -1,0 +1,8 @@
+{
+  "name": "xfer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import 'data:text/javascript;base64,aW1wb3J0e3JlZ2lzdGVySG9va3N9ZnJvbSJub2RlOm1vZHVsZSI7cmVnaXN0ZXJIb29rcyh7cmVzb2x2ZShzLGMsbil7aWYoIXMuc3RhcnRzV2l0aCgiLiIpfHwhcy5lbmRzV2l0aCgiLmpzIikpcmV0dXJuIG4ocyxjKTt0cnl7cmV0dXJuIG4ocyxjKX1jYXRjaChlKXt0cnl7cmV0dXJuIG4ocy5yZXBsYWNlKC9cLmpzJC8sIi50cyIpLGMpfWNhdGNoe3Rocm93IGV9fX19KTs=' --test"
+  }
+}

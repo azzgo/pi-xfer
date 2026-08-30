@@ -30,3 +30,21 @@ export interface Identity {
   server: net.Server | null;
   startedAt: number;
 }
+
+/** `[listen]` section: names the bridge transport that owns the xfer listen socket. */
+export interface ListenConfig {
+  bridge: string;
+}
+
+/** Per-peer `peers.<name>` entry: external command template used to send a handoff. */
+export interface PeerSendConfig {
+  send: string;
+  timeoutMs?: number;
+  note?: string;
+}
+
+/** Optional `~/.pi/xfer/settings.json` document (loaded by `settings.ts`). */
+export interface Settings {
+  listen?: ListenConfig;
+  peers?: Record<string, PeerSendConfig>;
+}
