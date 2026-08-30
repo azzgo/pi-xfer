@@ -4,12 +4,76 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { interpolate, type InterpolationVars } from "./settings.js";
 import type { PeerSendConfig, XferNotifyMessage } from "./types.js";
+import type { PeerSendEntry } from "./peers.js";
+import { msgId } from "./utils.js";
 
 /** Fire-and-forget outcome of a one-shot send: only the exit code really matters. */
 export interface SendResult {
   ok: boolean;
   code: number | null;
   stderrHead: string;
+}
+
+/** Options for `sendPeerHandoff`. */
+export interface SendPeerHandoffOptions {
+  /** Sender's xfer name — the frame `from` field and the `%n` var. */
+  from: string;
+  /** One-sentence summary carried in the notify frame. */
+  summary: string;
+  /** Full markdown handoff document body. */
+  document: string;
+  /** Extra interpolation vars (e.g. `%p`); merged over the `%n`/`%peer` defaults. */
+  vars?: InterpolationVars;
+}
+
+/** Resolved outcome of a peer handoff: doc path, message id and the send result. */
+export interface SendPeerHandoffResult {
+  handoff_id: string;
+  docPath: string;
+  result: SendResult;
+}
+
+/** Optional injection point so component tests can fake the send mechanism. */
+export type SendFrameFn = typeof sendViaCommand;
+
+/**
+ * Write `document` to a 0600 temp file (`/tmp/pi-xfer-<id>.md`), then deliver it to the
+ * remote settings peer `peer` via `send` (default: the real `sendViaCommand`). The frame
+ * is the same `xfer-notify` shape the local socket path uses; vars default to `%n` =
+ * `opts.from` and `%peer` = `peer.name`, merged under `opts.vars`.
+ *
+ * A template referencing an unprovided var (e.g. `%p`) makes `interpolate` throw — that
+ * is the documented contract for send-command authors. On any failure — a thrown send or
+ * a non-ok result — the temp doc is removed, and a non-ok result surfaces as a thrown
+ * `Error` naming the exit code and the captured stderr head (exit code is the only result
+ * of a one-way send).
+ */
+export async function sendPeerHandoff(
+  peer: PeerSendEntry,
+  opts: SendPeerHandoffOptions,
+  send: SendFrameFn = sendViaCommand,
+): Promise<SendPeerHandoffResult> {
+  const mid = msgId();
+  const docPath = path.join(os.tmpdir(), `pi-xfer-${mid}.md`);
+  fs.writeFileSync(docPath, opts.document, { encoding: "utf-8", mode: 0o600 });
+  try {
+    const frame: XferNotifyMessage = {
+      type: "xfer-notify",
+      msg_id: mid,
+      from: opts.from,
+      file: docPath,
+      summary: opts.summary,
+    };
+    const result = await send(peer, frame, { n: opts.from, peer: peer.name, ...opts.vars });
+    if (!result.ok) {
+      const stderr = result.stderrHead ? ` — ${result.stderrHead}` : "";
+      throw new Error(`xfer: send command for peer "${peer.name}" failed (exit code ${result.code})${stderr}`);
+    }
+    return { handoff_id: mid, docPath, result };
+  } catch (err) {
+    try { fs.unlinkSync(docPath); } catch { /* best effort */ }
+    throw err;
+  }
 }
 
 /** Default cap on how long the spawned command may run. */

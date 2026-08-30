@@ -8,8 +8,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { sendViaCommand } from "./oneshot.js";
+import { sendPeerHandoff, sendViaCommand } from "./oneshot.js";
 import type { PeerSendConfig, XferNotifyMessage } from "./types.js";
+import type { InterpolationVars } from "./settings.js";
+import type { PeerSendEntry } from "./peers.js";
 
 let tmpDir: string;
 
@@ -112,5 +114,105 @@ describe("sendViaCommand", () => {
     const result = await sendViaCommand(peer, makeFrame(), { p: "7777" });
     assert.equal(result.ok, true);
     assert.equal(fs.readFileSync(out, "utf-8"), "7777");
+  });
+});
+
+describe("sendPeerHandoff", () => {
+  const DOC = "# Handoff\n\nbody";
+
+  function makePeer(overrides: Partial<PeerSendEntry> = {}): PeerSendEntry {
+    return { name: "codex", send: "true", ...overrides };
+  }
+
+  function okFake(): typeof sendViaCommand {
+    return async () => ({ ok: true, code: 0, stderrHead: "" });
+  }
+
+  it("returns handoff_id + docPath and writes the doc 0600 with the document content", async () => {
+    const { handoff_id, docPath, result } = await sendPeerHandoff(
+      makePeer(),
+      { from: "pi", summary: "s", document: DOC },
+      okFake(),
+    );
+    assert.equal(result.ok, true);
+    assert.equal(path.basename(docPath), `pi-xfer-${handoff_id}.md`);
+    assert.equal(path.dirname(docPath), os.tmpdir());
+    assert.equal(fs.readFileSync(docPath, "utf-8"), DOC);
+    assert.equal(fs.statSync(docPath).mode & 0o777, 0o600);
+    fs.unlinkSync(docPath);
+  });
+
+  it("builds the xfer-notify frame and default %n/%peer vars, passing the peer through", async () => {
+    let seenFrame: XferNotifyMessage | undefined;
+    let seenVars: InterpolationVars | undefined;
+    let seenPeer: PeerSendEntry | undefined;
+    const fake: typeof sendViaCommand = async (peer, frame, vars) => {
+      seenPeer = peer;
+      seenFrame = frame;
+      seenVars = vars;
+      return { ok: true, code: 0, stderrHead: "" };
+    };
+    const { handoff_id, docPath } = await sendPeerHandoff(
+      makePeer({ name: "zeta" }),
+      { from: "pi", summary: "sum", document: DOC },
+      fake,
+    );
+    assert.equal(seenPeer?.name, "zeta");
+    assert.deepEqual(seenFrame, {
+      type: "xfer-notify",
+      msg_id: handoff_id,
+      from: "pi",
+      file: docPath,
+      summary: "sum",
+    });
+    assert.deepEqual(seenVars, { n: "pi", peer: "zeta" });
+    fs.unlinkSync(docPath);
+  });
+
+  it("merges caller vars over the defaults", async () => {
+    let seenVars: InterpolationVars | undefined;
+    const fake: typeof sendViaCommand = async (_peer, _frame, vars) => {
+      seenVars = vars;
+      return { ok: true, code: 0, stderrHead: "" };
+    };
+    const { docPath } = await sendPeerHandoff(
+      makePeer(),
+      { from: "pi", summary: "s", document: DOC, vars: { p: "7777" } },
+      fake,
+    );
+    assert.deepEqual(seenVars, { n: "pi", peer: "codex", p: "7777" });
+    fs.unlinkSync(docPath);
+  });
+
+  it("throws with the exit code + stderrHead on a non-ok result and removes the doc", async () => {
+    let docPath: string | undefined;
+    const fake: typeof sendViaCommand = async (_peer, frame) => {
+      docPath = frame.file;
+      return { ok: false, code: 3, stderrHead: "boom\n" };
+    };
+    await assert.rejects(
+      sendPeerHandoff(makePeer(), { from: "pi", summary: "s", document: DOC }, fake),
+      (err: Error) => {
+        assert.match(err.message, /exit code 3/);
+        assert.match(err.message, /boom/);
+        return true;
+      },
+    );
+    assert.ok(docPath);
+    assert.equal(fs.existsSync(docPath), false);
+  });
+
+  it("removes the doc and rethrows when the send throws (e.g. unprovided %p)", async () => {
+    let docPath: string | undefined;
+    const fake: typeof sendViaCommand = async (_peer, frame) => {
+      docPath = frame.file;
+      throw new Error("Template references %p but vars.p is undefined");
+    };
+    await assert.rejects(
+      sendPeerHandoff(makePeer(), { from: "pi", summary: "s", document: DOC }, fake),
+      /vars\.p is undefined/,
+    );
+    assert.ok(docPath);
+    assert.equal(fs.existsSync(docPath), false);
   });
 });
