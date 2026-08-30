@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { DEFAULT_SETTINGS_PATH, loadSettings, validateSettings } from "./settings.js";
+import { DEFAULT_SETTINGS_PATH, interpolate, loadSettings, validateSettings } from "./settings.js";
 
 let tmpDir: string;
 
@@ -150,5 +150,77 @@ describe("validateSettings", () => {
 describe("DEFAULT_SETTINGS_PATH", () => {
   it("points at ~/.pi/xfer/settings.json", () => {
     assert.equal(DEFAULT_SETTINGS_PATH, path.join(os.homedir(), ".pi", "xfer", "settings.json"));
+  });
+});
+
+describe("interpolate", () => {
+  it("returns the empty template unchanged", () => {
+    assert.equal(interpolate("", { p: "1", n: "n", peer: "peer", msgfile: "m" }), "");
+  });
+
+  it("interpolates each var individually", () => {
+    assert.equal(interpolate("%p", { p: "4711" }), "4711");
+    assert.equal(interpolate("%n", { n: "pi" }), "pi");
+    assert.equal(interpolate("%peer", { peer: "codex" }), "codex");
+    assert.equal(interpolate("%msgfile", { msgfile: "/tmp/handoff.md" }), "/tmp/handoff.md");
+  });
+
+  it("emits a literal % for %% without consulting vars", () => {
+    assert.equal(interpolate("%%", {}), "%");
+    assert.equal(interpolate("a%%b%%c", {}), "a%b%c");
+    assert.equal(interpolate("send %p%%", { p: "4711" }), "send 4711%");
+  });
+
+  it("matches tokens maximal-munch", () => {
+    assert.equal(interpolate("%peer", { p: "P", peer: "codex" }), "codex");
+    assert.equal(interpolate("%msgfile", { msgfile: "/m.md", p: "P" }), "/m.md");
+    assert.throws(() => interpolate("%pfile", { p: "P" }), /Unknown template token '%pfile'/);
+  });
+
+  it("interpolates a combined template with multiple tokens and literals", () => {
+    const tpl = "pi xfer send --to %peer --name %n --file %msgfile --port %p";
+    assert.equal(
+      interpolate(tpl, { p: "4711", n: "pi", peer: "codex", msgfile: "/tmp/h.md" }),
+      "pi xfer send --to codex --name pi --file /tmp/h.md --port 4711",
+    );
+  });
+
+  it("throws on unknown tokens, naming the token and the template", () => {
+    const cases: Array<[string, string]> = [
+      ["%msg", "%msg"],
+      ["%P", "%P"],
+      ["%x", "%x"],
+      ["100%", "%"],
+    ];
+    for (const [tpl, token] of cases) {
+      assert.throws(
+        () => interpolate(tpl, { p: "1", n: "n", peer: "peer", msgfile: "m" }),
+        (err: Error) => err.message.includes(token) && err.message.includes(tpl),
+        `expected ${tpl} to be rejected`,
+      );
+    }
+  });
+
+  it("throws when a referenced var is undefined, naming var and token", () => {
+    assert.throws(
+      () => interpolate("send to %peer", {}),
+      (err: Error) =>
+        err.message.includes("%peer") && err.message.includes("vars.peer") && err.message.includes("send to %peer"),
+    );
+    assert.throws(() => interpolate("%p %n", { p: "1" }), /vars\.n/);
+  });
+
+  it("interpolates repeated occurrences of the same token", () => {
+    assert.equal(interpolate("%p:%p:%p", { p: "7" }), "7:7:7");
+    assert.equal(interpolate("cp %msgfile %msgfile.bak", { msgfile: "/m.md" }), "cp /m.md /m.md.bak");
+  });
+
+  it("tolerates supplied-but-unused vars", () => {
+    assert.equal(interpolate("run %p", { p: "4711", n: "x", peer: "y", msgfile: "z" }), "run 4711");
+  });
+
+  it("keeps adjacent literal text intact", () => {
+    assert.equal(interpolate("--peer=%peer,x", { peer: "c" }), "--peer=c,x");
+    assert.equal(interpolate("50%% done", {}), "50% done");
   });
 });

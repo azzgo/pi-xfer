@@ -78,6 +78,58 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
   return { valid: true, settings };
 }
 
+/** Values a command template may reference when interpolated by `interpolate`. */
+export type InterpolationVars = { p?: string; n?: string; peer?: string; msgfile?: string };
+
+/** `%token` name → the `InterpolationVars` field it reads. `%%` is handled inline and reads nothing. */
+const TOKEN_VARS: ReadonlyMap<string, keyof InterpolationVars> = new Map([
+  ["msgfile", "msgfile"],
+  ["peer", "peer"],
+  ["p", "p"],
+  ["n", "n"],
+]);
+
+/**
+ * Interpolate `%tokens` in an xfer command template (peer `send` commands, the bridge
+ * listen command): `%p`, `%n`, `%peer` and `%msgfile` splice in the matching `vars`
+ * value, `%%` is a literal `%` that never consults `vars`.
+ *
+ * Matching is maximal-munch, enforced strictly: the full run of `[A-Za-z0-9_]` after a
+ * `%` must exactly name a known token, so `%peer` never degrades to `%p` and near-misses
+ * (`%msg`, `%pfile`, `%P`) throw instead of silently interpolating a prefix. A lone `%`
+ * with nothing token-like after it throws too, and a token whose var is `undefined`
+ * throws so a half-substituted command can never be spawned.
+ */
+export function interpolate(tpl: string, vars: InterpolationVars): string {
+  let out = "";
+  let i = 0;
+  while (i < tpl.length) {
+    const ch = tpl.charAt(i);
+    if (ch !== "%") {
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (tpl.startsWith("%%", i)) {
+      out += "%";
+      i += 2;
+      continue;
+    }
+    const name = /^[A-Za-z0-9_]+/.exec(tpl.slice(i + 1))?.[0];
+    const varName = name === undefined ? undefined : TOKEN_VARS.get(name);
+    if (name === undefined || varName === undefined) {
+      throw new Error(`Unknown template token '%${name ?? tpl.charAt(i + 1)}' in template: ${tpl}`);
+    }
+    const value = vars[varName];
+    if (value === undefined) {
+      throw new Error(`Template references %${name} but vars.${varName} is undefined in template: ${tpl}`);
+    }
+    out += value;
+    i += 1 + name.length;
+  }
+  return out;
+}
+
 /** Validate one `peers.<name>` entry, collecting every problem instead of failing fast. */
 function validatePeer(name: string, entry: unknown): { errors: string[]; config?: PeerSendConfig } {
   const label = `peers.${name}`;
