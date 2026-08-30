@@ -42,10 +42,15 @@ export function createServer(delivery: InboundDelivery): net.Server {
   });
 }
 
-/** Bind a server to its socket endpoint and report readiness. */
+/** Where a listener binds: a unix socket path or a TCP host/port pair. */
+export type ListenEndpoint =
+  | { kind: "unix"; path: string }
+  | { kind: "tcp"; host: string; port: number };
+
+/** Bind a server to its endpoint and report readiness (unix sockets are chmod'd 0600; TCP is not). */
 export async function listenServer(opts: {
   server: net.Server;
-  endpoint: string;
+  endpoint: ListenEndpoint;
   name: string;
   notifyError: (message: string) => void;
   setStatus: (text: string) => void;
@@ -63,7 +68,9 @@ export async function listenServer(opts: {
     };
     const onListening = () => {
       server.off("error", onError);
-      try { fs.chmodSync(endpoint, 0o600); } catch { /* best effort */ }
+      if (endpoint.kind === "unix") {
+        try { fs.chmodSync(endpoint.path, 0o600); } catch { /* best effort */ }
+      }
       opts.onListening();
       try { opts.setStatus(`📡 ${opts.name}`); } catch { /* best effort */ }
       resolve();
@@ -71,6 +78,7 @@ export async function listenServer(opts: {
     server.on("error", onRuntimeError);
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(endpoint);
+    if (endpoint.kind === "unix") server.listen(endpoint.path);
+    else server.listen({ host: endpoint.host, port: endpoint.port });
   });
 }

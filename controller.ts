@@ -4,38 +4,62 @@ import type * as net from "node:net";
 import { XFER_DIR } from "./constants.js";
 import { createServer, listenServer } from "./server.js";
 import { XferState } from "./state.js";
+import type { XferNotifyMessage } from "./types.js";
 import { deriveName, endpointForName, metadataForName } from "./utils.js";
+
+/** Host/port + server handle of a running bridge listener. */
+export interface BridgeListener {
+  host: string;
+  port: number;
+  server: net.Server;
+}
+
+/** `server.address()` narrowed to a TCP endpoint; throws on unbound or pipe-bound servers. */
+function tcpListenerInfo(server: net.Server): BridgeListener {
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("bridge listener is not bound to a TCP address");
+  }
+  return { host: address.address, port: address.port, server };
+}
 
 /**
  * Orchestrates the xfer listener lifecycle: session start, rename,
  * and shutdown. Owns the inbound socket + its delivery into the session.
  */
 export class XferController {
-  constructor(
-    private readonly pi: ExtensionAPI,
-    readonly state: XferState,
-  ) {}
+  private readonly pi: ExtensionAPI;
+  readonly state: XferState;
+
+  /** Bridge-side TCP listener, when running; independent of `state.identity`. */
+  private bridgeServer: net.Server | null = null;
+
+  constructor(pi: ExtensionAPI, state: XferState) {
+    this.pi = pi;
+    this.state = state;
+  }
+
+  /** Route one inbound frame into the session — shared by the unix + bridge listeners. */
+  private deliverInbound(msg: XferNotifyMessage): void {
+    const { pi, state } = this;
+    const isIdle = state.isRuntimeIdle();
+    pi.sendMessage({
+      customType: "xfer-inbound",
+      content:
+        `📨 [Xfer from **${msg.from}**]\n\n` +
+        `**Request**: ${msg.summary}\n\n` +
+        `**Doc**: \`${msg.file}\`\n\n` +
+        `Read the doc and handle the request.` +
+        `\n\nXfer is one-way — only reply if you have meaningful new information to communicate back.`,
+      display: true,
+    }, isIdle
+      ? { deliverAs: "followUp", triggerTurn: true }
+      : { deliverAs: "steer" });
+  }
 
   /** Inbound socket server that routes `xfer-notify` into the session. */
   private createInboundServer(): net.Server {
-    const { pi, state } = this;
-    return createServer({
-      deliver: (msg) => {
-        const isIdle = state.isRuntimeIdle();
-        pi.sendMessage({
-          customType: "xfer-inbound",
-          content:
-            `📨 [Xfer from **${msg.from}**]\n\n` +
-            `**Request**: ${msg.summary}\n\n` +
-            `**Doc**: \`${msg.file}\`\n\n` +
-            `Read the doc and handle the request.` +
-            `\n\nXfer is one-way — only reply if you have meaningful new information to communicate back.`,
-          display: true,
-        }, isIdle
-          ? { deliverAs: "followUp", triggerTurn: true }
-          : { deliverAs: "steer" });
-      },
-    });
+    return createServer({ deliver: (msg) => this.deliverInbound(msg) });
   }
 
   private async listen(ctx: ExtensionContext): Promise<void> {
@@ -43,12 +67,42 @@ export class XferController {
     if (!identity?.server) throw new Error("xfer server not initialised");
     await listenServer({
       server: identity.server,
-      endpoint: identity.endpoint,
+      endpoint: { kind: "unix", path: identity.endpoint },
       name: identity.name,
       notifyError: (message) => ctx.ui.notify(message, "error"),
       setStatus: (text) => ctx.ui.setStatus("xfer", text),
       onListening: () => this.state.writeMetadata(true),
     });
+  }
+
+  /** Bridge transport: the same frame protocol over 127.0.0.1 TCP for the bridge's lifetime.
+   *  Never called from `start()`/`session_start` — the bridge owns this listener. */
+  async startBridgeListener(): Promise<BridgeListener> {
+    if (this.bridgeServer) return tcpListenerInfo(this.bridgeServer);
+    const server = this.createInboundServer();
+    try {
+      await listenServer({
+        server,
+        endpoint: { kind: "tcp", host: "127.0.0.1", port: 0 },
+        name: "xfer-bridge",
+        notifyError: (message) => this.state.runtimeContext?.ui.notify(message, "error"),
+        setStatus: () => { /* status display stays owned by the bridge task */ },
+        onListening: () => { /* metadata tracks the unix identity only */ },
+      });
+    } catch (error) {
+      if (server.listening) server.close();
+      throw error;
+    }
+    this.bridgeServer = server;
+    return tcpListenerInfo(server);
+  }
+
+  /** Close the bridge listener and release its port; a no-op when not running. */
+  async stopBridgeListener(): Promise<void> {
+    const server = this.bridgeServer;
+    this.bridgeServer = null;
+    if (!server) return;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
   /** `session_start`: derive name, start the socket, begin metadata polling. */
