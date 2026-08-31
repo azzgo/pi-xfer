@@ -2,8 +2,11 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { XferController } from "./controller.js";
 import { getRemotePeer, listRemotePeers, type PeerSendEntry } from "./peers.js";
+import { BrokerManager } from "./broker-manager.js";
+import { XFER_DIR } from "./constants.js";
 import { DEFAULT_SETTINGS_PATH, loadSettings } from "./settings.js";
 import { endpointForName, listPeers, peerDescription } from "./utils.js";
 
@@ -11,6 +14,10 @@ import { endpointForName, listPeers, peerDescription } from "./utils.js";
 export interface XferCommandOptions {
   /** Remote-peer settings file; defaults to `~/.pi/xfer/settings.json` (tests inject a temp path). */
   settingsPath?: string;
+  /** Broker lifecycle manager; defaults to a real BrokerManager (tests inject a stub). */
+  brokerManager?: BrokerManager;
+  /** Directory holding broker.log; defaults to the broker manager's xferDir (XFER_DIR). */
+  brokerXferDir?: string;
 }
 
 /** One-line description of a remote peer: its note, or the head of its send template. */
@@ -45,9 +52,29 @@ function listenerSection(controller: XferController): string {
   return text;
 }
 
+/** How many trailing broker.log lines `/xfer broker logs` shows. */
+const LOG_TAIL_LINES = 50;
+
+/** Tail of <xferDir>/broker.log — last ~50 non-empty lines, or an explanatory note. */
+function brokerLogTail(xferDir: string, lines = LOG_TAIL_LINES): string {
+  const logPath = path.join(xferDir, "broker.log");
+  try {
+    const tail = fs
+      .readFileSync(logPath, "utf-8")
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .slice(-lines);
+    return tail.length > 0 ? tail.join("\n") : `(empty) ${logPath}`;
+  } catch {
+    return `broker.log unavailable at ${logPath}`;
+  }
+}
+
 /** Register the `/xfer` slash command. */
 export function registerXferCommand(pi: ExtensionAPI, controller: XferController, options: XferCommandOptions = {}): void {
   const settingsPath = options.settingsPath ?? DEFAULT_SETTINGS_PATH;
+  const brokerManager = options.brokerManager ?? new BrokerManager();
+  const brokerXferDir = options.brokerXferDir ?? XFER_DIR;
 
   pi.registerCommand("xfer", {
     description:
@@ -55,7 +82,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer <target> <request>  — generate doc and send\n" +
       "  /xfer list               — list peers\n" +
       "  /xfer peer <name> <req>  — send via remote peer (settings.json)\n" +
-      "  /xfer name [<name>]      — show or set name",
+      "  /xfer name [<name>]      — show or set name\n" +
+      "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle",
 
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
       // `/xfer peer <TAB>` completes remote settings peers only.
@@ -82,6 +110,17 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         ].filter(i => i.value.startsWith(subPrefix));
         return items.length > 0 ? items : null;
       }
+      // `/xfer broker <TAB>` completes the broker subcommand group only.
+      if (prefix.startsWith("broker ")) {
+        const subPrefix = prefix.slice("broker ".length).replace(/^\s+/, "");
+        const items: AutocompleteItem[] = [
+          { value: "start", label: "start", description: "Start the broker daemon (already-running is a no-op)" },
+          { value: "status", label: "status", description: "Show broker status (port/pid)" },
+          { value: "stop", label: "stop", description: "Stop the broker daemon" },
+          { value: "logs", label: "logs", description: "Show the last broker.log lines" },
+        ].filter(i => i.value.startsWith(subPrefix));
+        return items.length > 0 ? items : null;
+      }
 
 
       const peers = listPeers(controller.state.identity?.name ?? "");
@@ -90,6 +129,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "name", label: "name", description: "Show or set this agent's name" },
         { value: "peer", label: "peer", description: "Send to a remote peer from settings.json" },
         { value: "listener", label: "listener", description: "Bridge listener: setup / stop / logs" },
+        { value: "broker", label: "broker", description: "Broker daemon: start / status / stop / logs" },
         { value: "status", label: "status", description: "Show listener status" },
         ...peers.map(peer => ({
           value: peer.xferName,
@@ -116,6 +156,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer listener stop|logs — stop bridge / show its output\n" +
           "   /xfer status             — listener status\n" +
           "   /xfer name [<name>]      — show or set name\n" +
+          "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
 
           "\n" +
           "💡 One-way, no wait. Reply via /xfer.",
@@ -270,6 +311,41 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         } catch {
           // The bridge manager already notified the human; nothing to add.
         }
+        return;
+      }
+
+      // ── /xfer broker start|status|stop|logs (broker daemon) ──
+      if (cmd === "broker") {
+        const sub = parts[1];
+        if (sub !== "start" && sub !== "status" && sub !== "stop" && sub !== "logs") {
+          ctx.ui.notify("Usage: /xfer broker <start|status|stop|logs>", "error");
+          return;
+        }
+        if (sub === "start") {
+          try {
+            const result = await brokerManager.start();
+            ctx.ui.notify(result === "already running" ? "🟡 Broker already running" : `🟢 ${result}`, "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        if (sub === "status") {
+          // status() never rejects (chrome-devtools convention: read the output, not the exit code).
+          ctx.ui.notify(await brokerManager.status(), "info");
+          return;
+        }
+        if (sub === "stop") {
+          try {
+            const result = await brokerManager.stop();
+            ctx.ui.notify(result === "broker not running" ? "⭕ Broker not running" : `🛑 ${result}`, "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        // logs — tail <xferDir>/broker.log without touching the daemon.
+        ctx.ui.notify(brokerLogTail(brokerXferDir), "info");
         return;
       }
 

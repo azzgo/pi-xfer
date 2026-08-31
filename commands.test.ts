@@ -21,6 +21,7 @@ import { after, before, describe, it } from "node:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import { XferController } from "./controller.js";
+import { BrokerManager } from "./broker-manager.js";
 import { XferState } from "./state.js";
 import type { Identity } from "./types.js";
 
@@ -81,7 +82,7 @@ function makeIdentity(): Identity {
 }
 
 /** Register against stubs; return the captured definition plus invoke helpers. */
-function harness(): {
+function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string } = {}): {
   description: string | undefined;
   handler: (args: string) => Promise<void>;
   completions: (prefix: string) => AutocompleteItem[] | null;
@@ -105,7 +106,7 @@ function harness(): {
     },
   } as unknown as XferController;
 
-  registerXferCommand(pi, controller, { settingsPath });
+  registerXferCommand(pi, controller, { settingsPath, brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir });
   assert.ok(def, "registerCommand was not captured");
 
   const ctx = {
@@ -118,6 +119,24 @@ function harness(): {
     sent,
     notifications,
   };
+}
+
+/** BrokerManager stub for command smoke tests — records calls, returns canned strings. */
+function stubBrokerManager(
+  overrides: Partial<Record<"start" | "stop" | "status", () => Promise<string>>> = {},
+): BrokerManager & { calls: string[] } {
+  const calls: string[] = [];
+  const make = (name: "start" | "stop" | "status", fallback: string) => async (): Promise<string> => {
+    calls.push(name);
+    const fn = overrides[name];
+    return fn ? fn() : fallback;
+  };
+  return {
+    start: make("start", "broker started (pid 4242, port 4719)"),
+    stop: make("stop", "broker stopped (pid 4242)"),
+    status: make("status", "broker: alive\n  port: 4719\n  pid: 4242"),
+    calls,
+  } as unknown as BrokerManager & { calls: string[] };
 }
 
 /** Harness backed by a REAL XferController (+ XferState) for bridge-listener tests. */
@@ -381,5 +400,137 @@ describe("xfer command: listener completions", () => {
     const values = items.map((i) => i.value);
     assert.ok(values.includes("listener"));
     assert.ok(values.includes("status"));
+  });
+});
+
+describe("xfer command: broker subcommand", () => {
+  it("starts the broker and notifies with pid/port; already-running is a no-op", async () => {
+    const broker = stubBrokerManager();
+    const h = harness({ brokerManager: broker });
+    await h.handler("broker start");
+    assert.deepEqual(broker.calls, ["start"]);
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /broker started \(pid 4242, port 4719\)/);
+
+    const running = stubBrokerManager({ start: async () => "already running" });
+    const h2 = harness({ brokerManager: running });
+    await h2.handler("broker start");
+    assert.equal(h2.notifications[0].type, "info");
+    assert.match(h2.notifications[0].message, /already running/);
+  });
+
+  it("notifies an error when start rejects", async () => {
+    const broker = stubBrokerManager({
+      start: async () => {
+        throw new Error("broker: not ready within 5000ms");
+      },
+    });
+    const h = harness({ brokerManager: broker });
+    await h.handler("broker start");
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /not ready/);
+  });
+
+  it("shows the manager status text as info (never throws)", async () => {
+    const broker = stubBrokerManager();
+    const h = harness({ brokerManager: broker });
+    await h.handler("broker status");
+    assert.deepEqual(broker.calls, ["status"]);
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /broker: alive/);
+    assert.match(h.notifications[0].message, /pid: 4242/);
+  });
+
+  it("stops the broker and notifies stopped / not-running", async () => {
+    const broker = stubBrokerManager();
+    const h = harness({ brokerManager: broker });
+    await h.handler("broker stop");
+    assert.deepEqual(broker.calls, ["stop"]);
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /broker stopped \(pid 4242\)/);
+
+    const idle = stubBrokerManager({ stop: async () => "broker not running" });
+    const h2 = harness({ brokerManager: idle });
+    await h2.handler("broker stop");
+    assert.equal(h2.notifications[0].type, "info");
+    assert.match(h2.notifications[0].message, /not running/);
+  });
+
+  it("errors on missing/unknown subcommands", async () => {
+    const h = harness();
+    await h.handler("broker");
+    await h.handler("broker restart");
+    assert.equal(h.notifications.length, 2);
+    for (const n of h.notifications) {
+      assert.equal(n.type, "error");
+      assert.match(n.message, /Usage: \/xfer broker <start\|status\|stop\|logs>/);
+    }
+  });
+
+  it("drives the real broker end-to-end through the command", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-broker-"));
+    const broker = new BrokerManager({ xferDir: dir, port: 0 });
+    const h = harness({ brokerManager: broker, brokerXferDir: dir });
+    try {
+      await h.handler("broker start");
+      assert.match(h.notifications[0].message, /broker started \(pid \d+, port \d+\)/, `got: ${h.notifications[0].message}`);
+
+      await h.handler("broker start"); // idempotent — probe finds the live daemon
+      assert.match(h.notifications[1].message, /already running/);
+
+      await h.handler("broker status");
+      assert.match(h.notifications[2].message, /broker: alive/);
+      assert.match(h.notifications[2].message, /port: \d+/);
+
+      await h.handler("broker stop");
+      assert.match(h.notifications[3].message, /broker stopped \(pid \d+\)/);
+    } finally {
+      await broker.stop().catch(() => {});
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("xfer command: broker logs", () => {
+  it("tails ~50 lines of <xferDir>/broker.log honoring the xferDir override", async () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `line ${i}`);
+    fs.writeFileSync(path.join(tmpDir, "broker.log"), lines.join("\n") + "\n", "utf-8");
+    const h = harness({ brokerXferDir: tmpDir });
+    await h.handler("broker logs");
+    assert.equal(h.notifications[0].type, "info");
+    const message = h.notifications[0].message;
+    assert.match(message, /^line 10\n/);
+    assert.match(message, /line 59$/);
+    assert.ok(!message.includes("line 0"), "log head must be dropped");
+  });
+
+  it("reports an unavailable broker.log without crashing", async () => {
+    const h = harness({ brokerXferDir: path.join(tmpDir, "no-such-dir") });
+    await h.handler("broker logs");
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /broker\.log unavailable/);
+  });
+});
+
+describe("xfer command: broker completions", () => {
+  it("offers start/status/stop/logs for the 'broker ' prefix", () => {
+    const h = harness();
+    const items = h.completions("broker ") ?? [];
+    assert.deepEqual(items.map((i) => i.value), ["start", "status", "stop", "logs"]);
+  });
+
+  it("offers broker among top-level subcommands", () => {
+    const h = harness();
+    const values = (h.completions("") ?? []).map((i) => i.value);
+    assert.ok(values.includes("broker"));
+  });
+});
+
+describe("xfer command: broker description and help text", () => {
+  it("mentions the broker subcommand group in the description and help", async () => {
+    const h = harness();
+    assert.match(h.description ?? "", /\/xfer broker <start\|status\|stop\|logs>/);
+    await h.handler("help");
+    assert.match(h.notifications[0].message, /broker start\|status\|stop\|logs/);
   });
 });
