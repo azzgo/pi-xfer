@@ -4,7 +4,7 @@
 page side:
 
 - **Pick / note core** — hover-pick elements, batch notes, per-item delete
-  (the old chrome-picker flow, rewritten for the broker).
+  (the old CDP-injected flow, rewritten for the broker).
 - **Send flow** — a prompt plus the picked annotations, delivered as an xfer
   handoff into a local pi session (`annotation.submit` → `ack`).
 - **Reverse channel** — agent questions arrive as `page.request` frames and
