@@ -48,3 +48,11 @@ export interface Settings {
   listen?: ListenConfig;
   peers?: Record<string, PeerSendConfig>;
 }
+
+/** One live local target from targets.listTargets: a `*.sock` plus best-effort sibling metadata (null when absent). */
+export interface TargetInfo {
+  name: string;
+  sessionName: string | null;
+  cwd: string | null;
+  status: string | null;
+}
