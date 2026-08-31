@@ -142,6 +142,15 @@ function writeStaleJson(xferDir: string, port: number, pid: number): void {
   );
 }
 
+/** A port that is free right now (bind :0, note it, close). */
+async function freePort(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
 // ---------- tests ----------
 
 describe("BrokerManager start", () => {
@@ -168,6 +177,20 @@ describe("BrokerManager start", () => {
     assert.ok(statusText.includes(String(info.port)), `status should contain the port, got:\n${statusText}`);
     assert.ok(statusText.includes(String(info.pid)), `status should contain the pid, got:\n${statusText}`);
     assert.ok(statusText.includes(info.version), `status should contain the version, got:\n${statusText}`);
+  });
+
+  it("start(portOverride) pins the requested port", async () => {
+    const dir = freshXferDir();
+    const manager = makeManager(dir); // default port 0 (ephemeral)
+    const port = await freePort();
+
+    const result = await manager.start(port);
+    assert.notEqual(result, "already running");
+    assert.ok(result.includes(`port ${port})`), `summary should show the pinned port, got:\n${result}`);
+
+    const state = readBrokerJson(dir);
+    assert.equal(state.port, port, "override pins the daemon port");
+    assert.ok((await manager.probe()) !== null, "daemon serves the pinned port");
   });
 
   it("double start returns 'already running' and leaves a single daemon", async () => {

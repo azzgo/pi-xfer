@@ -110,16 +110,18 @@ export class BrokerManager {
     if (!pidAlive(info.pid)) return null;
     return (await tcpProbe(info.port)) ? info : null;
   }
-
   /**
    * Start the broker daemon. Returns "already running" when a live broker is
    * already up (no spawn); otherwise spawns detached, waits for readiness
-   * (broker.json + TCP), and resolves with a one-line summary. If a foreign
-   * program held the configured port, the daemon falls back to an ephemeral
-   * one and the summary says so. Rejects on spawn failure or readiness
-   * timeout, surfacing the broker.log tail.
+   * (broker.json + TCP), and resolves with a one-line summary. `portOverride`
+   * pins the daemon port for this start (0 = ephemeral); by default the
+   * manager's configured port is used. If a foreign program held the port,
+   * the daemon falls back to an ephemeral one and the summary says so.
+   * Rejects on spawn failure or readiness timeout, surfacing the broker.log
+   * tail.
    */
-  async start(): Promise<string> {
+  async start(portOverride?: number): Promise<string> {
+    const port = portOverride ?? this.port;
     if ((await this.probe()) !== null) return "already running";
 
     fs.mkdirSync(this.xferDir, { recursive: true, mode: 0o700 });
@@ -135,7 +137,7 @@ export class BrokerManager {
         RESOLVE_HOOK,
         BROKER_MAIN,
         "--port",
-        String(this.port),
+        String(port),
         "--xfer-dir",
         this.xferDir,
       ], {
@@ -167,8 +169,8 @@ export class BrokerManager {
     if (info === null) {
       throw new Error(`broker: not ready within ${this.readinessTimeoutMs}ms\n${this.logTail()}`);
     }
-    if (this.port !== 0 && info.port !== this.port) {
-      return `broker started (pid ${info.pid}, port ${info.port} — port ${this.port} was occupied by another program, fell back to an ephemeral port)`;
+    if (port !== 0 && info.port !== port) {
+      return `broker started (pid ${info.pid}, port ${info.port} — port ${port} was occupied by another program, fell back to an ephemeral port)`;
     }
     return `broker started (pid ${info.pid}, port ${info.port})`;
   }

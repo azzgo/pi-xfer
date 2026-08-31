@@ -914,6 +914,16 @@ export async function main(): Promise<void> {
     console.error(`[broker] invalid port: ${port}`);
     process.exit(1);
   }
+  // A live broker.pid means one of OUR brokers is already up for this xfer-dir —
+  // regardless of which port it holds. Check BEFORE binding: the EADDRINUSE
+  // branch below only fires on a port collision, so without this pre-check a
+  // second daemon on a different (free) port would start and clobber the pid/json
+  // state, orphaning the first.
+  const existingPid = readPidFile(xferDir);
+  if (existingPid !== null && pidAlive(existingPid)) {
+    console.log("already running");
+    process.exit(0);
+  }
 
   let handle: BrokerHandle;
   try {
@@ -923,9 +933,10 @@ export async function main(): Promise<void> {
       console.error(`[broker] bind failed: ${(error as Error).message}`);
       process.exit(1);
     }
-    // Port taken: is it our own broker? broker.pid decides.
-    const existingPid = readPidFile(xferDir);
-    if (existingPid !== null && pidAlive(existingPid)) {
+    // Backstop for the race where a broker appeared between the pre-bind check
+    // above and this bind: broker.pid decides.
+    const racedPid = readPidFile(xferDir);
+    if (racedPid !== null && pidAlive(racedPid)) {
       console.log("already running");
       process.exit(0);
     }

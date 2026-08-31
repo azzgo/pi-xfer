@@ -581,6 +581,27 @@ describe("broker daemon (integration)", () => {
     assert.ok(!second.stderr().includes("falling back"), "no fallback when our broker owns the port");
   });
 
+  it("refuses a second daemon on a DIFFERENT port while broker.pid names a live process", async () => {
+    const xferDir = freshXferDir();
+    const first = await spawnDaemon(xferDir);
+
+    // The pre-bind pid check is what makes this a no-op: a different, free
+    // port would otherwise bind cleanly and clobber the pid/json state,
+    // orphaning the first daemon.
+    const other = await freePort();
+    const second = spawnRaw(xferDir, other);
+    const { code } = await second.exited;
+    assert.equal(code, 0);
+    assert.match(second.stdout(), /already running/);
+
+    // State still belongs to the first daemon, which keeps serving.
+    const state = readBrokerJson(xferDir);
+    assert.equal(state.pid, first.child.pid, "first daemon's pid untouched");
+    assert.equal(state.port, first.port, "first daemon's port untouched");
+    const status = await getStatus(first.port);
+    assert.equal(status.ok, true);
+  });
+
   it("returns 404 for paths other than /status", async () => {
     const daemon = await spawnDaemon(freshXferDir());
     const response = await httpGet(daemon.port, "/other");
