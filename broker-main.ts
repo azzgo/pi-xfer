@@ -528,6 +528,143 @@ export function handlePageResponse(connection: WsConnection, frame: Frame): void
   settlePageRequest(String(id), result);
 }
 
+// ---------- ask-page: session-side CLI + HTTP + answer notify (task 031) ----------
+
+/** Outcome of routing an ask-page request — what the CLI/HTTP layer reports. */
+export interface AskPageOutcome {
+  ok: boolean;
+  request_id?: string;
+  error?: string;
+}
+
+/** Input for the answer doc rendered after a page request settles. */
+interface AnswerDocInput {
+  question: string;
+  answer?: string;
+  error?: string;
+  requestId: string;
+  msgId: string;
+}
+
+/**
+ * Answer doc for an ask-page round trip: question + answer|error + the two
+ * ids (request_id, msg_id). Written to os.tmpdir()/pi-xfer-<msg_id>.md (0600),
+ * same convention as the annotation.submit handoff docs.
+ */
+function renderAnswerDoc({ question, answer, error, requestId, msgId }: AnswerDocInput): string {
+  const lines: string[] = ["# Page answer", "", "## Question", "", question, ""];
+  if (error !== undefined) lines.push("## Error", "", error, "");
+  else lines.push("## Answer", "", answer ?? "", "");
+  lines.push("---", "", "from: web-picker-ask", `request_id: ${requestId}`, `msg_id: ${msgId}`, "");
+  return lines.join("\n");
+}
+
+/**
+ * Route an ask-page request and — asynchronously, fire-and-forget (Wayfinder
+ * 009) — turn the outcome into an answer doc + xfer-notify push to the asking
+ * session. Returns immediately with the request_id; `no_tabs` resolves
+ * synchronously as {ok:false, error:"no_tabs"} with NO request created and NO
+ * notify sent (the CLI reports it and exits 1).
+ *
+ * Notify summary: "answer: <first 120 chars>" on a page answer, "timeout" on
+ * a timeout, and for other non-ok outcomes the error text under the answer
+ * prefix (the doc carries the error either way).
+ */
+export function startAskPage(xferDir: string, target: string, question: string, timeoutMs?: number): AskPageOutcome {
+  const requestId = routePageRequest(target, question, timeoutMs);
+  if (requestId === null) return { ok: false, error: "no_tabs" };
+  void deliverAskPageAnswer(xferDir, requestId, target, question);
+  return { ok: true, request_id: requestId };
+}
+
+async function deliverAskPageAnswer(xferDir: string, requestId: string, target: string, question: string): Promise<void> {
+  const result = await awaitPageResult(requestId);
+  const msgId = nextMsgId();
+  const doc = path.join(os.tmpdir(), `pi-xfer-${msgId}.md`);
+  const answer = result.ok ? result.text : undefined;
+  const error = result.ok ? undefined : result.error;
+  try {
+    fs.writeFileSync(doc, renderAnswerDoc({ question, answer, error, requestId, msgId }), { mode: 0o600 });
+  } catch (writeError) {
+    console.log(`[ask-page ${requestId}] cannot write answer doc: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
+    return;
+  }
+  const summary = result.ok
+    ? `answer: ${(answer ?? "").slice(0, 120)}`
+    : error === "timeout"
+      ? "timeout"
+      : `answer: ${(error ?? "").slice(0, 120)}`;
+  console.log(`[ask-page ${requestId}] ${result.ok ? "answer" : `error: ${error ?? "unknown"}`} → ${target} (doc ${doc})`);
+  try {
+    await pushXferNotify(xferDir, target, {
+      type: WIRE_XFER_NOTIFY,
+      msg_id: msgId,
+      from: "web-picker-ask",
+      file: doc,
+      summary,
+    });
+    console.log(`[ask-page ${requestId}] notify delivered to ${target}`);
+  } catch (notifyError) {
+    const message = notifyError instanceof Error ? notifyError.message : String(notifyError);
+    console.log(`[ask-page ${requestId}] notify FAILED: ${message} (doc kept at ${doc})`);
+  }
+}
+
+/**
+ * POST /ask-page — {target, question, timeoutMs?}, size-guarded ≤ MAX_FRAME_BYTES.
+ * Replies {ok:true, request_id} immediately; the answer/timeout notify is
+ * fire-and-forget. no_tabs → {ok:false, error:"no_tabs"} (the CLI exits 1).
+ */
+function handleAskPageHttp(request: http.IncomingMessage, response: http.ServerResponse, xferDir: string): void {
+  let settled = false;
+  let oversized = false;
+  let size = 0;
+  const chunks: Buffer[] = [];
+  const respond = (status: number, body: Record<string, unknown>): void => {
+    if (settled) return;
+    settled = true;
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify(body));
+  };
+
+  request.on("data", (chunk: Buffer) => {
+    if (oversized) return;
+    size += chunk.length;
+    if (size > MAX_FRAME_BYTES) {
+      oversized = true;
+      respond(413, { ok: false, error: "payload_too_large" });
+      return;
+    }
+    chunks.push(chunk);
+  });
+  request.on("end", () => {
+    if (settled) return;
+    let body: unknown;
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+    } catch {
+      respond(400, { ok: false, error: "invalid_json" });
+      return;
+    }
+    const record = (body ?? {}) as { target?: unknown; question?: unknown; timeoutMs?: unknown };
+    const { target, question, timeoutMs } = record;
+    if (typeof target !== "string" || target.trim() === "") {
+      respond(400, { ok: false, error: "invalid_payload: missing or invalid target" });
+      return;
+    }
+    if (typeof question !== "string" || question.trim() === "") {
+      respond(400, { ok: false, error: "invalid_payload: missing or invalid question" });
+      return;
+    }
+    if (timeoutMs !== undefined && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+      respond(400, { ok: false, error: "invalid_payload: timeoutMs must be a positive number" });
+      return;
+    }
+    const outcome = startAskPage(xferDir, target, question, timeoutMs as number | undefined);
+    if (outcome.ok) respond(200, { ok: true, request_id: outcome.request_id });
+    else respond(200, { ok: false, error: outcome.error });
+  });
+}
 /** page.request is broker→page only; an inbound one is a protocol misuse — log, stay silent. */
 function handleInboundPageRequest(): void {
   console.log("[broker] page.request is outbound-only; inbound request ignored");
@@ -588,7 +725,6 @@ export async function startBroker(options: BrokerOptions): Promise<BrokerHandle>
   const conns = new Map<WsConnection, TabInfo>();
   activeConns = conns;
   frameHandlers = buildFrameHandlers(options.xferDir);
-  frameHandlers = buildFrameHandlers(options.xferDir);
   const startedAt = new Date().toISOString();
 
   const server = http.createServer((request, response) => {
@@ -598,6 +734,10 @@ export async function startBroker(options: BrokerOptions): Promise<BrokerHandle>
       response.end(
         JSON.stringify({ ok: true, port: boundPort(), version: VERSION, clients: conns.size, startedAt }),
       );
+      return;
+    }
+    if (url.pathname === "/ask-page" && request.method === "POST") {
+      handleAskPageHttp(request, response, options.xferDir);
       return;
     }
     response.writeHead(404).end();
@@ -648,9 +788,126 @@ export async function startBroker(options: BrokerOptions): Promise<BrokerHandle>
   };
 }
 
+// ---------- ask-page CLI helpers ----------
+
+/** POST a JSON body and collect the response (used by the ask-page CLI). */
+function httpPostJson(port: number, pathname: string, body: unknown): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const request = http.request(
+      {
+        host: HOST,
+        port,
+        path: pathname,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        let raw = "";
+        response.setEncoding("utf-8");
+        response.on("data", (chunk: string) => {
+          raw += chunk;
+        });
+        response.on("end", () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            parsed = null;
+          }
+          resolve({ status: response.statusCode ?? 0, body: parsed });
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end(payload);
+  });
+}
+
+/**
+ * `node broker-main.ts ask-page <target> "<question>" [--timeout-ms <ms>]` —
+ * reads broker.json (port) from the daemon's xfer dir, POSTs /ask-page
+ * (fire-and-forget), prints the request_id (stdout, exit 0), or an error
+ * (stderr, exit 1) for no_tabs / broker down / unreachable.
+ */
+async function runAskPageCommand(args: string[]): Promise<void> {
+  // Flags may appear anywhere in argv; --xfer-dir is re-read via parseArgs
+  // (same resolution as the daemon), so here we only skip it when collecting
+  // the two positionals <target> <question>.
+  const positional: string[] = [];
+  let timeoutMs: number | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--timeout-ms") {
+      const raw = args[i + 1];
+      const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        console.error(`[broker] ask-page: invalid --timeout-ms "${raw}"`);
+        process.exit(1);
+      }
+      timeoutMs = parsed;
+      i++;
+      continue;
+    }
+    if (arg === "--xfer-dir") {
+      i++; // the value is consumed by parseArgs below
+      continue;
+    }
+    positional.push(arg);
+  }
+  const target = positional[0];
+  const question = positional[1];
+  if (typeof target !== "string" || target.trim() === "" || typeof question !== "string" || question.trim() === "") {
+    console.error('usage: node broker-main.ts ask-page <target> "<question>" [--timeout-ms <ms>]');
+    process.exit(1);
+  }
+
+  // Same xfer-dir resolution as the daemon; broker.json carries the port.
+  const xferDir = parseArgs(process.argv.slice(2)).xferDir;
+  let port: number;
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(path.join(xferDir, "broker.json"), "utf-8"));
+    const info = raw as { port?: unknown };
+    if (typeof info.port !== "number" || info.port <= 0 || info.port > 65535) throw new Error("bad port");
+    port = info.port;
+  } catch {
+    console.error(`[broker] ask-page: broker not running in ${xferDir} (no broker.json)`);
+    process.exit(1);
+  }
+
+  let response: { status: number; body: unknown };
+  try {
+    response = await httpPostJson(port, "/ask-page", {
+      target,
+      question,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+  } catch (error) {
+    console.error(`[broker] ask-page: broker unreachable on ${HOST}:${port} (${(error as Error).message})`);
+    process.exit(1);
+  }
+
+  const body = (response.body ?? {}) as { ok?: unknown; request_id?: unknown; error?: unknown };
+  if (response.status === 200 && body.ok === true && typeof body.request_id === "string") {
+    process.stdout.write(`${body.request_id}\n`, () => process.exit(0));
+    return;
+  }
+  console.error(`[broker] ask-page failed: ${typeof body.error === "string" ? body.error : `http ${response.status}`}`);
+  process.exit(1);
+}
+
+
 /** CLI entry: parse args, handle EADDRINUSE, install clean-exit handlers. */
 export async function main(): Promise<void> {
-  const { port, xferDir } = parseArgs(process.argv.slice(2));
+  const args = process.argv.slice(2);
+  if (args[0] === "ask-page") {
+    await runAskPageCommand(args.slice(1));
+    return;
+  }
+  const { port, xferDir } = parseArgs(args);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     console.error(`[broker] invalid port: ${port}`);
     process.exit(1);
