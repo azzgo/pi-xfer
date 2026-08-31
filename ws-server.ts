@@ -138,23 +138,26 @@ function createParser(): FrameParser {
 
 /**
  * Feed raw socket bytes into the parser; yields one complete frame per callback
- * invocation. Invalid frames (protocol errors) drop the connection.
+ * invocation. Returns false when a frame fails to decode — i.e. an inbound
+ * payload above MAX_FRAME_BYTES (the only way decodeFrame throws here, since
+ * incomplete frames return before it is called) — so the caller can drop the
+ * connection instead of silently stalling on the oversized bytes.
  */
 function pumpFrames(
   parser: FrameParser,
   chunk: Buffer,
   onFrame: (frame: DecodedFrame) => boolean | void,
-): void {
+): boolean {
   parser.buffer = Buffer.concat([parser.buffer, chunk]);
   for (;;) {
     const buf = parser.buffer;
-    if (buf.length < 2) return;
+    if (buf.length < 2) return true;
     let headerLen: number;
     const len7 = buf[1]! & 0x7f;
     if (len7 === 126) headerLen = 4;
     else if (len7 === 127) headerLen = 10;
     else headerLen = 2;
-    if (buf.length < headerLen) return;
+    if (buf.length < headerLen) return true;
     const frameLen =
       headerLen +
       (len7 === 126
@@ -163,15 +166,15 @@ function pumpFrames(
           ? buf.readUInt32BE(6)
           : len7) +
       ((buf[1]! & 0x80) !== 0 ? 4 : 0);
-    if (buf.length < frameLen) return;
+    if (buf.length < frameLen) return true;
     let frame: DecodedFrame;
     try {
       frame = decodeFrame(buf.subarray(0, frameLen));
     } catch {
-      return; // oversized / malformed: caller decides; we just stop parsing
+      return false; // oversized / malformed — caller tears the connection down
     }
     parser.buffer = buf.subarray(frameLen);
-    if (onFrame(frame) === false) return;
+    if (onFrame(frame) === false) return true; // close handled by the caller
   }
 }
 
@@ -269,7 +272,7 @@ export function attachWsServer(httpServer: http.Server, options: WsServerOptions
     options.onConnection(connection);
 
     socket.on("data", (chunk: Buffer) => {
-      pumpFrames(parser, chunk, (frame) => {
+      const ok = pumpFrames(parser, chunk, (frame) => {
         switch (frame.opcode) {
           case OPCODE_TEXT: {
             let message: unknown;
@@ -300,6 +303,10 @@ export function attachWsServer(httpServer: http.Server, options: WsServerOptions
             return; // unknown/continuation frames ignored in this subset
         }
       });
+      if (!ok) {
+        console.log("[ws] dropping connection: inbound frame exceeds MAX_FRAME_BYTES");
+        connection.close(1009); // 1009 = message too big
+      }
     });
 
     socket.on("error", () => {
