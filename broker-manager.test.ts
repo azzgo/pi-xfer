@@ -117,6 +117,31 @@ function runCli(args: string[]): Promise<{ code: number | null; stdout: string; 
   });
 }
 
+/** pid of a process that has already exited (kill(pid, 0) will ESRCH). */
+async function reapedPid(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  const pid = child.pid;
+  assert.ok(pid !== undefined);
+  await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  return pid;
+}
+
+/** A plain TCP listener squatting a port — no broker files, no protocol. */
+async function squatPort(): Promise<{ server: net.Server; port: number }> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  return { server, port };
+}
+
+/** Write a broker.json naming a dead pid on the given port (crashed-daemon residue). */
+function writeStaleJson(xferDir: string, port: number, pid: number): void {
+  fs.writeFileSync(
+    path.join(xferDir, "broker.json"),
+    JSON.stringify({ port, pid, startedAt: "stale", version: "0.0.0" }),
+  );
+}
+
 // ---------- tests ----------
 
 describe("BrokerManager start", () => {
@@ -229,5 +254,64 @@ describe("BrokerManager status", () => {
     assert.equal(cli.code, 0, `CLI status must exit 0, stderr: ${cli.stderr}`);
     assert.ok(cli.stdout.includes("alive"), `CLI status should print alive, got:\n${cli.stdout}`);
     assert.ok(cli.stdout.includes(String(port)), `CLI status should print the port, got:\n${cli.stdout}`);
+  });
+});
+
+describe("BrokerManager port fallback (foreign program holds the port)", () => {
+  it("probe ignores stale broker.json (dead pid) even when a foreign listener squats the port", async () => {
+    const dir = freshXferDir();
+    const { server, port } = await squatPort();
+    try {
+      const deadPid = await reapedPid();
+      writeStaleJson(dir, port, deadPid);
+
+      // TCP alone would bless the squatter as "already running"; the pid
+      // liveness check is what separates a crashed daemon's residue from a
+      // live broker.
+      const manager = makeManager(dir);
+      assert.equal(await manager.probe(), null, "dead pid + squatted port is not a running broker");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("start() lands on an ephemeral port and the summary announces the fallback", async () => {
+    const dir = freshXferDir();
+    const { server, port } = await squatPort();
+    try {
+      const manager = new BrokerManager({ xferDir: dir, port });
+      managers.push(manager);
+
+      const result = await manager.start();
+      assert.notEqual(result, "already running");
+      assert.match(result, /port \d+ was occupied by another program/);
+      assert.match(result, /fell back to an ephemeral port/);
+
+      // The daemon serves a different port, recorded in broker.json, and
+      // the manager's status reflects the fallback port as alive.
+      const state = readBrokerJson(dir);
+      assert.notEqual(state.port, port, "daemon moved off the occupied port");
+      const statusText = await manager.status();
+      assert.ok(statusText.includes("alive"), `status should say alive, got:\\n${statusText}`);
+      assert.ok(statusText.includes(String(state.port)), `status should show the fallback port, got:\\n${statusText}`);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("status on stale broker.json + squatted port reports dead with a foreign-program hint", async () => {
+    const dir = freshXferDir();
+    const { server, port } = await squatPort();
+    try {
+      const deadPid = await reapedPid();
+      writeStaleJson(dir, port, deadPid);
+
+      const manager = makeManager(dir);
+      const text = await manager.status();
+      assert.match(text, /dead/, `status should indicate dead, got:\\n${text}`);
+      assert.match(text, /another program/, `status should hint at the squatter, got:\\n${text}`);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

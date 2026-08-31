@@ -25,8 +25,10 @@
  * `<xfer-dir>/broker.json` {port, pid, startedAt, version} atomically (tmp +
  * rename, mode 0600, same pattern as state.ts) and deletes both on clean exit
  * (SIGTERM/SIGINT). EADDRINUSE consults broker.pid: an alive pid → "already
- * running" on stdout, exit 0; a dead/stale pid → unlink both files, retry the
- * bind once, and exit 1 if that still fails.
+ * running" on stdout, exit 0; a dead/stale pid (none of our brokers is up) →
+ * unlink both files and fall back to an ephemeral port (0) with a warning on
+ * stderr, so a foreign program squatting the configured port cannot wedge or
+ * masquerade as the broker. The real port always lands in broker.json.
  *
  * Zero dependencies: node:* + ./ws-server.js + ./constants.js only. Runs
  * directly (`node broker-main.ts [--port N] [--xfer-dir DIR]`); also exports
@@ -927,12 +929,18 @@ export async function main(): Promise<void> {
       console.log("already running");
       process.exit(0);
     }
-    // Stale (or missing) pid file: clear it and retry the bind once.
+    // Stale (or missing) pid file → none of our brokers is up; clear the
+    // stale state. A port held by a foreign program must not wedge startup
+    // (nor pass itself off as the broker): fall back to an ephemeral port
+    // and warn on stderr — the real port lands in broker.json either way.
     unlinkBrokerFiles(xferDir);
+    if (port !== 0) {
+      console.error(`[broker] port ${port} is occupied by another program — falling back to an ephemeral port`);
+    }
     try {
-      handle = await startBroker({ port, xferDir });
-    } catch (retryError) {
-      console.error(`[broker] bind failed: ${(retryError as Error).message}`);
+      handle = await startBroker({ port: 0, xferDir });
+    } catch (fallbackError) {
+      console.error(`[broker] bind failed: ${(fallbackError as Error).message}`);
       process.exit(1);
     }
   }

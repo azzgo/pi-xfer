@@ -12,8 +12,12 @@
  *
  * Lifecycle:
  *   start()  — probe first: if a broker is already alive (broker.json exists
- *              AND a TCP connect to its port succeeds) return "already
- *              running" without spawning. Otherwise spawn broker-main.ts
+ *              AND its pid is live AND a TCP connect to its port succeeds)
+ *              return "already running" without spawning. Otherwise spawn
+ *              broker-main.ts
+ *              (port fallback: if the daemon reports it landed on a different
+ *              port than requested — a foreign program held the configured
+ *              one — the summary says so; the real port lives in broker.json).
  *              detached (`node broker-main.ts --port <port> --xfer-dir <dir>`)
  *              with stdout/stderr wired to <xfer-dir>/broker.log (append mode;
  *              the manager opens the fd, the daemon just writes), unref() the
@@ -24,8 +28,9 @@
  *              makes the daemon a group leader), poll for exit ≤2s, then
  *              SIGKILL the group; finally unlink broker.pid/broker.json if
  *              still present.
- *   status() — read broker.json + TCP probe its port; print port/pid/
- *              startedAt/version + alive|dead. NEVER exits non-zero
+ *   status() — read broker.json + its pid liveness + TCP probe its port;
+ *              print port/pid/startedAt/version + alive|dead. NEVER exits
+ *              non-zero
  *              (chrome-devtools convention: read the output, not the code).
  *
  * The daemon resolves its `./x.js` imports through the same --import resolve
@@ -92,21 +97,27 @@ export class BrokerManager {
   }
 
   /**
-   * The status probe: alive only when broker.json exists AND a TCP connect to
-   * its port succeeds. Used by start() to detect an already-running broker,
-   * by start()'s readiness poll, and exposed for status()/tests.
+   * The status probe: alive only when broker.json exists AND its recorded pid
+   * is live AND a TCP connect to its port succeeds. The pid check keeps a
+   * crashed daemon's stale broker.json from blessing a foreign program that
+   * squatted the port as "already running". Used by start() to detect an
+   * already-running broker, by start()'s readiness poll, and exposed for
+   * tests.
    */
   async probe(): Promise<BrokerInfo | null> {
     const info = readBrokerJson(this.xferDir);
     if (info === null) return null;
+    if (!pidAlive(info.pid)) return null;
     return (await tcpProbe(info.port)) ? info : null;
   }
 
   /**
    * Start the broker daemon. Returns "already running" when a live broker is
    * already up (no spawn); otherwise spawns detached, waits for readiness
-   * (broker.json + TCP), and resolves with a one-line summary. Rejects on
-   * spawn failure or readiness timeout, surfacing the broker.log tail.
+   * (broker.json + TCP), and resolves with a one-line summary. If a foreign
+   * program held the configured port, the daemon falls back to an ephemeral
+   * one and the summary says so. Rejects on spawn failure or readiness
+   * timeout, surfacing the broker.log tail.
    */
   async start(): Promise<string> {
     if ((await this.probe()) !== null) return "already running";
@@ -156,6 +167,9 @@ export class BrokerManager {
     if (info === null) {
       throw new Error(`broker: not ready within ${this.readinessTimeoutMs}ms\n${this.logTail()}`);
     }
+    if (this.port !== 0 && info.port !== this.port) {
+      return `broker started (pid ${info.pid}, port ${info.port} — port ${this.port} was occupied by another program, fell back to an ephemeral port)`;
+    }
     return `broker started (pid ${info.pid}, port ${info.port})`;
   }
 
@@ -187,20 +201,22 @@ export class BrokerManager {
   }
 
   /**
-   * Read broker.json + TCP probe its port; one text block with port, pid,
-   * startedAt, version and alive|dead. Never rejects — consumers read the
-   * output, never the exit code.
+   * Read broker.json + its pid liveness + TCP probe its port; one text block
+   * with port, pid, startedAt, version and alive|dead. Never rejects —
+   * consumers read the output, never the exit code.
    */
   async status(): Promise<string> {
     const info = readBrokerJson(this.xferDir);
     if (info === null) {
       return `broker: dead\n  xferDir: ${this.xferDir} (no broker.json)`;
     }
-    const alive = await tcpProbe(info.port);
-    if (!alive) {
+    const listenerUp = await tcpProbe(info.port);
+    if (!listenerUp || !pidAlive(info.pid)) {
       return [
         "broker: dead",
-        `  port: ${info.port} (stale — no listener)`,
+        listenerUp
+          ? `  port: ${info.port} (listener present but pid ${info.pid} is dead — likely another program)`
+          : `  port: ${info.port} (stale — no listener)`,
         `  pid: ${info.pid}`,
         `  startedAt: ${info.startedAt}`,
         `  version: ${info.version}`,

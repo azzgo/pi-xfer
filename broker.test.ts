@@ -516,7 +516,7 @@ describe("broker daemon (integration)", () => {
     assert.ok(fs.existsSync(path.join(xferDir, "broker.pid")));
   });
 
-  it("recovers from a stale broker.pid (dead process) and rebinds on the same port", async () => {
+  it("starts over a stale broker.pid (dead process) when the port is free", async () => {
     const xferDir = freshXferDir();
     const port = await freePort();
     const deadPid = await reapedPid();
@@ -530,7 +530,7 @@ describe("broker daemon (integration)", () => {
     );
 
     const daemon = await spawnDaemon(xferDir, port);
-    assert.equal(daemon.port, port, "recovery bind keeps the requested port");
+    assert.equal(daemon.port, port, "free port keeps the requested port");
 
     // State rewritten with the new live pid, and the daemon actually serves.
     const state = readBrokerJson(xferDir);
@@ -538,6 +538,47 @@ describe("broker daemon (integration)", () => {
     assert.equal(state.pid, daemon.child.pid);
     const status = await getStatus(daemon.port);
     assert.equal(status.ok, true);
+  });
+
+  it("falls back to an ephemeral port when a foreign program holds the configured port", async () => {
+    const xferDir = freshXferDir();
+
+    // A plain TCP listener with no broker files: pid file absent → the daemon
+    // must NOT claim "already running" and must NOT fail — it warns and lands
+    // on an ephemeral port instead.
+    const squatter = net.createServer();
+    await new Promise<void>((resolve) => squatter.listen(0, "127.0.0.1", resolve));
+    const squatterPort = (squatter.address() as { port: number }).port;
+    try {
+      const daemon = await spawnDaemon(xferDir, squatterPort);
+      assert.notEqual(daemon.port, squatterPort, "daemon moved off the occupied port");
+
+      // broker.json records the fallback port, and the daemon actually serves it.
+      const state = readBrokerJson(xferDir);
+      assert.equal(state.port, daemon.port);
+      assert.equal(state.pid, daemon.child.pid);
+      const status = await getStatus(daemon.port);
+      assert.equal(status.ok, true);
+
+      // The fallback is announced on stderr (→ broker.log under the manager).
+      assert.match(daemon.stderr(), /port \d+ is occupied by another program/);
+      assert.match(daemon.stderr(), /falling back to an ephemeral port/);
+
+      daemon.child.kill("SIGTERM");
+      await daemon.exited;
+    } finally {
+      await new Promise<void>((resolve) => squatter.close(() => resolve()));
+    }
+  });
+
+  it("still reports 'already running' when the port is held by OUR live broker", async () => {
+    const xferDir = freshXferDir();
+    const first = await spawnDaemon(xferDir);
+    const second = spawnRaw(xferDir, first.port);
+    const { code } = await second.exited;
+    assert.equal(code, 0);
+    assert.match(second.stdout(), /already running/);
+    assert.ok(!second.stderr().includes("falling back"), "no fallback when our broker owns the port");
   });
 
   it("returns 404 for paths other than /status", async () => {
