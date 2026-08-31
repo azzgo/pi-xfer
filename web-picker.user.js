@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PI Web Picker
 // @namespace    pi.dotfiles
-// @version      1.1.0
-// @description  元素拾取 + 备注批注 + broker 连接与 send 流程（v1.1：协议 v0.1 无 token，目标下拉/发送）
+// @version      1.2.0
+// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.2：协议 v0.1 无 token，目标下拉/发送，page.request 提问卡）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /**
- * PI Web Picker — userscript v1.1: pick/note core + broker connection + send flow.
+ * PI Web Picker — userscript v1.2: pick/note core + broker connection + send flow + ask modal.
  *
  * Pick/note core (unchanged from v1.0.0): Shadow-DOM overlay UI, fab with drag +
  * pick entry, frozen pick mode with layer switching (and 1-9 batch picks), IME-safe
@@ -29,6 +29,11 @@
  *     target persisted in GM `wp.lastTarget`, ⟳ manual refresh.
  *   - annotation.submit (picks reuse the payloadFor schema verbatim) → ack toasts
  *     the handoff_id and clears the local batch; error frames toast code + message.
+ *   - reverse channel (v1.2): inbound page.request → centered ask modal (question
+ *     text + from/handoff meta + answer textarea); 回复 → page.response{ok:true,
+ *     text}, 忽略 / Esc → page.response{ok:false, error:"dismissed"}; IME-safe
+ *     Enter submits; ask modal and pick mode are mutually exclusive (opening one
+ *     dismisses the other).
  *   - frames are built only through PROTOCOL constants + frame() builders — the
  *     wire protocol lives in exactly one place, never written inline.
  *
@@ -77,6 +82,8 @@
     KIND_ERROR: 'error',
     KIND_TARGETS_LIST: 'targets.list',
     KIND_TARGETS_RESULT: 'targets.result',
+    KIND_PAGE_REQUEST: 'page.request',
+    KIND_PAGE_RESPONSE: 'page.response',
     NS_LOCAL: 'local',
   };
   function frame(type, extra) { return Object.assign({ v: PROTOCOL.V, type }, extra); }
@@ -96,6 +103,13 @@
   }
   function frameTargetsList(id) {
     return frame(PROTOCOL.KIND_TARGETS_LIST, { id });
+  }
+  function framePageResponse(id, ok, payload) {
+    return frame(PROTOCOL.KIND_PAGE_RESPONSE, {
+      id,
+      ok,
+      ...(ok ? { text: payload } : { error: payload }),
+    });
   }
 
   // ---------- storage — all keys under pi.wp.*, all access guarded ----------
@@ -316,7 +330,7 @@
       #dot.connecting { background: var(--wp-amber); }
       #dot.on { background: var(--wp-green); box-shadow: 0 0 0 2px #161a21, 0 0 8px rgba(34,197,94,.8); }
       /* ---- floating cards ---- */
-      #card, #panel, #settings {
+      #card, #panel, #settings, #ask {
         background: #fff; border: 1px solid var(--wp-line); border-radius: var(--wp-radius);
         box-shadow: var(--wp-shadow); color: var(--wp-ink);
         font: 13px/1.5 var(--wp-font); z-index: 2147483647; pointer-events: auto;
@@ -403,6 +417,20 @@
       #settings .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); margin: 12px 0 4px;
         letter-spacing: .02em; }
       #settings .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+      /* ---- ask modal (reverse channel) ---- */
+      #ask { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 420px; max-width: calc(100vw - 32px); padding: 16px; display: none; }
+      #ask b { font-size: 13px; display: block; }
+      #ask .q { font: 13px/1.6 var(--wp-font); background: var(--wp-soft);
+        border: 1px solid var(--wp-line); border-radius: 8px; padding: 10px 12px;
+        margin-top: 8px; max-height: 140px; overflow: auto; white-space: pre-wrap;
+        word-break: break-word; }
+      #ask .meta { font: 10.5px/1.5 var(--wp-mono); color: var(--wp-muted); margin-top: 8px;
+        word-break: break-all; }
+      #ask .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); margin: 12px 0 4px;
+        letter-spacing: .02em; }
+      #ask textarea { min-height: 76px; }
+      #ask .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
       /* ---- toast ---- */
       #toast { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
         background: rgba(15,21,34,.95); color: #f1f5f9; font: 12.5px var(--wp-font);
@@ -465,6 +493,17 @@
         <button class="primary" id="ssave">保存并连接</button>
       </div>
     </div>
+    <div id="ask">
+      <b>agent 提问</b>
+      <div class="q" id="aqtext"></div>
+      <div class="meta" id="aqmeta"></div>
+      <div class="lbl">回答</div>
+      <textarea id="aqtxt" placeholder="输入回答，Enter 提交（输入法选字按 Enter 不会误发）"></textarea>
+      <div class="row">
+        <button class="ghost" id="aqignore">忽略 Esc</button>
+        <button class="primary" id="aqsend">回复 Enter</button>
+      </div>
+    </div>
   `;
 
   const $ = (id) => root.getElementById(id);
@@ -475,7 +514,9 @@
         elPrompt = $('prompt'), elTarget = $('target'), elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
-        elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel');
+        elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'),
+        elAsk = $('ask'), elAskQ = $('aqtext'), elAskMeta = $('aqmeta'),
+        elAskTxt = $('aqtxt'), elAskSend = $('aqsend'), elAskIgnore = $('aqignore');
 
   // ---------- state ----------
   let pickMode = false;
@@ -540,6 +581,7 @@
 
   // ---------- pick mode ----------
   function setActive(on) {
+    if (on) dismissAsk();           // ask modal and pick mode are mutually exclusive
     pickMode = on;
     host.style.pointerEvents = 'none';
     elBar.style.display = on ? 'flex' : 'none';
@@ -824,6 +866,11 @@
         if (p && p.kind === 'targets') { pending.delete(f.id); p.resolve(Array.isArray(f.targets) ? f.targets : []); }
         return;
       }
+      if (f.type === PROTOCOL.KIND_PAGE_REQUEST) {
+        debugLog('page.request', f.id, f.text);
+        openAsk(f);
+        return;
+      }
     };
     sock.onclose = () => {
       if (ws !== sock) return;               // superseded by a newer connect
@@ -960,6 +1007,43 @@
   });
   elSCancel.addEventListener('click', closeSettings);
 
+  // ---------- reverse channel — page.request → ask modal → page.response ----------
+  // One ask modal at a time; every inbound page.request gets exactly one reply:
+  // 回复 → {ok:true, text}, 忽略/Esc → {ok:false, error:"dismissed"}. Entering
+  // pick mode also dismisses (mutual exclusivity) so no request is left hanging.
+  let askReq = null;               // active inbound request {id, handoff_id, from, text}
+  function openAsk(f) {
+    if (askReq) dismissAsk();      // a newer question supersedes an unanswered one
+    if (pickMode) setActive(false);
+    askReq = { id: f.id, handoff_id: f.handoff_id, from: f.from, text: f.text };
+    elAskQ.textContent = f.text || '(空问题)';
+    elAskMeta.textContent = 'from: ' + (f.from || '?') +
+      (f.handoff_id ? ' · handoff: ' + f.handoff_id : '');
+    elAskTxt.value = '';
+    elAsk.style.display = 'block';
+    setTimeout(() => elAskTxt.focus(), 0);
+    toast('收到 agent 提问');
+  }
+  function replyAsk() {
+    if (!askReq) return;
+    const text = elAskTxt.value.trim();
+    if (!text) { toast('先写回答'); elAskTxt.focus(); return; }
+    const req = askReq;
+    askReq = null;
+    elAsk.style.display = 'none';
+    if (sendFrame(framePageResponse(req.id, true, text))) toast('已回复 agent');
+    else toast('发送失败: broker 未连接');
+  }
+  function dismissAsk() {
+    if (!askReq) return;
+    const req = askReq;
+    askReq = null;
+    elAsk.style.display = 'none';
+    sendFrame(framePageResponse(req.id, false, 'dismissed'));
+  }
+  elAskSend.addEventListener('click', replyAsk);
+  elAskIgnore.addEventListener('click', dismissAsk);
+
   elOk.addEventListener('click', submit);
   elCancel.addEventListener('click', unpin);
 
@@ -991,6 +1075,15 @@
   document.addEventListener('keydown', (e) => {
     if (panelOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault(); closePanel(); return;
+    }
+    if (askReq && !e.isComposing && e.keyCode !== 229) {
+      const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
+      if (e.key === 'Enter' && !e.shiftKey && firstTarget === elAskTxt) {
+        e.preventDefault(); e.stopPropagation(); replyAsk(); return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation(); dismissAsk(); return;
+      }
     }
     if (!pickMode) return;
     if (pinned) {
@@ -1030,6 +1123,7 @@
     settings: openSettings,
     send: (prompt, target) => submitToAgent(prompt, target),
     targets: () => targets.slice(),
+    ask: () => (askReq ? Object.assign({}, askReq) : null),
     refreshTargets: refreshTargets,
     snapshot: loadBatch,
     setDebug: (on) => { gm.set(GM_DEBUG, !!on); return !!on; },
