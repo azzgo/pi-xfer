@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PI Web Picker
 // @namespace    pi.dotfiles
-// @version      1.0.0
-// @description  元素拾取 + 备注批注（xfer web-picker v1：pick/note 核心，尚未连接 broker）
+// @version      1.1.0
+// @description  元素拾取 + 备注批注 + broker 连接与 send 流程（v1.1：协议 v0.1 无 token，目标下拉/发送）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -13,34 +13,40 @@
 // ==/UserScript==
 
 /**
- * PI Web Picker — userscript v1: pick/note core only.
+ * PI Web Picker — userscript v1.1: pick/note core + broker connection + send flow.
  *
- * Scope of this build: Shadow-DOM overlay UI, fab with drag + pick entry,
- * frozen pick mode with layer switching (and 1-9 batch picks), IME-safe note
- * card, note panel, per-item delete, hotkeys ⇧⌥P (pick) / ⇧⌥L (panel), and
+ * Pick/note core (unchanged from v1.0.0): Shadow-DOM overlay UI, fab with drag +
+ * pick entry, frozen pick mode with layer switching (and 1-9 batch picks), IME-safe
+ * note card, note panel, per-item delete, hotkeys ⇧⌥P (pick) / ⇧⌥L (panel), and
  * framework source extraction (React/Vue dev builds → source file:line).
  *
- * NOT CONNECTED YET — broker/WS wiring lands in the next revision. This build
- * never opens a network connection; it only records picks into sessionStorage
- * on the current tab. The `@connect 127.0.0.1` and GM grants are declared now
- * so that revision ships without a Tampermonkey permission re-prompt
- * (`unsafeWindow` is already needed here for the source-info page-realm
- * fallback).
+ * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
+ *   - manual connect only: ws://127.0.0.1:4719/ws by default; broker URL editable
+ *     in the settings modal (GM `wp.brokerUrl`); hello on open → welcome → green
+ *     status dot on the fab. Reconnect is NEVER automatic.
+ *   - send box at the bottom of the note panel: prompt textarea + target <select>
+ *     fed by targets.list → targets.result (label `name — cwd · status`), last-used
+ *     target persisted in GM `wp.lastTarget`, ⟳ manual refresh.
+ *   - annotation.submit (picks reuse the payloadFor schema verbatim) → ack toasts
+ *     the handoff_id and clears the local batch; error frames toast code + message.
+ *   - frames are built only through PROTOCOL constants + frame() builders — the
+ *     wire protocol lives in exactly one place, never written inline.
  *
- * Install (Tampermonkey):
- *   1. Open the Tampermonkey Dashboard → "+" (Create a new script).
- *   2. Replace the editor content with this entire file and save (Ctrl/Cmd+S).
- *   3. Reload any page: the round fab appears near the bottom-right corner.
- *      ⇧⌥P = enter/exit pick mode, ⇧⌥L = toggle the note panel.
- *
- * Storage contract — every key is prefixed `pi.wp.`:
+ * Storage contract — existing keys stay `pi.wp.*`; the two GM connection keys keep
+ * the round-trial names (no `pi.` prefix) for continuity:
  *   - pi.wp.picks   sessionStorage  per-tab pick batch (array of payloadFor
  *                                   records; schema below must stay stable)
  *   - pi.wp.fabPos  sessionStorage  fab position {x, y}
  *   - pi.wp.debug   GM storage      debug flag (boolean; toggle at runtime via
  *                                   window.__PI_WP_API__.setDebug(true|false))
- *   GM keys for connection prefs (e.g. pi.wp.brokerUrl) are reserved for the
- *   broker revision and intentionally absent here.
+ *   - wp.brokerUrl  GM storage      broker WS URL override (settings modal)
+ *   - wp.lastTarget GM storage      last used local target name (persisted choice)
+ *
+ * Install (Tampermonkey):
+ *   1. Open the Tampermonkey Dashboard → "+" (Create a new script).
+ *   2. Replace the editor content with this entire file and save (Ctrl/Cmd+S).
+ *   3. Reload any page: the round fab appears near the bottom-right corner.
+ *      ⇧⌥P = enter/exit pick mode, ⇧⌥L = toggle the note panel (send box inside).
  */
 (() => {
   'use strict';
@@ -55,6 +61,42 @@
   const HOST_FLAG = 'data-pi-wp-host';
   const MAX_DEPTH = 8;
   const HOTKEY = { code: 'KeyP', alt: true, shift: true };
+  const GM_BROKER = 'wp.brokerUrl';        // broker WS URL override (settings modal)
+  const GM_TARGET = 'wp.lastTarget';       // last used local target name
+  const DEFAULT_BROKER_URL = 'ws://127.0.0.1:4719';
+
+  // ---------- wire protocol v0.1 (Ticket 007 + trial amends: no token, targets frames) ----------
+  // Every frame carries { v, type }; each request gets exactly one reply (ack | error).
+  // All protocol constants and frame builders live here — never write a frame inline.
+  const PROTOCOL = {
+    V: 0,                                          // envelope version on every frame
+    KIND_HELLO: 'hello',
+    KIND_WELCOME: 'welcome',
+    KIND_SUBMIT: 'annotation.submit',
+    KIND_ACK: 'ack',
+    KIND_ERROR: 'error',
+    KIND_TARGETS_LIST: 'targets.list',
+    KIND_TARGETS_RESULT: 'targets.result',
+    NS_LOCAL: 'local',
+  };
+  function frame(type, extra) { return Object.assign({ v: PROTOCOL.V, type }, extra); }
+  function frameHello() {
+    return frame(PROTOCOL.KIND_HELLO, {
+      client: { ua: 'tampermonkey', tab: { id: String(Date.now()), url: location.href, title: document.title } },
+    });
+  }
+  function frameSubmit(id, prompt, targetName) {
+    return frame(PROTOCOL.KIND_SUBMIT, {
+      id,
+      page: { url: location.href, title: document.title },
+      picks: loadBatch(),
+      prompt,
+      target: { namespace: PROTOCOL.NS_LOCAL, name: targetName },
+    });
+  }
+  function frameTargetsList(id) {
+    return frame(PROTOCOL.KIND_TARGETS_LIST, { id });
+  }
 
   // ---------- storage — all keys under pi.wp.*, all access guarded ----------
   // GM storage survives across tabs and sessions (debug flag today; connection
@@ -93,6 +135,7 @@
     saveBatch(b);
     refreshCount();
   }
+  function clearBatch() { saveBatch([]); refreshCount(); }
 
   // ---------- DOM utils ----------
   const cssEscape = (s) => (window.CSS && CSS.escape)
@@ -268,8 +311,12 @@
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #ef4444; color: #fff; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
         display: none; box-shadow: 0 0 0 2px #161a21; cursor: pointer; }
+      #dot { position: absolute; top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px;
+        background: #94a3b8; box-shadow: 0 0 0 2px #161a21; transition: background .2s; }
+      #dot.connecting { background: var(--wp-amber); }
+      #dot.on { background: var(--wp-green); box-shadow: 0 0 0 2px #161a21, 0 0 8px rgba(34,197,94,.8); }
       /* ---- floating cards ---- */
-      #card, #panel {
+      #card, #panel, #settings {
         background: #fff; border: 1px solid var(--wp-line); border-radius: var(--wp-radius);
         box-shadow: var(--wp-shadow); color: var(--wp-ink);
         font: 13px/1.5 var(--wp-font); z-index: 2147483647; pointer-events: auto;
@@ -280,15 +327,22 @@
         word-break: break-all; margin-bottom: 10px; max-height: 70px; overflow: auto; }
       #card .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
       /* ---- shared form controls ---- */
-      textarea {
+      textarea, input, select {
         width: 100%; border: 1px solid var(--wp-line); border-radius: 8px; padding: 7px 10px;
         font: 12.5px/1.5 var(--wp-font); background: #fff; color: var(--wp-ink);
         outline: none; transition: border-color .15s ease, box-shadow .15s ease;
       }
       textarea { resize: vertical; min-height: 44px; }
-      textarea:focus {
+      textarea:focus, input:focus, select:focus {
         border-color: var(--wp-accent); box-shadow: 0 0 0 3px rgba(79,140,255,.14);
       }
+      input, select { font-family: var(--wp-mono); font-size: 12px; }
+      select {
+        appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 28px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 9px center; background-size: 12px;
+      }
+      select:disabled { background-color: var(--wp-soft); color: var(--wp-muted); cursor: not-allowed; }
       button { font: 600 12px var(--wp-font); border: none; border-radius: 8px; cursor: pointer;
         padding: 7px 14px; transition: background .15s ease, box-shadow .15s ease, transform .05s ease; }
       button:active { transform: translateY(1px); }
@@ -297,6 +351,8 @@
       button.primary:disabled { background: #c4d5f7; box-shadow: none; cursor: not-allowed; transform: none; }
       button.ghost { background: #f1f5f9; color: var(--wp-muted); }
       button.ghost:hover { background: #e2e8f0; color: #475569; }
+      button.icon { padding: 7px 9px; font-size: 13px; line-height: 1; }
+      button.icon:disabled { opacity: .45; cursor: not-allowed; transform: none; }
       /* ---- panel ---- */
       #panel { position: fixed; top: 60px; right: 16px; width: 348px; max-height: 80vh;
         display: none; flex-direction: column; overflow: hidden; }
@@ -325,6 +381,28 @@
       #plist .item .pts { color: #94a3b8; font-size: 10px; font-family: var(--wp-mono); }
       #plist .item .del { background: none; color: #ef4444; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
       #plist .item .del:hover { background: #fef2f2; }
+      /* ---- send box ---- */
+      #sendbox { border-top: 1px solid var(--wp-line); padding: 12px 14px; display: flex;
+        flex-direction: column; gap: 7px; background: var(--wp-soft); border-radius: 0 0 var(--wp-radius) var(--wp-radius); }
+      #sendbox .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); letter-spacing: .02em; }
+      #sendbox textarea { background: #fff; }
+      #sendbox .trow { display: flex; gap: 6px; align-items: center; }
+      #sendbox .trow select { flex: 1; }
+      #sendbox .srow { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+      #connstate { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500;
+        color: var(--wp-muted); flex: 1; cursor: pointer; user-select: none; white-space: nowrap; }
+      #connstate .dot { flex: none; width: 9px; height: 9px; border-radius: 50%;
+        background: #94a3b8; transition: background .2s ease, box-shadow .2s ease; }
+      #connstate.connecting .dot { background: var(--wp-amber); }
+      #connstate.on { color: #15803d; }
+      #connstate.on .dot { background: var(--wp-green); box-shadow: 0 0 0 3px rgba(34,197,94,.18); }
+      #connstate:hover { text-decoration: underline; text-underline-offset: 3px; }
+      /* ---- settings modal ---- */
+      #settings { position: fixed; width: 312px; padding: 16px; display: none; top: 20vh; right: 20px; }
+      #settings b { font-size: 13px; display: block; margin-bottom: 2px; }
+      #settings .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); margin: 12px 0 4px;
+        letter-spacing: .02em; }
+      #settings .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
       /* ---- toast ---- */
       #toast { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
         background: rgba(15,21,34,.95); color: #f1f5f9; font: 12.5px var(--wp-font);
@@ -355,21 +433,49 @@
     <div id="panel">
       <div class="ph"><b>已选备注</b><span class="cnt2" id="pcount"></span><button id="pclose" title="关闭 Esc">✕</button></div>
       <div id="plist"></div>
+      <div id="sendbox">
+        <div class="lbl">发送到 agent（prompt 指令）</div>
+        <textarea id="prompt" placeholder="要让 agent 做什么？如：把这两个按钮合并成一个"></textarea>
+        <div class="trow">
+          <span class="lbl">目标</span>
+          <select id="target"></select>
+          <button class="ghost icon" id="trefresh" title="刷新 target 列表">⟳</button>
+        </div>
+        <div class="srow">
+          <span id="connstate"><span class="dot"></span><span id="conntext">未连接 · 点击设置</span></span>
+          <button class="ghost" id="clearbtn">清空</button>
+          <button class="primary" id="sendbtn">发送 →</button>
+        </div>
+      </div>
     </div>
-    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点红色数字角标开备注面板">
+    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点红色数字角标开备注面板 · 绿点=broker 已连接">
       <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
       </svg>
+      <span id="dot"></span>
       <span id="cnt">0</span>
     </button>
     <div id="toast"></div>
+    <div id="settings">
+      <b>连接设置</b>
+      <div class="lbl">BROKER 地址（WS）</div>
+      <input id="sburl" placeholder="ws://127.0.0.1:4719" />
+      <div class="row">
+        <button class="ghost" id="scancel">取消</button>
+        <button class="primary" id="ssave">保存并连接</button>
+      </div>
+    </div>
   `;
 
   const $ = (id) => root.getElementById(id);
   const elHL = $('hl'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'),
-        elFab = $('fab'), elCnt = $('cnt'), elCard = $('card'), elSel = $('sel'),
+        elFab = $('fab'), elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
-        elPanel = $('panel'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose');
+        elPanel = $('panel'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
+        elPrompt = $('prompt'), elTarget = $('target'), elTRefresh = $('trefresh'),
+        elSend = $('sendbtn'), elClear = $('clearbtn'),
+        elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
+        elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel');
 
   // ---------- state ----------
   let pickMode = false;
@@ -622,6 +728,7 @@
     panelOpen = true;
     renderPanel();
     elPanel.style.display = 'flex';
+    if (wsState === 'on') refreshTargets(); else renderTargetSelect();
   }
   function closePanel() { panelOpen = false; elPanel.style.display = 'none'; }
   function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
@@ -653,6 +760,205 @@
     renderPanel();
     toast('已删除 ' + sel);
   });
+
+  // ---------- broker connection (protocol v0.1, no token — manual connect only) ----------
+  let ws = null;
+  let wsState = 'off';                 // off | connecting | on
+  const pending = new Map();           // request id → { kind:'submit'|'targets', resolve }
+  let targets = [];                    // [{name, sessionName, cwd, status}] from targets.list
+
+  function brokerUrl() { return gm.get(GM_BROKER, DEFAULT_BROKER_URL); }
+
+  function sendFrame(obj) {
+    if (!ws || ws.readyState !== 1) return false;
+    try { ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
+  }
+
+  function setWsState(s) {
+    wsState = s;
+    elDot.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : '';
+    elConn.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : '';
+    elConn.title = s === 'on' ? '点击断开 broker' : s === 'connecting' ? '连接中…' : '点击打开连接设置';
+    elConnText.textContent = s === 'on' ? 'broker 已连接'
+      : s === 'connecting' ? '连接中…'
+      : '未连接 · 点击设置';
+    if (s !== 'on') { targets = []; renderTargetSelect(); }
+  }
+
+  function connectBroker() {
+    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+    const url = brokerUrl().replace(/\/+$/, '') + '/ws';
+    setWsState('connecting');
+    let sock;
+    try { sock = new WebSocket(url); }
+    catch (e) { setWsState('off'); toast('WS 创建失败: ' + e.message); return; }
+    ws = sock;
+    sock.onopen = () => { sendFrame(frameHello()); };
+    sock.onmessage = (ev) => {
+      let f;
+      try { f = JSON.parse(ev.data); } catch (e) { return; }
+      if (!f || typeof f.type !== 'string') return;
+      if (f.type === PROTOCOL.KIND_WELCOME) {
+        setWsState('on');
+        toast('broker 已连接');
+        refreshTargets();
+        return;
+      }
+      if (f.type === PROTOCOL.KIND_ACK) {
+        const p = pending.get(f.id);
+        if (p && p.kind === 'submit') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
+        return;
+      }
+      if (f.type === PROTOCOL.KIND_ERROR) {
+        const p = pending.get(f.id);
+        if (p) {
+          pending.delete(f.id);
+          p.resolve(p.kind === 'submit' ? { ok: false, code: f.code, message: f.message } : []);
+        } else {
+          toast('broker 错误: ' + (f.code || '?'));
+        }
+        return;
+      }
+      if (f.type === PROTOCOL.KIND_TARGETS_RESULT) {
+        const p = pending.get(f.id);
+        if (p && p.kind === 'targets') { pending.delete(f.id); p.resolve(Array.isArray(f.targets) ? f.targets : []); }
+        return;
+      }
+    };
+    sock.onclose = () => {
+      if (ws !== sock) return;               // superseded by a newer connect
+      ws = null;
+      for (const p of pending.values()) p.resolve(p.kind === 'submit'
+        ? { ok: false, code: 'closed', message: 'broker 连接已断开' }
+        : []);
+      pending.clear();
+      if (wsState !== 'off') { setWsState('off'); toast('broker 连接已断开'); }
+    };
+    sock.onerror = () => {
+      if (ws === sock && wsState !== 'off') { setWsState('off'); toast('broker 连不上: ' + url); }
+    };
+  }
+
+  function disconnectBroker() {
+    setWsState('off');
+    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+    toast('已断开');
+  }
+
+  // ---------- send flow (annotation.submit → ack/error) ----------
+  function submitToAgent(prompt, targetName) {
+    return new Promise((resolve) => {
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
+      const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pending.set(id, { kind: 'submit', resolve });
+      if (!sendFrame(frameSubmit(id, prompt, targetName))) {
+        pending.delete(id);
+        resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
+        return;
+      }
+      setTimeout(() => {
+        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: 'broker 无响应' }); }
+      }, 10000);
+    });
+  }
+
+  // ---------- targets dropdown (targets.list → targets.result) ----------
+  function requestTargets() {
+    return new Promise((resolve) => {
+      if (wsState !== 'on') { resolve([]); return; }
+      const id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pending.set(id, { kind: 'targets', resolve });
+      if (!sendFrame(frameTargetsList(id))) { pending.delete(id); resolve([]); return; }
+      setTimeout(() => {
+        if (pending.has(id)) { pending.delete(id); resolve([]); }
+      }, 5000);
+    });
+  }
+  async function refreshTargets() {
+    targets = await requestTargets();
+    renderTargetSelect();
+  }
+  function renderTargetSelect() {
+    const last = gm.get(GM_TARGET, '');
+    elTarget.innerHTML = '';
+    if (wsState !== 'on') {
+      elTarget.appendChild(new Option('（未连接 broker）', ''));
+      elTarget.disabled = true;
+      return;
+    }
+    if (!targets.length) {
+      elTarget.appendChild(new Option('（无活跃 local session）', ''));
+      elTarget.disabled = true;
+      return;
+    }
+    elTarget.disabled = false;
+    for (const t of targets) {
+      const label = t.name + ' — ' + (t.cwd || '?') + (t.status ? ' · ' + t.status : '');
+      const o = new Option(label, t.name);
+      if (t.name === last) o.selected = true;
+      elTarget.appendChild(o);
+    }
+  }
+
+  elTarget.addEventListener('change', () => {
+    const v = elTarget.value.trim();
+    if (v) gm.set(GM_TARGET, v);
+  });
+  elTRefresh.addEventListener('click', () => {
+    if (wsState !== 'on') { openSettings(); return; }
+    refreshTargets().then(() =>
+      toast(targets.length ? '目标列表已刷新（' + targets.length + '）' : '没有发现活跃 local session'));
+  });
+
+  elSend.addEventListener('click', async () => {
+    const prompt = elPrompt.value.trim();
+    const target = elTarget.value.trim();
+    if (!prompt) { toast('先写 prompt 指令'); elPrompt.focus(); return; }
+    if (!target) {
+      toast(wsState !== 'on' ? '先连接 broker（点击左下状态）' : '没有可用目标：先启动 pi session 的 xfer listen');
+      return;
+    }
+    if (!loadBatch().length && !confirm('没有标注任何元素，只发 prompt？')) return;
+    elSend.disabled = true;
+    elSend.textContent = '发送中…';
+    const res = await submitToAgent(prompt, target);
+    elSend.disabled = false;
+    elSend.textContent = '发送 →';
+    if (res.ok) {
+      gm.set(GM_TARGET, target);
+      toast('已送达 agent（handoff ' + (res.result && res.result.handoff_id ? res.result.handoff_id : '?') + '）');
+      elPrompt.value = '';
+      clearBatch();
+      renderPanel();
+    } else {
+      toast('发送失败: ' + res.code + (res.message ? ' — ' + res.message : ''));
+    }
+  });
+  elClear.addEventListener('click', () => {
+    const n = loadBatch().length;
+    if (!n) return;
+    if (confirm('清空本页全部 ' + n + ' 条标注？')) { clearBatch(); renderPanel(); }
+  });
+  elConn.addEventListener('click', () => {
+    if (wsState === 'on') disconnectBroker();
+    else if (wsState === 'off') openSettings();
+  });
+
+  // ---------- settings modal (broker URL only) ----------
+  function openSettings() {
+    elSUrl.value = brokerUrl();
+    elSettings.style.display = 'block';
+    setTimeout(() => elSUrl.focus(), 0);
+  }
+  function closeSettings() { elSettings.style.display = 'none'; }
+  elSSave.addEventListener('click', () => {
+    const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;
+    gm.set(GM_BROKER, url);
+    closeSettings();
+    toast('已保存，连接中…');
+    connectBroker();
+  });
+  elSCancel.addEventListener('click', closeSettings);
 
   elOk.addEventListener('click', submit);
   elCancel.addEventListener('click', unpin);
@@ -711,6 +1017,7 @@
   window.addEventListener('resize', () => { if (pickMode) refresh(); }, true);
 
   refreshCount();
+  renderTargetSelect();
   debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ' + location.host);
 
   // ---------- programmatic API (DevTools console) ----------
@@ -718,13 +1025,22 @@
     start: () => { setActive(true); return true; },
     stop: () => { setActive(false); return true; },
     panel: togglePanel,
+    connect: connectBroker,
+    disconnect: disconnectBroker,
+    settings: openSettings,
+    send: (prompt, target) => submitToAgent(prompt, target),
+    targets: () => targets.slice(),
+    refreshTargets: refreshTargets,
     snapshot: loadBatch,
     setDebug: (on) => { gm.set(GM_DEBUG, !!on); return !!on; },
   };
 
   // ---------- Tampermonkey menu ----------
   try {
-    GM_registerMenuCommand('开始拾取 (⇧⌥P)', () => setActive(true));
+    GM_registerMenuCommand('连接 broker', () => connectBroker());
+    GM_registerMenuCommand('断开 broker', () => disconnectBroker());
+    GM_registerMenuCommand('连接设置…', openSettings);
     GM_registerMenuCommand('打开标注面板 (⇧⌥L)', togglePanel);
+    GM_registerMenuCommand('开始拾取 (⇧⌥P)', () => setActive(true));
   } catch (e) { /* menu registration unavailable in this manager */ }
 })();
