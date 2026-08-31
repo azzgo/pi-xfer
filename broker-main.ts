@@ -15,7 +15,11 @@
  *                          xfer-notify frame to <xfer-dir>/<target>.sock, then
  *                          acks {handoff_id, doc} or errors (invalid_payload,
  *                          bad_target, target_not_found, delivery_failed).
- *   - targets.list      → targets.result with listTargets(<xfer-dir>).
+ *   - page.request/page.response — reverse channel (task 030): routePageRequest()
+ *                          broadcasts a question to every welcomed tab; the first
+ *                          matching page.response resolves it; a timeout (default
+ *                          120s, BROKER_PAGE_TIMEOUT_MS/env + per-call override) or
+ *                          no connected tabs resolve as {ok:false, error}.
  *
  * After a successful bind it writes `<xfer-dir>/broker.pid` and
  * `<xfer-dir>/broker.json` {port, pid, startedAt, version} atomically (tmp +
@@ -190,10 +194,6 @@ function tabFromFrame(frame: Frame): TabInfo {
   return typeof tab === "object" && tab !== null ? (tab as TabInfo) : {};
 }
 
-/** Stub handlers for frames still owned by later tasks; they log and stay silent on the wire. */
-function notImplemented(type: string): (connection: WsConnection, frame: Frame) => void {
-  return () => console.log(`[broker] handler not yet implemented: ${type}`);
-}
 
 type FrameHandler = (connection: WsConnection, frame: Frame) => void;
 
@@ -203,11 +203,20 @@ type FrameHandler = (connection: WsConnection, frame: Frame) => void;
  */
 let frameHandlers: Record<string, FrameHandler> = {};
 
+/** Tab registry of the most recently started broker instance (mirrors frameHandlers). */
+let activeConns: Map<WsConnection, TabInfo> | null = null;
+
 /** msg_id scheme mirroring the mock broker: prefix + base36 timestamp + base36 counter. */
 let submitSeq = 0;
 function nextMsgId(): string {
   return `${WIRE_MSG_ID_PREFIX}${Date.now().toString(36)}${(submitSeq++).toString(36)}`;
 }
+
+/** Same base36 scheme as msg ids, but with the `r` prefix (mock broker's nextId("r")). */
+function nextRequestId(): string {
+  return `r${Date.now().toString(36)}${(submitSeq++).toString(36)}`;
+}
+
 
 /**
  * xfer-notify push, modeled on client.ts's house sendNotify (one JSON line,
@@ -342,6 +351,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
     return;
   }
   console.log(`[doc] ${doc} (${picks.length} picks → local:${targetName})`);
+  latestHandoffByTarget.set(targetName, msgId); // the doc exists → page.requests can reference it
 
   void pushXferNotify(xferDir, targetName, {
     type: WIRE_XFER_NOTIFY,
@@ -369,13 +379,167 @@ function handleTargetsList(connection: WsConnection, frame: Frame, xferDir: stri
   console.log(`[targets] ${targets.length} live local target(s)`);
 }
 
+// ---------- reverse channel: page.request / page.response ----------
+
+/** Outcome of one page.request — what the ask-page CLI reports/notifies. */
+export interface PageResult {
+  ok: boolean;
+  text?: string;
+  error?: string;
+}
+
+/** Default page.request timeout; overridable per call and via BROKER_PAGE_TIMEOUT_MS. */
+export const DEFAULT_PAGE_TIMEOUT_MS = 120_000;
+
+/** Latest handoff doc id delivered to each asking target (page.request handoff_id). */
+const latestHandoffByTarget = new Map<string, string>();
+
+/**
+ * In-flight page.requests: requestId → entry. Settled entries stay put (so the
+ * CLI can still read the result and late responses are recognized as such) until
+ * the map exceeds MAX_PENDING_PAGE_REQUESTS, when settled ones are pruned.
+ */
+const pendingPageRequests = new Map<string, PendingPageRequest>();
+const MAX_PENDING_PAGE_REQUESTS = 128;
+
+interface PendingPageRequest {
+  /** Tab connection that answered (set when a response arrives; null until then). */
+  tabConn: WsConnection | null;
+  /** Session the question is aimed at (xfer name; also the page.request `from`). */
+  askingTarget: string;
+  timer: NodeJS.Timeout;
+  settled: boolean;
+  result: Promise<PageResult>;
+  resolve: (result: PageResult) => void;
+}
+
+function envPageTimeoutMs(): number {
+  const raw = process.env.BROKER_PAGE_TIMEOUT_MS;
+  const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PAGE_TIMEOUT_MS;
+}
+
+/** Resolve a pending request exactly once; keeps the entry for late-response detection. */
+function settlePageRequest(requestId: string, result: PageResult): void {
+  const entry = pendingPageRequests.get(requestId);
+  if (!entry || entry.settled) return;
+  entry.settled = true;
+  clearTimeout(entry.timer);
+  entry.resolve(result);
+  if (pendingPageRequests.size > MAX_PENDING_PAGE_REQUESTS) {
+    for (const [id, pending] of pendingPageRequests) {
+      if (pendingPageRequests.size <= MAX_PENDING_PAGE_REQUESTS) break;
+      if (pending.settled) pendingPageRequests.delete(id);
+    }
+  }
+}
+
+/**
+ * Broadcast a question to every welcomed tab and register the pending request.
+ * Returns the requestId (r<msg_id> scheme), or null when no tabs are connected
+ * (no request created — the CLI reports {ok:false, error:"no_tabs"} via askPage).
+ * Await the outcome with {@link awaitPageResult} / {@link askPage}.
+ */
+export function routePageRequest(target: string, question: string, timeoutMs?: number): string | null {
+  const tabs = activeConns ? [...activeConns.keys()] : [];
+  if (tabs.length === 0) {
+    console.log(`[page.request] no tabs connected → no_tabs (target ${target})`);
+    return null;
+  }
+  const id = nextRequestId();
+  const resolvedTimeout = timeoutMs ?? envPageTimeoutMs();
+  const frame = {
+    v: PROTOCOL_VERSION,
+    type: WIRE_PAGE_REQUEST,
+    id,
+    handoff_id: latestHandoffByTarget.get(target) ?? "demo",
+    from: target,
+    kind: "question",
+    text: question,
+    timeoutMs: resolvedTimeout,
+  };
+  let sent = 0;
+  for (const conn of tabs) {
+    conn.send(frame);
+    sent++;
+  }
+  console.log(`[page.request ${id}] → ${sent} tab(s): ${question} (handoff ${frame.handoff_id}, timeout ${resolvedTimeout}ms)`);
+
+  let resolve!: (result: PageResult) => void;
+  const result = new Promise<PageResult>((res) => {
+    resolve = res;
+  });
+  const entry: PendingPageRequest = {
+    tabConn: null,
+    askingTarget: target,
+    settled: false,
+    result,
+    resolve,
+    timer: setTimeout(() => settlePageRequest(id, { ok: false, error: "timeout" }), resolvedTimeout),
+  };
+  // Do not keep the daemon alive just for an unanswered page request.
+  entry.timer.unref?.();
+  pendingPageRequests.set(id, entry);
+  return id;
+}
+
+/** Await the outcome of a previously routed page request (resolves immediately when settled). */
+export function awaitPageResult(requestId: string): Promise<PageResult> {
+  const entry = pendingPageRequests.get(requestId);
+  return entry ? entry.result : Promise.resolve({ ok: false, error: "no_such_request" });
+}
+
+/**
+ * Minimal CLI-facing wrapper: route a page request and await its outcome.
+ * No connected tabs → immediate {ok:false, error:"no_tabs"} without creating a request.
+ */
+export function askPage(target: string, question: string, timeoutMs?: number): Promise<PageResult> {
+  const requestId = routePageRequest(target, question, timeoutMs);
+  return requestId === null ? Promise.resolve({ ok: false, error: "no_tabs" }) : awaitPageResult(requestId);
+}
+
+/**
+ * Inbound page.response{id, ok, text|error} → correlate with the pending request.
+ * The first response wins; late responses (already settled / unknown id) are
+ * logged and ignored. No frame is sent back to the tab (mock protocol behavior).
+ */
+export function handlePageResponse(connection: WsConnection, frame: Frame): void {
+  const id = frameId(frame);
+  if (id === null) {
+    console.log(`[page.response] ignored: missing id`);
+    return;
+  }
+  const entry = pendingPageRequests.get(String(id));
+  if (!entry || entry.settled) {
+    console.log(`[page.response ${String(id)}] ignored (${entry ? "already settled" : "unknown request"})`);
+    return;
+  }
+  if (frame.ok !== true && frame.ok !== false) {
+    console.log(`[page.response ${String(id)}] ignored: ok must be a boolean`);
+    return;
+  }
+  entry.tabConn = connection;
+  const text = typeof frame.text === "string" ? frame.text : undefined;
+  const error = typeof frame.error === "string" ? frame.error : undefined;
+  const result: PageResult = frame.ok
+    ? { ok: true, ...(text !== undefined ? { text } : {}) }
+    : { ok: false, ...(error !== undefined ? { error } : {}) };
+  console.log(`[page.response ${String(id)}] ok=${frame.ok} ${frame.ok ? `text: ${text ?? ""}` : `error: ${error ?? ""}`}`);
+  settlePageRequest(String(id), result);
+}
+
+/** page.request is broker→page only; an inbound one is a protocol misuse — log, stay silent. */
+function handleInboundPageRequest(): void {
+  console.log("[broker] page.request is outbound-only; inbound request ignored");
+}
+
 /** Handlers bound to one broker instance's xfer dir (assigned by startBroker). */
 function buildFrameHandlers(xferDir: string): Record<string, FrameHandler> {
   return {
     [WIRE_ANNOTATION_SUBMIT]: (connection, frame) => handleAnnotationSubmit(connection, frame, xferDir),
     [WIRE_TARGETS_LIST]: (connection, frame) => handleTargetsList(connection, frame, xferDir),
-    [WIRE_PAGE_REQUEST]: notImplemented(WIRE_PAGE_REQUEST),
-    [WIRE_PAGE_RESPONSE]: notImplemented(WIRE_PAGE_RESPONSE),
+    [WIRE_PAGE_REQUEST]: () => handleInboundPageRequest(),
+    [WIRE_PAGE_RESPONSE]: (connection, frame) => handlePageResponse(connection, frame),
   };
 }
 
@@ -422,6 +586,8 @@ export function handleFrame(
 /** Bind + attach WS + write pid/json. Rejects with the raw listen error (EADDRINUSE etc.). */
 export async function startBroker(options: BrokerOptions): Promise<BrokerHandle> {
   const conns = new Map<WsConnection, TabInfo>();
+  activeConns = conns;
+  frameHandlers = buildFrameHandlers(options.xferDir);
   frameHandlers = buildFrameHandlers(options.xferDir);
   const startedAt = new Date().toISOString();
 
