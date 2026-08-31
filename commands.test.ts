@@ -126,11 +126,14 @@ function stubBrokerManager(
   overrides: Partial<Record<"start" | "stop" | "status", () => Promise<string>>> = {},
 ): BrokerManager & { calls: string[] } {
   const calls: string[] = [];
-  const make = (name: "start" | "stop" | "status", fallback: string) => async (): Promise<string> => {
-    calls.push(name);
-    const fn = overrides[name];
-    return fn ? fn() : fallback;
-  };
+  const make = (name: "start" | "stop" | "status", fallback: string) =>
+    async (...args: number[]): Promise<string> => {
+      // Record the port arg so tests can assert start(portOverride) plumbing.
+      const port = args[0];
+      calls.push(typeof port === "number" ? `${name} ${port}` : name);
+      const fn = overrides[name];
+      return fn ? fn() : fallback;
+    };
   return {
     start: make("start", "broker started (pid 4242, port 4719)"),
     stop: make("stop", "broker stopped (pid 4242)"),
@@ -417,6 +420,24 @@ describe("xfer command: broker subcommand", () => {
     await h2.handler("broker start");
     assert.equal(h2.notifications[0].type, "info");
     assert.match(h2.notifications[0].message, /already running/);
+  });
+
+  it("passes --port N from 'broker start --port N' to the manager", async () => {
+    const broker = stubBrokerManager();
+    const h = harness({ brokerManager: broker });
+    await h.handler("broker start --port 5000");
+    assert.deepEqual(broker.calls, ["start 5000"]);
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /broker started \(pid 4242, port 4719\)/);
+  });
+
+  it("rejects an invalid --port without touching the manager", async () => {
+    const broker = stubBrokerManager();
+    const h = harness({ brokerManager: broker });
+    await h.handler("broker start --port abc");
+    assert.deepEqual(broker.calls, []);
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /--port/);
   });
 
   it("notifies an error when start rejects", async () => {

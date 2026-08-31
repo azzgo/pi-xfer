@@ -114,7 +114,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       if (prefix.startsWith("broker ")) {
         const subPrefix = prefix.slice("broker ".length).replace(/^\s+/, "");
         const items: AutocompleteItem[] = [
-          { value: "start", label: "start", description: "Start the broker daemon (already-running is a no-op)" },
+          { value: "start", label: "start", description: "Start the broker daemon (--port N to pin, 0 = ephemeral; already-running is a no-op)" },
           { value: "status", label: "status", description: "Show broker status (port/pid)" },
           { value: "stop", label: "stop", description: "Stop the broker daemon" },
           { value: "logs", label: "logs", description: "Show the last broker.log lines" },
@@ -318,12 +318,25 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       if (cmd === "broker") {
         const sub = parts[1];
         if (sub !== "start" && sub !== "status" && sub !== "stop" && sub !== "logs") {
-          ctx.ui.notify("Usage: /xfer broker <start|status|stop|logs>", "error");
+          ctx.ui.notify("Usage: /xfer broker <start|status|stop|logs> — start 可带 --port N (0 = 临时端口)", "error");
           return;
         }
         if (sub === "start") {
+          // Optional `--port N` pins the daemon port for this start (0 =
+          // ephemeral). A live broker.pid keeps it a no-op ("already running")
+          // regardless of the port — the pid is the source of truth, not the
+          // port (broker-main.ts pre-bind pid check).
+          let requested: number | undefined;
+          const portIdx = parts.indexOf("--port");
+          if (portIdx >= 0) {
+            requested = Number.parseInt(parts[portIdx + 1] ?? "", 10);
+            if (!Number.isInteger(requested) || requested < 0 || requested > 65535) {
+              ctx.ui.notify("❌ --port needs an integer 0..65535 (0 = ephemeral)", "error");
+              return;
+            }
+          }
           try {
-            const result = await brokerManager.start();
+            const result = await brokerManager.start(requested);
             ctx.ui.notify(result === "already running" ? "🟡 Broker already running" : `🟢 ${result}`, "info");
           } catch (err) {
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
