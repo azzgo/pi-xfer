@@ -437,15 +437,15 @@ describe("broker daemon (integration)", () => {
     ws.destroy();
   });
 
-  it("accepts known protocol frames via the dispatch table without erroring", async () => {
+  it("routes known protocol frames through the dispatch table", async () => {
     const daemon = await spawnDaemon(freshXferDir());
     const ws = await RawWs.connect(daemon.port);
 
     ws.sendText(JSON.stringify({ v: 0, type: "hello" }));
     await ws.next(); // welcome
 
-    // annotation.submit / targets.list / page.request / page.response are
-    // wired (handlers land in later tasks) — none may bounce unsupported.
+    // annotation.submit: no "someone" socket in the xfer dir → target_not_found
+    // (proves the handler is wired and fails fast instead of bouncing unsupported).
     ws.sendText(
       JSON.stringify({
         v: 0,
@@ -456,7 +456,28 @@ describe("broker daemon (integration)", () => {
         target: { name: "someone" },
       }),
     );
+    const submit = JSON.parse((await ws.next(5000)).payload.toString("utf-8")) as {
+      type: string;
+      code: string;
+      id: string;
+    };
+    assert.equal(submit.type, "error");
+    assert.equal(submit.code, "target_not_found");
+    assert.equal(submit.id, "a1");
+
+    // targets.list → targets.result (empty dir).
     ws.sendText(JSON.stringify({ v: 0, type: "targets.list", id: "t1" }));
+    const targets = JSON.parse((await ws.next(5000)).payload.toString("utf-8")) as {
+      type: string;
+      id: string;
+      targets: unknown[];
+    };
+    assert.equal(targets.type, "targets.result");
+    assert.equal(targets.id, "t1");
+    assert.deepEqual(targets.targets, []);
+
+    // page.request / page.response are still silent stubs until task 030
+    // registers their routing handlers — neither may bounce unsupported.
     ws.sendText(JSON.stringify({ v: 0, type: "page.request", id: "p1", text: "hi" }));
     ws.sendText(JSON.stringify({ v: 0, type: "page.response", id: "p2", ok: true, text: "yo" }));
     await assert.rejects(ws.next(300), /no frame/);
