@@ -52,7 +52,10 @@ green = connected.
 ```
 
 State lives in `~/.pi/xfer/broker.{pid,json}` + `broker.log`. Starting when one
-is already running reports "already running" and exits 0.
+is already running (pid alive) reports "already running" and exits 0. If the
+configured port is held by a *foreign* program (no live broker pid), the daemon
+warns and falls back to an ephemeral port — `/xfer broker start` toasts the
+actual port, and it is always recorded in `broker.json`.
 
 Until the `/xfer broker` command group is wired you can run the daemon
 directly: `node pi/agent/extensions/xfer/broker-main.ts`. For the reverse
@@ -77,8 +80,8 @@ channel round trip, the prototype broker is the working oracle today:
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| Connect fails, dot stays grey | Broker not running — `/xfer broker start`; or the URL in 连接设置 is wrong. Health check: `curl http://127.0.0.1:4719/status`. |
-| Port 4719 occupied | Fixed-port policy: the broker never auto-falls back. If `curl /status` answers, a broker is already up (check `~/.pi/xfer/broker.pid` / `/xfer broker status`). A foreign process → free the port, or run the broker on another port (`--port N`) and set that URL in 连接设置. |
+| Connect fails, dot stays grey | Broker not running — `/xfer broker start`; or the URL in 连接设置 is wrong. Health check: `curl http://127.0.0.1:<port>/status`（端口以 `/xfer broker status` 为准，fallback 后不是 4719）. |
+| Port 4719 occupied by another program | The daemon falls back to an ephemeral port and warns: the start toast / `/xfer broker status` / `broker.json` show the real port — set that URL in 连接设置 (the failure toast links there). Prefer freeing the port for a stable address; `pid` alive in broker.pid means it's our own broker → "already running", no fallback. |
 | Dropdown shows （无活跃 local session） | No listening session: targets come from `~/.pi/xfer/*.sock`. Start a pi session with xfer loaded (its `.sock` appears), then ⟳. Not connected at all → the dropdown shows （未连接 broker） instead. |
 | https page won't connect | ws to `127.0.0.1` is loopback-exempt from mixed-content blocking in Chromium, and Tampermonkey's `@connect 127.0.0.1` covers the request — https pages normally work. If a page still refuses, trial on a non-https page or double-check the URL is exactly `ws://127.0.0.1:4719` (not `wss://`, not `http://`). |
 | After a broker restart the dot stays grey | **Reconnect is manual only** — the userscript never auto-reconnects. Click the status row / Tampermonkey menu → 连接, or re-save 连接设置. |

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PI Web Picker
 // @namespace    pi.dotfiles
-// @version      1.2.0
-// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.2：协议 v0.1 无 token，目标下拉/发送，page.request 提问卡）
+// @version      1.3.0
+// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.3：连接失败提示指向连接设置；broker 端口 fallback 后改这里）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -21,9 +21,12 @@
  * framework source extraction (React/Vue dev builds → source file:line).
  *
  * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
- *   - manual connect only: ws://127.0.0.1:4719/ws by default; broker URL editable
- *     in the settings modal (GM `wp.brokerUrl`); hello on open → welcome → green
- *     status dot on the fab. Reconnect is NEVER automatic.
+ *   - manual connect only: ws://127.0.0.1:4719/ws by default; broker URL (incl.
+ *     the port — relevant since the broker falls back to an ephemeral port when
+ *     4719 is squatted by another program, see /xfer broker status) editable in
+ *     the settings modal (GM `wp.brokerUrl`); hello on open → welcome → green
+ *     status dot on the fab. Reconnect is NEVER automatic. Connection failure
+ *     toasts the URL and points at the settings pill.
  *   - send box at the bottom of the note panel: prompt textarea + target <select>
  *     fed by targets.list → targets.result (label `name — cwd · status`), last-used
  *     target persisted in GM `wp.lastTarget`, ⟳ manual refresh.
@@ -882,7 +885,10 @@
       if (wsState !== 'off') { setWsState('off'); toast('broker 连接已断开'); }
     };
     sock.onerror = () => {
-      if (ws === sock && wsState !== 'off') { setWsState('off'); toast('broker 连不上: ' + url); }
+      if (ws === sock && wsState !== 'off') {
+        setWsState('off');
+        toast('broker 连不上: ' + url + '（连接设置里可改地址）');
+      }
     };
   }
 
