@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.6.0
+// @version      1.6.1
 // @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.6：page.request 改为固定 op 工具通道，console/network 常开捕获，移除 ask 弹窗）
 // @match        *://*/*
 // @grant        GM_getValue
@@ -85,6 +85,7 @@
   const HOST_FLAG = 'data-pi-wp-host';
   const MAX_DEPTH = 8;
   const HOTKEY = { code: 'KeyP', alt: true, shift: true };
+  const GM_BROKER = 'wp.brokerUrl';        // broker WS URL override (settings modal)
   const GM_TARGET = 'wp.lastTarget';       // last used local target name
   const GM_FPROPS = 'wp.frameworkProps';   // framework.inspect props/state opt-in (default off)
   const DEFAULT_BROKER_URL = 'ws://127.0.0.1:4719';
