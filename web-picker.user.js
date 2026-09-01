@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PI Web Picker
 // @namespace    pi.dotfiles
-// @version      1.3.0
-// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.3：连接失败提示指向连接设置；broker 端口 fallback 后改这里）
+// @version      1.4.0
+// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.4：target 选择改为可搜索下拉；broker 端口 fallback 后改这里）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -27,8 +27,9 @@
  *     the settings modal (GM `wp.brokerUrl`); hello on open → welcome → green
  *     status dot on the fab. Reconnect is NEVER automatic. Connection failure
  *     toasts the URL and points at the settings pill.
- *   - send box at the bottom of the note panel: prompt textarea + target <select>
- *     fed by targets.list → targets.result (label `name — cwd · status`), last-used
+ *   - send box at the bottom of the note panel: prompt textarea + searchable
+ *     target combobox fed by targets.list → targets.result (row = name +
+ *     `cwd · status`; type-to-filter, ↑↓/Enter 或点击选择), last-used
  *     target persisted in GM `wp.lastTarget`, ⟳ manual refresh.
  *   - annotation.submit (picks reuse the payloadFor schema verbatim) → ack toasts
  *     the handoff_id and clears the local batch; error frames toast code + message.
@@ -350,16 +351,29 @@
         outline: none; transition: border-color .15s ease, box-shadow .15s ease;
       }
       textarea { resize: vertical; min-height: 44px; }
-      textarea:focus, input:focus, select:focus {
+      textarea:focus, input:focus {
         border-color: var(--wp-accent); box-shadow: 0 0 0 3px rgba(79,140,255,.14);
       }
-      input, select { font-family: var(--wp-mono); font-size: 12px; }
-      select {
-        appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 28px;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-        background-repeat: no-repeat; background-position: right 9px center; background-size: 12px;
-      }
-      select:disabled { background-color: var(--wp-soft); color: var(--wp-muted); cursor: not-allowed; }
+      input { font-family: var(--wp-mono); font-size: 12px; }
+      input:disabled { background: var(--wp-soft); color: var(--wp-muted); cursor: not-allowed; }
+      /* ---- target combobox（可搜索下拉，取代原生 <select>）---- */
+      #tcombo { position: relative; flex: 1; min-width: 0; }
+      #tdrop { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
+        background: #fff; border: 1px solid var(--wp-line); border-radius: 10px;
+        box-shadow: var(--wp-shadow); padding: 4px; max-height: 224px; overflow-y: auto; display: none; }
+      #tdrop.open { display: block; }
+      #tdrop::-webkit-scrollbar { width: 8px; }
+      #tdrop::-webkit-scrollbar-thumb { background: #dde4ec; border-radius: 4px; }
+      #tdrop .titem { padding: 6px 9px; border-radius: 7px; cursor: pointer; }
+      #tdrop .titem.hl { background: #eaf1ff; }
+      #tdrop .tname { font: 600 12px/1.45 var(--wp-mono); color: var(--wp-ink); word-break: break-all; }
+      #tdrop .tname b, #tdrop .tsub b { color: var(--wp-accent-deep); }
+      #tdrop .tsub { font: 10.5px/1.45 var(--wp-mono); color: var(--wp-muted);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #tdrop .tick { color: var(--wp-green); font-weight: 700; }
+      #tdrop .tempty { padding: 12px 8px; text-align: center; color: #94a3b8; font-size: 12px; }
+      #tdrop .thint { margin-top: 3px; padding: 5px 9px 2px; border-top: 1px solid var(--wp-line);
+        color: #94a3b8; font-size: 10px; }
       button { font: 600 12px var(--wp-font); border: none; border-radius: 8px; cursor: pointer;
         padding: 7px 14px; transition: background .15s ease, box-shadow .15s ease, transform .05s ease; }
       button:active { transform: translateY(1px); }
@@ -371,10 +385,12 @@
       button.icon { padding: 7px 9px; font-size: 13px; line-height: 1; }
       button.icon:disabled { opacity: .45; cursor: not-allowed; transform: none; }
       /* ---- panel ---- */
+      /* 不设 overflow:hidden —— sendbox 里的 target 下拉需要向上溢出面板显示 */
       #panel { position: fixed; top: 60px; right: 16px; width: 348px; max-height: 80vh;
-        display: none; flex-direction: column; overflow: hidden; }
+        display: none; flex-direction: column; }
       #panel .ph { display: flex; align-items: center; gap: 8px; padding: 11px 14px;
-        background: var(--wp-soft); border-bottom: 1px solid var(--wp-line); user-select: none; }
+        background: var(--wp-soft); border-bottom: 1px solid var(--wp-line); user-select: none;
+        border-radius: var(--wp-radius) var(--wp-radius) 0 0; }
       #panel .ph b { flex: 1; font-size: 13px; font-weight: 600; }
       #panel .ph .cnt2 { color: var(--wp-muted); font-size: 11px; }
       #panel .ph button { background: transparent; color: var(--wp-muted); padding: 3px 8px; border-radius: 6px; }
@@ -404,7 +420,6 @@
       #sendbox .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); letter-spacing: .02em; }
       #sendbox textarea { background: #fff; }
       #sendbox .trow { display: flex; gap: 6px; align-items: center; }
-      #sendbox .trow select { flex: 1; }
       #sendbox .srow { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
       #connstate { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500;
         color: var(--wp-muted); flex: 1; cursor: pointer; user-select: none; white-space: nowrap; }
@@ -469,7 +484,10 @@
         <textarea id="prompt" placeholder="要让 agent 做什么？如：把这两个按钮合并成一个"></textarea>
         <div class="trow">
           <span class="lbl">目标</span>
-          <select id="target"></select>
+          <div id="tcombo">
+            <input id="tinput" placeholder="未连接 broker" autocomplete="off" spellcheck="false" />
+            <div id="tdrop"></div>
+          </div>
           <button class="ghost icon" id="trefresh" title="刷新 target 列表">⟳</button>
         </div>
         <div class="srow">
@@ -514,7 +532,8 @@
         elFab = $('fab'), elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
         elPanel = $('panel'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
-        elPrompt = $('prompt'), elTarget = $('target'), elTRefresh = $('trefresh'),
+        elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
+        elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
         elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'),
@@ -773,9 +792,9 @@
     panelOpen = true;
     renderPanel();
     elPanel.style.display = 'flex';
-    if (wsState === 'on') refreshTargets(); else renderTargetSelect();
+    if (wsState === 'on') refreshTargets(); else renderTargetCombo();
   }
-  function closePanel() { panelOpen = false; elPanel.style.display = 'none'; }
+  function closePanel() { panelOpen = false; closeDrop(); elPanel.style.display = 'none'; }
   function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
   elPclose.addEventListener('click', closePanel);
   elPlist.addEventListener('change', (e) => {
@@ -827,7 +846,7 @@
     elConnText.textContent = s === 'on' ? 'broker 已连接'
       : s === 'connecting' ? '连接中…'
       : '未连接 · 点击设置';
-    if (s !== 'on') { targets = []; renderTargetSelect(); }
+    if (s !== 'on') { targets = []; renderTargetCombo(); }
   }
 
   function connectBroker() {
@@ -915,7 +934,7 @@
     });
   }
 
-  // ---------- targets dropdown (targets.list → targets.result) ----------
+  // ---------- targets (targets.list → targets.result) + searchable combobox ----------
   function requestTargets() {
     return new Promise((resolve) => {
       if (wsState !== 'on') { resolve([]); return; }
@@ -929,34 +948,127 @@
   }
   async function refreshTargets() {
     targets = await requestTargets();
-    renderTargetSelect();
-  }
-  function renderTargetSelect() {
-    const last = gm.get(GM_TARGET, '');
-    elTarget.innerHTML = '';
-    if (wsState !== 'on') {
-      elTarget.appendChild(new Option('（未连接 broker）', ''));
-      elTarget.disabled = true;
-      return;
-    }
-    if (!targets.length) {
-      elTarget.appendChild(new Option('（无活跃 local session）', ''));
-      elTarget.disabled = true;
-      return;
-    }
-    elTarget.disabled = false;
-    for (const t of targets) {
-      const label = t.name + ' — ' + (t.cwd || '?') + (t.status ? ' · ' + t.status : '');
-      const o = new Option(label, t.name);
-      if (t.name === last) o.selected = true;
-      elTarget.appendChild(o);
-    }
+    renderTargetCombo();
   }
 
-  elTarget.addEventListener('change', () => {
-    const v = elTarget.value.trim();
-    if (v) gm.set(GM_TARGET, v);
+  // ---------- target combobox — 可搜索下拉（目标一多，原生 <select> 翻起来太麻烦） ----------
+  // focus/点击展开、输入即按 name/cwd/status 过滤、↑↓ 高亮、Enter 或点击选中、
+  // Esc / 点击外部收起；选中即写回 GM wp.lastTarget，与旧 <select> 的 change 语义一致。
+  let comboSel = '';       // 当前选中的 target name（'' = 无）
+  let comboFilter = '';    // 下拉展开期间的过滤词
+  let comboHl = 0;         // 过滤结果中的高亮下标
+  let comboOpen = false;
+
+  function comboList() {
+    const q = comboFilter.trim().toLowerCase();
+    if (!q) return targets.slice();
+    return targets.filter((t) =>
+      ((t.name || '') + ' ' + (t.cwd || '') + ' ' + (t.status || '')).toLowerCase().includes(q));
+  }
+  function markMatch(text, q) {
+    const s = String(text == null ? '' : text);
+    const i = q ? s.toLowerCase().indexOf(q.toLowerCase()) : -1;
+    if (i < 0) return escapeHtml(s);
+    return escapeHtml(s.slice(0, i)) + '<b>' + escapeHtml(s.slice(i, i + q.length)) + '</b>' +
+      escapeHtml(s.slice(i + q.length));
+  }
+  function renderDrop() {
+    if (!targets.length) { elTDrop.innerHTML = '<div class="tempty">（无活跃 local session）</div>'; return; }
+    const list = comboList();
+    if (!list.length) { elTDrop.innerHTML = '<div class="tempty">无匹配目标</div>'; return; }
+    if (comboHl >= list.length) comboHl = list.length - 1;
+    if (comboHl < 0) comboHl = 0;
+    const q = comboFilter.trim();
+    elTDrop.innerHTML = list.map((t, i) => {
+      const sub = (t.cwd || '?') + (t.status ? ' · ' + t.status : '');
+      return '<div class="titem' + (i === comboHl ? ' hl' : '') + '" data-name="' + escapeHtml(t.name) + '">' +
+        '<div class="tname">' + (q ? markMatch(t.name, q) : escapeHtml(t.name)) +
+          (t.name === comboSel ? ' <span class="tick">✓</span>' : '') + '</div>' +
+        '<div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + '</div>' +
+      '</div>';
+    }).join('') + '<div class="thint">输入过滤 · ↑↓ 选择 · Enter 确认 · Esc 关闭</div>';
+    const hl = elTDrop.querySelector('.titem.hl');     // 键盘移动时保持高亮行可见
+    if (hl) {
+      if (hl.offsetTop < elTDrop.scrollTop) elTDrop.scrollTop = hl.offsetTop;
+      else if (hl.offsetTop + hl.offsetHeight > elTDrop.scrollTop + elTDrop.clientHeight)
+        elTDrop.scrollTop = hl.offsetTop + hl.offsetHeight - elTDrop.clientHeight;
+    }
+  }
+  function openDrop(selectAll) {
+    if (elTInput.disabled || comboOpen) return;
+    comboOpen = true;
+    comboFilter = '';
+    comboHl = Math.max(0, targets.findIndex((t) => t.name === comboSel));
+    elTDrop.classList.add('open');
+    renderDrop();
+    if (selectAll) setTimeout(() => elTInput.select(), 0);  // 全选现有文本：直接输入即开始过滤
+  }
+  function closeDrop() {
+    if (!comboOpen) return;
+    comboOpen = false;
+    elTDrop.classList.remove('open');
+    elTInput.value = comboSel;          // 还原为已选目标的展示
+  }
+  function pickTarget(name) {
+    if (!name) return;
+    comboSel = name;
+    gm.set(GM_TARGET, name);
+    closeDrop();
+    elTInput.blur();
+    toast('目标已切换：' + name);
+  }
+  function renderTargetCombo() {
+    const last = gm.get(GM_TARGET, '');
+    comboSel = '';
+    elTInput.disabled = true;
+    elTInput.value = '';
+    elTInput.placeholder = wsState !== 'on' ? '未连接 broker' : '无活跃 local session';
+    closeDrop();
+    if (wsState !== 'on' || !targets.length) return;
+    elTInput.disabled = false;
+    comboSel = targets.some((t) => t.name === last) ? last : targets[0].name;
+    if (comboOpen) renderDrop(); else elTInput.value = comboSel;
+  }
+
+  elTInput.addEventListener('focus', () => openDrop(true));
+  elTInput.addEventListener('input', () => {
+    if (!comboOpen) openDrop(false);
+    comboFilter = elTInput.value;
+    comboHl = 0;
+    renderDrop();
   });
+  elTInput.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;   // IME 组字中：交给输入法
+    if (!comboOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') { e.preventDefault(); openDrop(true); }
+      return;
+    }
+    const list = comboList();
+    if (e.key === 'ArrowDown') { e.preventDefault(); comboHl = Math.min(list.length - 1, comboHl + 1); renderDrop(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); comboHl = Math.max(0, comboHl - 1); renderDrop(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (list[comboHl]) pickTarget(list[comboHl].name); }
+  });
+  elTDrop.addEventListener('mousemove', (e) => {
+    const it = e.target && e.target.closest ? e.target.closest('.titem') : null;
+    if (!it) return;
+    const items = elTDrop.querySelectorAll('.titem');
+    const i = Array.prototype.indexOf.call(items, it);
+    if (i < 0 || i === comboHl) return;
+    if (items[comboHl]) items[comboHl].classList.remove('hl');
+    it.classList.add('hl');
+    comboHl = i;
+  });
+  elTDrop.addEventListener('click', (e) => {
+    const it = e.target && e.target.closest ? e.target.closest('.titem') : null;
+    if (it) pickTarget(it.getAttribute('data-name') || '');
+  });
+  // 点击 combo 之外收起下拉——不走 blur：blur 会在点击选项命中前抢先收起下拉
+  window.addEventListener('pointerdown', (e) => {
+    if (!comboOpen) return;
+    const path = e.composedPath ? e.composedPath() : [];
+    if (path.indexOf(elTCombo) >= 0) return;
+    closeDrop();
+  }, true);
   elTRefresh.addEventListener('click', () => {
     if (wsState !== 'on') { openSettings(); return; }
     refreshTargets().then(() =>
@@ -965,7 +1077,7 @@
 
   elSend.addEventListener('click', async () => {
     const prompt = elPrompt.value.trim();
-    const target = elTarget.value.trim();
+    const target = comboSel;
     if (!prompt) { toast('先写 prompt 指令'); elPrompt.focus(); return; }
     if (!target) {
       toast(wsState !== 'on' ? '先连接 broker（点击左下状态）' : '没有可用目标：先启动 pi session 的 xfer listen');
@@ -1079,6 +1191,10 @@
   }, true);
 
   document.addEventListener('keydown', (e) => {
+    // Esc 优先收起 target 下拉（capture 阶段拦截，避免顺带把整个面板也关了）
+    if (comboOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault(); e.stopPropagation(); closeDrop(); return;
+    }
     if (panelOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault(); closePanel(); return;
     }
@@ -1116,7 +1232,7 @@
   window.addEventListener('resize', () => { if (pickMode) refresh(); }, true);
 
   refreshCount();
-  renderTargetSelect();
+  renderTargetCombo();
   debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ' + location.host);
 
   // ---------- programmatic API (DevTools console) ----------
