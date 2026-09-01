@@ -5,8 +5,13 @@ page side:
 
 - **Pick / note core** — hover-pick elements, batch notes, per-item delete
   (the old CDP-injected flow, rewritten for the broker).
-- **Send flow** — a prompt plus the picked annotations, delivered as an xfer
-  handoff into a local pi session (`annotation.submit` → `ack`).
+- **Shift group (v1.5)** — ⇧Enter / ⇧click aggregates elements into a pending
+  group (amber dashed marks); Enter opens one shared note for the whole group.
+  Members land in the handoff as linked records (optional `group` id field).
+- **Send flow** — a prompt (optional — leaving it empty sends a default that
+  responds to each pick's note, or explains the element's rendering) plus the
+  picked annotations, delivered as an xfer handoff into a local pi session
+  (`annotation.submit` → `ack`).
 - **Reverse channel** — agent questions arrive as `page.request` frames and
   surface as an in-page ask modal; your answer goes back as `page.response`.
 
@@ -35,6 +40,9 @@ shapes below match `mock-broker.mjs`, `.pi/wayfinder/prototypes/`).
 |----------|--------|
 | ⇧⌥P | enter / exit pick mode |
 | ⇧⌥L | toggle the note panel (send box inside) |
+| ⇧Enter / ⇧click (pick mode) | add / remove the highlighted element to the pending group |
+| Enter (with a pending group) | open the group note card → one shared note for all members |
+| Enter (no pending group) | pin the highlighted element for a solo note, as before |
 
 The fab's top-left dot is the broker status: grey = off, amber = connecting,
 green = connected.
@@ -67,9 +75,11 @@ channel round trip, the prototype broker is the working oracle today:
 1. **Connect** — grey dot → 连接设置… → confirm `ws://127.0.0.1:4719` →
    保存并连接. The dot turns green ("broker 已连接").
 2. **Pick** — ⇧⌥P, hover elements, ⇧⌥L for the panel, edit / delete notes.
-3. **Send** — pick a few elements, write a prompt, choose the target session in
-   the dropdown (⟳ refreshes), 发送 → the toast shows the `handoff_id` and the
-   target session receives a `📨 [Xfer from web-picker]` handoff.
+3. **Send** — pick a few elements, write a prompt (or leave it empty: the agent
+   gets a default instruction to respond to each pick's note / explain its
+   rendering), choose the target session in the dropdown (⟳ refreshes), 发送 →
+   the toast shows the `handoff_id` and the target session receives a
+   `📨 [Xfer from web-picker]` handoff.
 4. **Ask-page round trip** — with the mock broker, type `ask <question>` on its
    stdin → the page shows the ask modal (question + from/handoff meta) → answer
    and press Enter (or 回复) → the broker prints `[page.response …] ok=true`

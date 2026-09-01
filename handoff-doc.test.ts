@@ -131,6 +131,20 @@ describe("renderHandoffDoc", () => {
     assert.equal(noSource.includes("### #legacy-banner\n\n- xpath: //*[@id=\"legacy-banner\"]"), true);
   });
 
+  it("renders the shift-group id only on records that carry one (web-picker v1.5)", () => {
+    const grouped: HandoffPick = { ...PICK_WITH_SOURCE, note: "these two buttons become one", group: "g1a2b" };
+    const doc = renderHandoffDoc(input({ picks: [grouped, PICK_WITHOUT_SOURCE] }));
+    assert.equal(doc.includes("- group: g1a2b\n"), true, "expected the group id on the member pick");
+    // Solo picks stay group-free: exactly one `- group:` line in the whole doc.
+    assert.equal(doc.indexOf("- group:"), doc.lastIndexOf("- group:"));
+    // Order within a section: note → group → source.
+    const section = doc.slice(doc.indexOf("### div.card > button.submit"), doc.indexOf("### #legacy-banner"));
+    assert.ok(
+      section.indexOf("- note:") < section.indexOf("- group:") && section.indexOf("- group:") < section.indexOf("- source:"),
+      `group line must sit between note and source: ${JSON.stringify(section)}`,
+    );
+  });
+
   it("ends with the from/handoff_id footer", () => {
     const doc = renderHandoffDoc(input({ msgId: "kx9-abc123" }));
     assert.equal(doc.endsWith("---\n\nfrom: web-picker\nhandoff_id: kx9-abc123\n"), true);

@@ -6,7 +6,9 @@
  * Picks follow the picker.js `payloadFor()` schema (protocol v0):
  * `{selector, xpath, tagName, textPreview, rect, note, ts, url, source}` —
  * only the fields the ticket names for the doc are rendered; `tagName`, per-pick
- * `ts`/`url` ride along in the type for schema fidelity.
+ * `ts`/`url` ride along in the type for schema fidelity. web-picker v1.5 adds an
+ * optional `group` id that links all picks submitted as one shift-group; it is
+ * rendered on the members that carry it and stays absent on solo picks.
  */
 
 /** `page` block of the `annotation.submit` payload. */
@@ -33,6 +35,8 @@ export interface HandoffPick {
   textPreview?: string;
   rect: { x: number; y: number; w: number; h: number };
   note?: string;
+  /** web-picker v1.5 shift-group: shared id on every member of one group (absent on solo picks). */
+  group?: string;
   ts?: number;
   url?: string;
   source?: HandoffPickSource | null;
@@ -80,6 +84,7 @@ function pickSection(pick: HandoffPick): string[] {
     field("rect", `x=${pick.rect.x} y=${pick.rect.y} w=${pick.rect.w} h=${pick.rect.h}`),
     field("note", pick.note ?? ""),
   ];
+  if (pick.group) lines.push(field("group", pick.group));
   if (pick.source) lines.push(field("source", `${pick.source.file}:${pick.source.line}`));
   lines.push("");
   return lines;

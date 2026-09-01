@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PI Web Picker
 // @namespace    pi.dotfiles
-// @version      1.4.0
-// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.4：target 选择改为可搜索下拉；broker 端口 fallback 后改这里）
+// @version      1.5.0
+// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.5：Shift 聚合多元素成组、整组共享一条备注；broker 端口 fallback 后改这里）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -20,6 +20,13 @@
  * note card, note panel, per-item delete, hotkeys ⇧⌥P (pick) / ⇧⌥L (panel), and
  * framework source extraction (React/Vue dev builds → source file:line).
  *
+ * Shift group (new in v1.5): ⇧Enter / ⇧click toggles the highlighted element into
+ * a pending group (amber dashed marks, in-memory only — DOM refs can't persist);
+ * Enter with a pending group opens the group note card → one shared note → every
+ * member submits as a regular payloadFor record plus an optional `group` id string
+ * linking members (solo picks never carry `group`, so the wire schema stays
+ * backward compatible). Panel note edits sync across members of the same group.
+ *
  * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
  *   - manual connect only: ws://127.0.0.1:4719/ws by default; broker URL (incl.
  *     the port — relevant since the broker falls back to an ephemeral port when
@@ -27,7 +34,9 @@
  *     the settings modal (GM `wp.brokerUrl`); hello on open → welcome → green
  *     status dot on the fab. Reconnect is NEVER automatic. Connection failure
  *     toasts the URL and points at the settings pill.
- *   - send box at the bottom of the note panel: prompt textarea + searchable
+ *   - send box at the bottom of the note panel: prompt textarea (optional —
+ *     empty sends DEFAULT_PROMPT: respond to each pick's note, or explain the
+ *     element's rendering) + searchable
  *     target combobox fed by targets.list → targets.result (row = name +
  *     `cwd · status`; type-to-filter, ↑↓/Enter 或点击选择), last-used
  *     target persisted in GM `wp.lastTarget`, ⟳ manual refresh.
@@ -55,7 +64,8 @@
  *   1. Open the Tampermonkey Dashboard → "+" (Create a new script).
  *   2. Replace the editor content with this entire file and save (Ctrl/Cmd+S).
  *   3. Reload any page: the round fab appears near the bottom-right corner.
- *      ⇧⌥P = enter/exit pick mode, ⇧⌥L = toggle the note panel (send box inside).
+ *      ⇧⌥P = enter/exit pick mode, ⇧⌥L = toggle the note panel (send box inside);
+ *      in pick mode ⇧Enter/⇧click add elements to a group, Enter submits its note.
  */
 (() => {
   'use strict';
@@ -293,6 +303,13 @@
       #hl { position: fixed; margin: 0; padding: 0; border: 2px solid var(--wp-accent); background: rgba(79,140,255,.12);
         border-radius: 3px; pointer-events: none; transition: all .04s linear; display: none; }
       #hl.pin { border-color: #ff5a5a; background: rgba(255,90,90,.14); }
+      /* ---- pending group marks (shift-group) ---- */
+      #gwrap { position: fixed; inset: 0; pointer-events: none; display: none; }
+      .gmark { position: fixed; margin: 0; border: 2px dashed var(--wp-amber);
+        background: rgba(245,158,11,.10); border-radius: 3px; pointer-events: none; }
+      .gmark .gi { position: absolute; top: -16px; left: -2px; background: var(--wp-amber);
+        color: #fff; font: 700 10px/16px var(--wp-mono); padding: 0 5px;
+        border-radius: 4px 4px 4px 0; white-space: nowrap; }
       #badge { position: fixed; top: 0; left: 0; transform: translate(-50%, -150%);
         background: var(--wp-dark); color: #fff; font: 600 11px/1.4 var(--wp-font);
         padding: 4px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; display: none;
@@ -314,6 +331,7 @@
         border-radius: 4px; padding: 1px 5px; font: 10.5px var(--wp-mono); color: #e2e8f0; }
       #bar .muted { color: #94a3b8; display: inline-flex; gap: 3px; align-items: center; }
       #bar #fz.on kbd { background: #0c4a6e; border-color: #0369a1; color: #e0f2fe; }
+      #bar #gh.on kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
       /* ---- fab ---- */
       #fab { position: fixed; width: 46px; height: 46px; border-radius: 14px;
         border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, #1b2230, #12161f);
@@ -342,7 +360,7 @@
       #card { position: fixed; width: 300px; padding: 14px; display: none; }
       #card .sel { font: 11px/1.5 var(--wp-mono); color: #475569; background: var(--wp-soft);
         border: 1px solid var(--wp-line); padding: 6px 8px; border-radius: 8px;
-        word-break: break-all; margin-bottom: 10px; max-height: 70px; overflow: auto; }
+        word-break: break-all; white-space: pre-wrap; margin-bottom: 10px; max-height: 70px; overflow: auto; }
       #card .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
       /* ---- shared form controls ---- */
       textarea, input, select {
@@ -407,6 +425,9 @@
         border: 1px solid var(--wp-line); padding: 4px 7px; border-radius: 6px;
         word-break: break-all; max-height: 44px; overflow: auto; }
       #plist .item .psrc { color: #059669; font: 10px/1.5 var(--wp-mono); margin-top: 4px; word-break: break-all; }
+      #plist .item .pgroup { display: inline-block; margin-top: 4px; padding: 1px 7px;
+        background: #fffbeb; border: 1px solid #fde68a; border-radius: 999px;
+        color: #b45309; font: 600 10px/1.6 var(--wp-mono); }
       #plist .item .pprev { color: #94a3b8; font-size: 11px; margin: 4px 0; overflow: hidden;
         text-overflow: ellipsis; white-space: nowrap; }
       #plist .item textarea { min-height: 34px; font-size: 12px; padding: 5px 8px; }
@@ -459,12 +480,14 @@
       #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     </style>
     <div id="hl"></div>
+    <div id="gwrap"></div>
     <div id="badge"></div>
     <div id="info"></div>
     <div id="bar"><b>PICK</b>
       <span class="muted"><kbd>[</kbd><kbd>]</kbd>切层</span>
       <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>跳层</span>
       <span class="muted"><kbd>Enter</kbd>选中</span>
+      <span class="muted" id="gh"><kbd>⇧Enter</kbd>加组</span>
       <span class="muted" id="fz"><kbd>F</kbd>冻结</span>
       <span class="muted"><kbd>Esc</kbd>退出</span>
     </div>
@@ -480,8 +503,8 @@
       <div class="ph"><b>已选备注</b><span class="cnt2" id="pcount"></span><button id="pclose" title="关闭 Esc">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
-        <div class="lbl">发送到 agent（prompt 指令）</div>
-        <textarea id="prompt" placeholder="要让 agent 做什么？如：把这两个按钮合并成一个"></textarea>
+        <div class="lbl">发送到 agent（prompt 指令，可留空）</div>
+        <textarea id="prompt" placeholder="要让 agent 做什么？留空 = 回应各标注的 note / 解释元素渲染逻辑"></textarea>
         <div class="trow">
           <span class="lbl">目标</span>
           <div id="tcombo">
@@ -528,7 +551,7 @@
   `;
 
   const $ = (id) => root.getElementById(id);
-  const elHL = $('hl'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'),
+  const elHL = $('hl'), elGWrap = $('gwrap'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
         elFab = $('fab'), elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
         elPanel = $('panel'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
@@ -546,6 +569,10 @@
   let idx = 0;
   let pinned = null;
   let frozen = true;
+  // v1.5 shift-group：待处理组合（元素引用，按加入顺序）。仅存内存——DOM 引用无法
+  // 进 sessionStorage；提交后随批次落库，退出拾取模式不清空以便误退后能恢复。
+  let groupEls = [];
+  let groupCard = false;               // note card 当前是否为组备注模式
   let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
   try {
     const saved = sessionStorage.getItem(KEY_POS);
@@ -609,10 +636,12 @@
     elBar.style.display = on ? 'flex' : 'none';
     elFab.style.display = on ? 'none' : 'block';
     document.body.style.cursor = on ? 'crosshair' : '';
-    if (on) { frozen = true; closePanel(); }
+    if (on) { frozen = true; closePanel(); renderGroupMarks(); }
     else {
       pinned = null; frozen = false;
+      closeGroupCard();
       elCard.style.display = 'none'; elHL.style.display = 'none'; elBadge.style.display = 'none'; elInfo.style.display = 'none';
+      renderGroupMarks();           // pickMode 已为 false → 隐藏 marks（组合本身保留在内存）
     }
     updateFreezeUI();
     refreshCount();
@@ -670,7 +699,7 @@
   function moveCapture(e) {
     if (!pickMode) return;
     if (frozen) { e.stopPropagation(); e.preventDefault(); }
-    if (pinned || isOurUI(e)) return;
+    if (pinned || groupCard || isOurUI(e)) return;   // 卡片打开期间高亮冻结
     stack = stackAt(e.clientX, e.clientY);
     idx = 0;
     refresh();
@@ -685,7 +714,8 @@
     const btn0 = e.button === undefined || e.button === 0;
     if (e.type === 'pointerdown' || e.type === 'mousedown') {
       e.stopPropagation(); e.preventDefault();
-      if (btn0 && !pinned) pinAt(e.clientX, e.clientY);
+      if (!btn0 || groupCard) return;             // 组备注卡片打开期间吞掉页面点击
+      if (!pinned) { if (e.shiftKey) groupAt(e.clientX, e.clientY); else pinAt(e.clientX, e.clientY); }
       return;
     }
     e.stopPropagation(); e.preventDefault();
@@ -749,8 +779,87 @@
     pin();
   }
 
+  // ---------- shift group (v1.5)：⇧Enter/⇧click 聚合 → 组 mark → 整组一条 note ----------
+  function toggleGroup(el) {
+    if (!el) return;
+    const i = groupEls.indexOf(el);
+    if (i >= 0) { groupEls.splice(i, 1); toast('已移出组合（剩 ' + groupEls.length + ' 项）'); }
+    else { groupEls.push(el); toast('已加入组合（共 ' + groupEls.length + ' 项）'); }
+    renderGroupMarks();
+    updateGroupUI();
+  }
+  function groupAt(x, y) {
+    const st = stackAt(x, y);
+    if (!st.length) return;
+    stack = st;
+    idx = 0;
+    toggleGroup(st[0]);
+  }
+  function renderGroupMarks() {
+    elGWrap.innerHTML = '';
+    if (!pickMode || !groupEls.length) { elGWrap.style.display = 'none'; return; }
+    elGWrap.style.display = 'block';
+    groupEls.forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) return;          // 元素已随页面变化消失
+      const m = document.createElement('div');
+      m.className = 'gmark';
+      Object.assign(m.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+      const tag = document.createElement('span');
+      tag.className = 'gi';
+      tag.textContent = String(i + 1);
+      m.appendChild(tag);
+      elGWrap.appendChild(m);
+    });
+  }
+  function updateGroupUI() {
+    const n = groupEls.length;
+    elGH.classList.toggle('on', n > 0);
+    elGH.innerHTML = '<kbd>⇧Enter</kbd>加组' +
+      (n ? ' · <kbd>Enter</kbd>组备注(' + n + ')' : '');
+  }
+  function openGroupCard() {
+    if (!groupEls.length || pinned) return;
+    groupCard = true;
+    const r = groupEls[0].getBoundingClientRect();
+    let left = r.right + 10;
+    if (left + 300 > window.innerWidth) left = Math.max(8, r.left - 310);
+    let top = r.top;
+    if (top + 240 > window.innerHeight) top = Math.max(8, window.innerHeight - 250);
+    elSel.textContent = groupEls.map((el) => cssPath(el)).join('\n');
+    elTxt.value = '';
+    elTxt.placeholder = '组备注（可选，整组共用这一条）';
+    elOk.textContent = '✓ 提交 ' + groupEls.length + ' 项 Enter';
+    Object.assign(elCard.style, { display: 'block', left: left + 'px', top: top + 'px' });
+    setTimeout(() => elTxt.focus(), 0);
+  }
+  function closeGroupCard() {
+    if (!groupCard) return;
+    groupCard = false;
+    elCard.style.display = 'none';
+    elTxt.placeholder = '备注（可选，留空直接回车提交）';
+    elOk.textContent = '✓ 确认 Enter';
+  }
+  function submitGroup() {
+    if (!groupCard || !groupEls.length) return;
+    const note = elTxt.value.trim();
+    const gid = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    const b = loadBatch();
+    groupEls.forEach((el) => b.push(Object.assign(payloadFor(el, note), { group: gid })));
+    saveBatch(b);
+    refreshCount();
+    const n = groupEls.length;
+    groupEls = [];
+    renderGroupMarks();
+    updateGroupUI();
+    closeGroupCard();
+    toast('已选中 ' + n + ' 项 · 组 ' + gid);
+  }
+
   // payload schema is the v0 wire format — the broker revision consumes these
-  // records verbatim, so field names/shapes here must stay stable.
+  // records verbatim, so field names/shapes here must stay stable. v1.5 adds
+  // ONE optional field: `group` (id string) links records submitted as one
+  // shift-group; solo picks never carry it, so old consumers stay unaffected.
   function payloadFor(el, note) {
     const r = el.getBoundingClientRect();
     return {
@@ -780,6 +889,7 @@
     elPlist.innerHTML = b.map((r, i) =>
       '<div class="item" data-i="' + i + '">' +
         '<div class="psel">' + escapeHtml(r.selector) + '</div>' +
+        (r.group ? '<div class="pgroup">⧉ 组 ' + escapeHtml(r.group) + '</div>' : '') +
         (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + ' · ' + r.source.file + ':' + r.source.line) + '</div>' : '') +
         (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + '</div>' : '') +
         '<textarea placeholder="备注…（失焦自动保存）">' + escapeHtml(r.note || '') + '</textarea>' +
@@ -806,8 +916,18 @@
     const i = +item.getAttribute('data-i');
     if (!b[i]) return;
     b[i].note = t.value.trim();
+    let synced = 0;
+    if (b[i].group) {                    // 组共享一条 note：改任一成员即同步整组
+      for (let j = 0; j < b.length; j++) {
+        if (j === i || b[j].group !== b[i].group) continue;
+        b[j].note = b[i].note;
+        synced++;
+        const ta = elPlist.querySelector('.item[data-i="' + j + '"] textarea');
+        if (ta) ta.value = b[i].note;    // DOM 直改，避免整表重渲染抢焦点
+      }
+    }
     saveBatch(b);
-    toast('备注已保存');
+    toast('备注已保存' + (synced ? '（已同步组内 ' + synced + ' 项）' : ''));
   });
   elPlist.addEventListener('click', (e) => {
     const del = e.target && e.target.closest ? e.target.closest('.del') : null;
@@ -918,12 +1038,15 @@
   }
 
   // ---------- send flow (annotation.submit → ack/error) ----------
+  // prompt 可留空：留空时落 DEFAULT_PROMPT——逐条回应标注 note / 解释元素渲染逻辑。
+  // broker 端 v0 校验要求 prompt 非空，所以默认值在这一侧补齐，线上帧始终带具体指令。
+  const DEFAULT_PROMPT = '请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。';
   function submitToAgent(prompt, targetName) {
     return new Promise((resolve) => {
       if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
       const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'submit', resolve });
-      if (!sendFrame(frameSubmit(id, prompt, targetName))) {
+      if (!sendFrame(frameSubmit(id, prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT, targetName))) {
         pending.delete(id);
         resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
         return;
@@ -1076,14 +1199,15 @@
   });
 
   elSend.addEventListener('click', async () => {
-    const prompt = elPrompt.value.trim();
+    const prompt = elPrompt.value.trim();            // 可留空 → submitToAgent 落到 DEFAULT_PROMPT
     const target = comboSel;
-    if (!prompt) { toast('先写 prompt 指令'); elPrompt.focus(); return; }
     if (!target) {
       toast(wsState !== 'on' ? '先连接 broker（点击左下状态）' : '没有可用目标：先启动 pi session 的 xfer listen');
       return;
     }
-    if (!loadBatch().length && !confirm('没有标注任何元素，只发 prompt？')) return;
+    const hasPicks = loadBatch().length > 0;
+    if (!prompt && !hasPicks) { toast('先标注元素或写 prompt'); return; }
+    if (!hasPicks && !confirm('没有标注任何元素，只发 prompt？')) return;
     elSend.disabled = true;
     elSend.textContent = '发送中…';
     const res = await submitToAgent(prompt, target);
@@ -1162,8 +1286,8 @@
   elAskSend.addEventListener('click', replyAsk);
   elAskIgnore.addEventListener('click', dismissAsk);
 
-  elOk.addEventListener('click', submit);
-  elCancel.addEventListener('click', unpin);
+  elOk.addEventListener('click', () => { if (groupCard) submitGroup(); else submit(); });
+  elCancel.addEventListener('click', () => { if (groupCard) closeGroupCard(); else unpin(); });
 
   // ---------- freeze UI / hotkeys ----------
   function updateFreezeUI() {
@@ -1208,6 +1332,16 @@
       }
     }
     if (!pickMode) return;
+    if (groupCard) {
+      if (e.isComposing || e.keyCode === 229) return;
+      const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
+      if (e.key === 'Enter' && firstTarget === elTxt && !e.shiftKey) {
+        e.preventDefault(); submitGroup();
+      } else if (e.key === 'Escape') {
+        closeGroupCard();
+      }
+      return;
+    }
     if (pinned) {
       if (e.isComposing || e.keyCode === 229) return;
       const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
@@ -1218,22 +1352,31 @@
       }
       return;
     }
+    if (e.key === 'Enter' && e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault(); e.stopPropagation();
+      toggleGroup(currentEl());          // ⇧Enter：当前高亮元素加入/移出组合
+      return;
+    }
     switch (e.key) {
       case ']': case 'ArrowDown': e.preventDefault(); shiftLayer(1); break;
       case '[': case 'ArrowUp': e.preventDefault(); shiftLayer(-1); break;
-      case 'Enter': case ' ': e.preventDefault(); pin(); break;
+      case 'Enter': case ' ':
+        e.preventDefault();
+        if (groupEls.length) openGroupCard(); else pin();   // 有待处理组合时 Enter = 组备注
+        break;
       case 'Escape': e.preventDefault(); setActive(false); break;
       default:
         if (/^[1-9]$/.test(e.key)) { e.preventDefault(); idx = Math.min(stack.length - 1, +e.key - 1); refresh(); }
     }
   }, true);
 
-  window.addEventListener('scroll', () => { if (pickMode) refresh(); }, true);
-  window.addEventListener('resize', () => { if (pickMode) refresh(); }, true);
+  window.addEventListener('scroll', () => { if (pickMode) { refresh(); renderGroupMarks(); } }, true);
+  window.addEventListener('resize', () => { if (pickMode) { refresh(); renderGroupMarks(); } }, true);
 
   refreshCount();
+  updateGroupUI();
   renderTargetCombo();
-  debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ' + location.host);
+  debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ' + location.host);
 
   // ---------- programmatic API (DevTools console) ----------
   window.__PI_WP_API__ = {
