@@ -17,8 +17,9 @@ just install-pi    # auto symlink ~/.pi/agent/extensions/xfer → repo folder
 ## Web Picker (page side)
 
 `web-picker.user.js` is the Tampermonkey page side of the broker: pick
-elements, annotate (solo or shift-group), send handoffs, answer ask-page
-questions. Install — open the raw URL in a browser with Tampermonkey enabled;
+elements, annotate (solo or shift-group), send handoffs, and answer the
+agent's read-only page-tool queries (fixed op table — no eval, no modal).
+Install — open the raw URL in a browser with Tampermonkey enabled;
 the `.user.js` suffix triggers the install prompt automatically:
 
 <https://raw.githubusercontent.com/azzgo/dotfiles/main/pi/agent/extensions/xfer/web-picker.user.js>

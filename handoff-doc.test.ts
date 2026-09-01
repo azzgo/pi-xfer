@@ -18,6 +18,7 @@ const PICK_WITH_SOURCE: HandoffPick = {
   textPreview: "Submit form",
   rect: { x: 120, y: 340, w: 96, h: 32 },
   note: "merge with the button above",
+  attributes: { type: "button", "aria-label": "Submit the form", disabled: "" },
   ts: 1725148801000,
   url: "https://example.com/app",
   source: { framework: "react", component: "SubmitButton", file: "src/SubmitButton.tsx", line: 42, column: 6 },
@@ -62,6 +63,7 @@ Merge these two buttons
 
 - xpath: /html/body/div[2]/button
 - text: Submit form
+- attrs: type="button" aria-label="Submit the form" disabled
 - rect: x=120 y=340 w=96 h=32
 - note: merge with the button above
 - source: src/SubmitButton.tsx:42
@@ -75,9 +77,11 @@ Merge these two buttons
 
 ## Follow-up channel
 
-The sending browser tab is still online. Ask it questions via the broker CLI — the command returns a request_id immediately; keep working instead of waiting for the answer:
-\`node broker-main.ts ask-page dotfiles_q1 "<question>"\`
-The answer arrives as an xfer-notify frame pushed to this session, carrying the request_id and the original question (a timeout arrives as a notify frame too — treat the handoff as one-way then). Multiple questions may be issued in parallel.
+The sending browser tab is still online. Collect page data by calling its fixed tool ops via the broker CLI — the command waits and prints the result JSON on stdout:
+\`node broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]\`
+Ops (fixed read-only table): page.info · dom.query {selector, maxCount?, styleProps?} · dom.html {selector?, maxLength?, maxDepth?} · console.logs {lastN?, sinceTs?, level?} · network.log {lastN?, urlFilter?} · framework.inspect {selector, props?, maxDepth?}. Example:
+\`node broker-main.ts page-tool dotfiles_q1 dom.query '{"selector":"button.primary","maxCount":5}'\`
+A timeout or no_tabs exits 1 with an error on stderr — treat the handoff as one-way then. Multiple calls may be issued in parallel.
 
 ---
 
@@ -156,18 +160,18 @@ describe("renderHandoffDoc", () => {
     const lineCount = section.split("\n").length;
     assert.ok(lineCount <= 10, `follow-up section has ${lineCount} lines, expected <= 10`);
     assert.equal(
-      doc.includes('`node broker-main.ts ask-page dotfiles_q1 "<question>"`'),
+      doc.includes('`node broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
       true,
-      "expected the ask-page command example",
+      "expected the page-tool command example",
     );
-    assert.equal(doc.includes("xfer-notify frame pushed to this session"), true);
+    assert.equal(doc.includes("prints the result JSON on stdout"), true);
   });
 
-  it("uses fromTarget in the ask-page example, placeholder when absent", () => {
+  it("uses fromTarget in the page-tool example, placeholder when absent", () => {
     const withTarget = renderHandoffDoc(input({ fromTarget: "session-a" }));
-    assert.equal(withTarget.includes('`node broker-main.ts ask-page session-a "<question>"`'), true);
+    assert.equal(withTarget.includes('`node broker-main.ts page-tool session-a <op> [paramsJSON]`'), true);
     const withoutTarget = renderHandoffDoc(input({ fromTarget: undefined }));
-    assert.equal(withoutTarget.includes('`node broker-main.ts ask-page <session-socket> "<question>"`'), true);
+    assert.equal(withoutTarget.includes('`node broker-main.ts page-tool <session-socket> <op> [paramsJSON]`'), true);
     assert.equal(withoutTarget.includes("undefined"), false);
   });
 

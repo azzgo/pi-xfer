@@ -37,6 +37,8 @@ export interface HandoffPick {
   note?: string;
   /** web-picker v1.5 shift-group: shared id on every member of one group (absent on solo picks). */
   group?: string;
+  /** web-picker v1.6: element attribute key/value pairs (values pre-truncated by the picker). */
+  attributes?: Record<string, string>;
   ts?: number;
   url?: string;
   source?: HandoffPickSource | null;
@@ -50,7 +52,7 @@ export interface RenderHandoffDocInput {
   prompt: string;
   page: HandoffPageInfo;
   picks: readonly HandoffPick[];
-  /** Asking session's xfer name/socket; substituted into the ask-page example when present. */
+  /** Asking session's xfer name/socket; substituted into the page-tool example when present. */
   fromTarget?: string;
 }
 
@@ -64,9 +66,11 @@ function followUpSection(fromTarget: string | undefined): string[] {
   return [
     "## Follow-up channel",
     "",
-    "The sending browser tab is still online. Ask it questions via the broker CLI — the command returns a request_id immediately; keep working instead of waiting for the answer:",
-    `\`node broker-main.ts ask-page ${target} "<question>"\``,
-    "The answer arrives as an xfer-notify frame pushed to this session, carrying the request_id and the original question (a timeout arrives as a notify frame too — treat the handoff as one-way then). Multiple questions may be issued in parallel.",
+    "The sending browser tab is still online. Collect page data by calling its fixed tool ops via the broker CLI — the command waits and prints the result JSON on stdout:",
+    `\`node broker-main.ts page-tool ${target} <op> [paramsJSON]\``,
+    "Ops (fixed read-only table): page.info · dom.query {selector, maxCount?, styleProps?} · dom.html {selector?, maxLength?, maxDepth?} · console.logs {lastN?, sinceTs?, level?} · network.log {lastN?, urlFilter?} · framework.inspect {selector, props?, maxDepth?}. Example:",
+    `\`node broker-main.ts page-tool ${target} dom.query '{"selector":"button.primary","maxCount":5}'\``,
+    "A timeout or no_tabs exits 1 with an error on stderr — treat the handoff as one-way then. Multiple calls may be issued in parallel.",
   ];
 }
 
@@ -75,15 +79,27 @@ function field(name: string, value: string): string {
   return `- ${name}: ${value}`.trimEnd();
 }
 
+/** `attrs` line: `key="value"` pairs (empty values render as bare keys), or null when absent. */
+function attrsField(pick: HandoffPick): string | null {
+  if (!pick.attributes) return null;
+  const entries = Object.entries(pick.attributes).slice(0, 20);
+  if (entries.length === 0) return null;
+  return entries.map(([key, value]) => (value ? `${key}="${value}"` : key)).join(" ");
+}
+
 function pickSection(pick: HandoffPick): string[] {
   const lines = [
     `### ${pick.selector}`,
     "",
     field("xpath", pick.xpath),
     field("text", pick.textPreview ?? ""),
+  ];
+  const attrs = attrsField(pick);
+  if (attrs) lines.push(field("attrs", attrs));
+  lines.push(
     field("rect", `x=${pick.rect.x} y=${pick.rect.y} w=${pick.rect.w} h=${pick.rect.h}`),
     field("note", pick.note ?? ""),
-  ];
+  );
   if (pick.group) lines.push(field("group", pick.group));
   if (pick.source) lines.push(field("source", `${pick.source.file}:${pick.source.line}`));
   lines.push("");

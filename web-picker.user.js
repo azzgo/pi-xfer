@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.5.0
-// @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.5：Shift 聚合多元素成组、整组共享一条备注；broker 端口 fallback 后改这里）
+// @version      1.6.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.6：page.request 改为固定 op 工具通道，console/network 常开捕获，移除 ask 弹窗）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /**
- * Xfer Web Picker — userscript: pick/note core + broker connection + send flow + ask modal.
+ * Xfer Web Picker — userscript: pick/note core + broker connection + send flow + page tools.
  *
  * Pick/note core (unchanged from v1.0.0): Shadow-DOM overlay UI, fab with drag +
  * pick entry, frozen pick mode with layer switching (and 1-9 batch picks), IME-safe
@@ -42,11 +42,14 @@
  *     target persisted in GM `wp.lastTarget`, ⟳ manual refresh.
  *   - annotation.submit (picks reuse the payloadFor schema verbatim) → ack toasts
  *     the handoff_id and clears the local batch; error frames toast code + message.
- *   - reverse channel (v1.2): inbound page.request → centered ask modal (question
- *     text + from/handoff meta + answer textarea); 回复 → page.response{ok:true,
- *     text}, 忽略 / Esc → page.response{ok:false, error:"dismissed"}; IME-safe
- *     Enter submits; ask modal and pick mode are mutually exclusive (opening one
- *     dismisses the other).
+ *   - page tools (v1.6): inbound page.request{tool:{op, params}} runs ONE of the
+ *     fixed read-only ops (page.info / dom.query / dom.html / console.logs /
+ *     network.log / framework.inspect) against this page and replies
+ *     page.response{ok:true, text:JSON}. No free-form eval, no human modal.
+ *     console.* + fetch/XHR captures are always-on ring buffers (200 entries
+ *     each, page-realm best-effort patch) so pre-request history is visible
+ *     to the agent. The v1.2 ask modal is REMOVED — agents confirm with the
+ *     user in their own session, not on the page.
  *   - frames are built only through PROTOCOL constants + frame() builders — the
  *     wire protocol lives in exactly one place, never written inline.
  *
@@ -59,6 +62,8 @@
  *                                   window.__PI_WP_API__.setDebug(true|false))
  *   - wp.brokerUrl  GM storage      broker WS URL override (settings modal)
  *   - wp.lastTarget GM storage      last used local target name (persisted choice)
+ *   - wp.frameworkProps GM storage  framework.inspect props/state opt-in (default off;
+ *                                   settings modal checkbox / __PI_WP_API__)
  *
  * Install (Tampermonkey):
  *   1. Open the Tampermonkey Dashboard → "+" (Create a new script).
@@ -80,9 +85,17 @@
   const HOST_FLAG = 'data-pi-wp-host';
   const MAX_DEPTH = 8;
   const HOTKEY = { code: 'KeyP', alt: true, shift: true };
-  const GM_BROKER = 'wp.brokerUrl';        // broker WS URL override (settings modal)
   const GM_TARGET = 'wp.lastTarget';       // last used local target name
+  const GM_FPROPS = 'wp.frameworkProps';   // framework.inspect props/state opt-in (default off)
   const DEFAULT_BROKER_URL = 'ws://127.0.0.1:4719';
+
+  // page-tool capture/result caps + computed-style defaults (v1.6)
+  const CAPTURE_MAX = 200;                 // ring buffer size for console/network entries
+  const RESULT_MAX_CHARS = 500000;         // page.response text budget (broker frames cap at 1MB)
+  const DEFAULT_STYLE_PROPS = ['display', 'position', 'color', 'background-color', 'font-size',
+    'font-weight', 'font-family', 'line-height', 'text-align', 'overflow', 'z-index', 'opacity',
+    'visibility', 'width', 'height', 'margin', 'padding', 'border', 'border-radius',
+    'flex-direction', 'gap'];
 
   // ---------- wire protocol v0.1 (Ticket 007 + trial amends: no token, targets frames) ----------
   // Every frame carries { v, type }; each request gets exactly one reply (ack | error).
@@ -99,6 +112,16 @@
     KIND_PAGE_REQUEST: 'page.request',
     KIND_PAGE_RESPONSE: 'page.response',
     NS_LOCAL: 'local',
+  };
+
+  // Fixed page-tool op table (v1.6) — the only ops page.request{tool} may invoke.
+  const PAGE_OPS = {
+    INFO: 'page.info',
+    DOM_QUERY: 'dom.query',
+    DOM_HTML: 'dom.html',
+    CONSOLE_LOGS: 'console.logs',
+    NETWORK_LOG: 'network.log',
+    FRAMEWORK_INSPECT: 'framework.inspect',
   };
   function frame(type, extra) { return Object.assign({ v: PROTOCOL.V, type }, extra); }
   function frameHello() {
@@ -352,7 +375,7 @@
       #dot.connecting { background: var(--wp-amber); }
       #dot.on { background: var(--wp-green); box-shadow: 0 0 0 2px #161a21, 0 0 8px rgba(34,197,94,.8); }
       /* ---- floating cards ---- */
-      #card, #panel, #settings, #ask {
+      #card, #panel, #settings {
         background: #fff; border: 1px solid var(--wp-line); border-radius: var(--wp-radius);
         box-shadow: var(--wp-shadow); color: var(--wp-ink);
         font: 13px/1.5 var(--wp-font); z-index: 2147483647; pointer-events: auto;
@@ -456,20 +479,9 @@
       #settings .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); margin: 12px 0 4px;
         letter-spacing: .02em; }
       #settings .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
-      /* ---- ask modal (reverse channel) ---- */
-      #ask { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        width: 420px; max-width: calc(100vw - 32px); padding: 16px; display: none; }
-      #ask b { font-size: 13px; display: block; }
-      #ask .q { font: 13px/1.6 var(--wp-font); background: var(--wp-soft);
-        border: 1px solid var(--wp-line); border-radius: 8px; padding: 10px 12px;
-        margin-top: 8px; max-height: 140px; overflow: auto; white-space: pre-wrap;
-        word-break: break-word; }
-      #ask .meta { font: 10.5px/1.5 var(--wp-mono); color: var(--wp-muted); margin-top: 8px;
-        word-break: break-all; }
-      #ask .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); margin: 12px 0 4px;
-        letter-spacing: .02em; }
-      #ask textarea { min-height: 76px; }
-      #ask .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+      #settings .chk { margin-top: 12px; font-size: 12px; color: var(--wp-muted); display: flex;
+        gap: 7px; align-items: center; cursor: pointer; user-select: none; }
+      #settings input[type="checkbox"] { width: auto; margin: 0; }
       /* ---- toast ---- */
       #toast { position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
         background: rgba(15,21,34,.95); color: #f1f5f9; font: 12.5px var(--wp-font);
@@ -532,20 +544,10 @@
       <b>连接设置</b>
       <div class="lbl">BROKER 地址（WS）</div>
       <input id="sburl" placeholder="ws://127.0.0.1:4719" />
+      <label class="chk"><input type="checkbox" id="sprops" /> framework.inspect 附带组件 props/state（默认关）</label>
       <div class="row">
         <button class="ghost" id="scancel">取消</button>
         <button class="primary" id="ssave">保存并连接</button>
-      </div>
-    </div>
-    <div id="ask">
-      <b>agent 提问</b>
-      <div class="q" id="aqtext"></div>
-      <div class="meta" id="aqmeta"></div>
-      <div class="lbl">回答</div>
-      <textarea id="aqtxt" placeholder="输入回答，Enter 提交（输入法选字按 Enter 不会误发）"></textarea>
-      <div class="row">
-        <button class="ghost" id="aqignore">忽略 Esc</button>
-        <button class="primary" id="aqsend">回复 Enter</button>
       </div>
     </div>
   `;
@@ -559,9 +561,7 @@
         elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
-        elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'),
-        elAsk = $('ask'), elAskQ = $('aqtext'), elAskMeta = $('aqmeta'),
-        elAskTxt = $('aqtxt'), elAskSend = $('aqsend'), elAskIgnore = $('aqignore');
+        elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops');
 
   // ---------- state ----------
   let pickMode = false;
@@ -630,7 +630,6 @@
 
   // ---------- pick mode ----------
   function setActive(on) {
-    if (on) dismissAsk();           // ask modal and pick mode are mutually exclusive
     pickMode = on;
     host.style.pointerEvents = 'none';
     elBar.style.display = on ? 'flex' : 'none';
@@ -857,15 +856,25 @@
   }
 
   // payload schema is the v0 wire format — the broker revision consumes these
-  // records verbatim, so field names/shapes here must stay stable. v1.5 adds
-  // ONE optional field: `group` (id string) links records submitted as one
-  // shift-group; solo picks never carry it, so old consumers stay unaffected.
+  // records verbatim, so field names/shapes here must stay stable. Optional
+  // additions so far: `group` (v1.5, shift-group link id) and `id`/`classes`/
+  // `attributes` (v1.6, richer element context so the agent rarely needs a
+  // follow-up dom.query). Old consumers ignore unknown fields.
   function payloadFor(el, note) {
     const r = el.getBoundingClientRect();
+    const attributes = {};
+    try {
+      for (const a of Array.from(el.attributes).slice(0, 20)) {
+        attributes[a.name] = (a.value || '').slice(0, 120);   // values truncated; boolean attrs stay ""
+      }
+    } catch (e) { /* attribute access is best-effort */ }
     return {
       selector: cssPath(el),
       xpath: xPath(el),
       tagName: el.tagName.toLowerCase(),
+      id: el.id || undefined,
+      classes: Array.from(el.classList || []),
+      attributes,
       textPreview: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
       rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
       note: note || '',
@@ -1009,8 +1018,8 @@
         return;
       }
       if (f.type === PROTOCOL.KIND_PAGE_REQUEST) {
-        debugLog('page.request', f.id, f.text);
-        openAsk(f);
+        debugLog('page.request', f.id, f.tool && f.tool.op);
+        handlePageToolRequest(f);
         return;
       }
     };
@@ -1233,13 +1242,18 @@
     else if (wsState === 'off') openSettings();
   });
 
-  // ---------- settings modal (broker URL only) ----------
+  // ---------- settings modal (broker URL + framework props opt-in) ----------
   function openSettings() {
     elSUrl.value = brokerUrl();
+    elSProps.checked = gm.get(GM_FPROPS, false) === true;
     elSettings.style.display = 'block';
     setTimeout(() => elSUrl.focus(), 0);
   }
   function closeSettings() { elSettings.style.display = 'none'; }
+  elSProps.addEventListener('change', () => {
+    gm.set(GM_FPROPS, elSProps.checked);   // immediate persist — no reconnect needed to toggle
+    toast('framework.inspect props/state ' + (elSProps.checked ? '已开启' : '已关闭'));
+  });
   elSSave.addEventListener('click', () => {
     const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;
     gm.set(GM_BROKER, url);
@@ -1249,42 +1263,371 @@
   });
   elSCancel.addEventListener('click', closeSettings);
 
-  // ---------- reverse channel — page.request → ask modal → page.response ----------
-  // One ask modal at a time; every inbound page.request gets exactly one reply:
-  // 回复 → {ok:true, text}, 忽略/Esc → {ok:false, error:"dismissed"}. Entering
-  // pick mode also dismisses (mutual exclusivity) so no request is left hanging.
-  let askReq = null;               // active inbound request {id, handoff_id, from, text}
-  function openAsk(f) {
-    if (askReq) dismissAsk();      // a newer question supersedes an unanswered one
-    if (pickMode) setActive(false);
-    askReq = { id: f.id, handoff_id: f.handoff_id, from: f.from, text: f.text };
-    elAskQ.textContent = f.text || '(空问题)';
-    elAskMeta.textContent = 'from: ' + (f.from || '?') +
-      (f.handoff_id ? ' · handoff: ' + f.handoff_id : '');
-    elAskTxt.value = '';
-    elAsk.style.display = 'block';
-    setTimeout(() => elAskTxt.focus(), 0);
-    toast('收到 agent 提问');
+  // ---------- page tools — page.request{tool:{op,params}} → fixed read-only op → page.response ----------
+  // No human modal, no free-form eval: the op table below is the entire attack
+  // surface, all handlers are read-only, and every result passes through
+  // jsonSafe (depth/string/array caps) so JSON.stringify can never throw or
+  // blow the 1MB broker frame budget on its own.
+
+  // JSON-safe serialization: drops/flat-marks everything a JSON round trip
+  // cannot carry (functions, symbols, cycles via depth cap, huge strings).
+  const JSON_SAFE_CAPS = { maxDepth: 5, maxStr: 100000, maxArray: 500, maxKeys: 200 };
+  function jsonSafe(value) {
+    let truncated = false;
+    function walk(v, depth) {
+      if (v === null || typeof v === 'number' || typeof v === 'boolean') return v;
+      if (v === undefined) return null;
+      if (typeof v === 'bigint' || typeof v === 'symbol') { truncated = true; return String(v); }
+      if (typeof v === 'function') { truncated = true; return 'ƒ ' + (v.name || 'anonymous'); }
+      if (typeof v === 'string') {
+        if (v.length > JSON_SAFE_CAPS.maxStr) { truncated = true; return v.slice(0, JSON_SAFE_CAPS.maxStr) + '…[truncated]'; }
+        return v;
+      }
+      if (v instanceof Error) {
+        return { name: v.name, message: v.message, stack: walk(v.stack == null ? '' : String(v.stack), depth + 1) };
+      }
+      if (depth >= JSON_SAFE_CAPS.maxDepth) { truncated = true; return '[maxDepth]'; }
+      if (Array.isArray(v)) {
+        if (v.length > JSON_SAFE_CAPS.maxArray) truncated = true;
+        return v.slice(0, JSON_SAFE_CAPS.maxArray).map((x) => walk(x, depth + 1));
+      }
+      if (typeof v !== 'object') { truncated = true; return String(v); }
+      const out = {};
+      let keys;
+      try { keys = Object.keys(v); } catch (e) { truncated = true; return '[uninspectable]'; }
+      if (keys.length > JSON_SAFE_CAPS.maxKeys) truncated = true;
+      for (const k of keys.slice(0, JSON_SAFE_CAPS.maxKeys)) {
+        try { out[k] = walk(v[k], depth + 1); } catch (e) { truncated = true; out[k] = '[error]'; }
+      }
+      return out;
+    }
+    let text;
+    try { text = JSON.stringify(walk(value, 0)); }
+    catch (e) { truncated = true; text = '"[unserializable]"'; }
+    return { text: text === undefined ? 'null' : text, truncated };
   }
-  function replyAsk() {
-    if (!askReq) return;
-    const text = elAskTxt.value.trim();
-    if (!text) { toast('先写回答'); elAskTxt.focus(); return; }
-    const req = askReq;
-    askReq = null;
-    elAsk.style.display = 'none';
-    if (sendFrame(framePageResponse(req.id, true, text))) toast('已回复 agent');
-    else toast('发送失败: broker 未连接');
+
+  // ---------- always-on capture — console.* + fetch/XHR ring buffers ----------
+  // Best-effort patch of the PAGE realm (unsafeWindow when available): sandbox-
+  // realm wrappers never see page-realm calls. Firefox Xray may reject function
+  // patching — everything is try/catch-wrapped; worst case capture is silent.
+  const consoleRing = [];   // {level, text, ts, stack?}
+  const netRing = [];       // {method, url, status, durationMs, ts, error?}
+  function ringPush(ring, rec) {
+    ring.push(rec);
+    if (ring.length > CAPTURE_MAX) ring.splice(0, ring.length - CAPTURE_MAX);
   }
-  function dismissAsk() {
-    if (!askReq) return;
-    const req = askReq;
-    askReq = null;
-    elAsk.style.display = 'none';
-    sendFrame(framePageResponse(req.id, false, 'dismissed'));
+  function captureRealm() {
+    try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; }
+    catch (e) { return window; }
   }
-  elAskSend.addEventListener('click', replyAsk);
-  elAskIgnore.addEventListener('click', dismissAsk);
+  function fmtCaptureArg(v) {
+    try {
+      if (typeof v === 'string') return v;
+      if (v instanceof Error) return v.stack || String(v);
+      const t = jsonSafe(v).text;
+      return t.length > 400 ? t.slice(0, 400) + '…' : t;
+    } catch (e) { return String(v); }
+  }
+  (function installCapture() {
+    const realm = captureRealm();
+    // console.*（跳过我们自己的 [pi.wp] 调试行，避免 debug 模式污染环形缓冲）
+    try {
+      for (const level of ['debug', 'log', 'info', 'warn', 'error']) {
+        const original = realm.console && typeof realm.console[level] === 'function' ? realm.console[level] : null;
+        if (!original) continue;
+        realm.console[level] = function (...args) {
+          try {
+            const first = typeof args[0] === 'string' ? args[0] : '';
+            if (!first.startsWith('[pi.wp]')) {
+              const rec = { level, text: args.map(fmtCaptureArg).join(' '), ts: Date.now() };
+              if (level === 'error' && args[0] instanceof Error && args[0].stack) rec.stack = String(args[0].stack).slice(0, 2000);
+              ringPush(consoleRing, rec);
+            }
+          } catch (e) { /* capture must never break the page */ }
+          return original.apply(this === undefined ? realm.console : this, args);
+        };
+      }
+    } catch (e) { /* console not patchable */ }
+    try {
+      realm.addEventListener('error', (ev) => {
+        try {
+          const err = ev && ev.error;
+          ringPush(consoleRing, {
+            level: 'error',
+            text: (ev && ev.message) || 'window.onerror',
+            stack: err && err.stack ? String(err.stack).slice(0, 2000) : undefined,
+            ts: Date.now(),
+          });
+        } catch (e) { /* ignore */ }
+      });
+      realm.addEventListener('unhandledrejection', (ev) => {
+        try {
+          const reason = ev && ev.reason;
+          ringPush(consoleRing, {
+            level: 'error',
+            text: 'unhandledrejection: ' + fmtCaptureArg(reason),
+            stack: reason && reason.stack ? String(reason.stack).slice(0, 2000) : undefined,
+            ts: Date.now(),
+          });
+        } catch (e) { /* ignore */ }
+      });
+    } catch (e) { /* realm listeners unavailable */ }
+    try {
+      const origFetch = realm.fetch;
+      if (typeof origFetch === 'function') {
+        realm.fetch = function (...args) {
+          const started = Date.now();
+          const req = args[0];
+          const url = typeof req === 'string' ? req : (req && req.url) || '';
+          const method = (args[1] && args[1].method) || (req && req.method) || 'GET';
+          const done = (res, error) => {
+            try {
+              const rec = { method: String(method), url: String(url).slice(0, 500), ts: Date.now() };
+              if (error) { rec.status = 0; rec.error = String((error && error.message) || error).slice(0, 200); }
+              else rec.status = res && res.status;
+              rec.durationMs = Date.now() - started;
+              ringPush(netRing, rec);
+            } catch (e) { /* ignore */ }
+          };
+          return origFetch.apply(this, args).then(
+            (res) => { done(res); return res; },
+            (err) => { done(null, err); throw err; },
+          );
+        };
+      }
+    } catch (e) { /* fetch not patchable */ }
+    try {
+      const XHR = realm.XMLHttpRequest;
+      if (XHR && XHR.prototype) {
+        const origOpen = XHR.prototype.open;
+        const origSend = XHR.prototype.send;
+        if (typeof origOpen === 'function' && typeof origSend === 'function') {
+          XHR.prototype.open = function (method, url) {
+            try { this.__wpNet = { method: String(method || 'GET'), url: String(url || '').slice(0, 500), started: 0 }; }
+            catch (e) { /* Xray may refuse expando writes */ }
+            return origOpen.apply(this, arguments);
+          };
+          XHR.prototype.send = function () {
+            let meta = null;
+            try { meta = this.__wpNet || null; } catch (e) { /* Xray */ }
+            if (!meta) meta = { method: 'GET', url: '', started: Date.now() };
+            meta.started = Date.now();
+            try {
+              this.addEventListener('loadend', () => {
+                try {
+                  ringPush(netRing, {
+                    method: meta.method, url: meta.url, status: this.status,
+                    durationMs: Date.now() - (meta.started || Date.now()), ts: Date.now(),
+                  });
+                } catch (e) { /* ignore */ }
+              });
+            } catch (e) { /* ignore */ }
+            return origSend.apply(this, arguments);
+          };
+        }
+      }
+    } catch (e) { /* XHR not patchable */ }
+  })();
+
+  // ---------- tool handlers ----------
+  function toolPageInfo() {
+    return {
+      url: location.href,
+      title: document.title,
+      readyState: document.readyState,
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      dpr: window.devicePixelRatio,
+      scroll: { x: window.scrollX, y: window.scrollY },
+      ua: navigator.userAgent,
+      language: navigator.language,
+      cookiesEnabled: navigator.cookieEnabled,
+      ts: Date.now(),
+    };
+  }
+
+  function elToolInfo(el, styleProps) {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const style = {};
+    for (const p of styleProps) style[p] = cs.getPropertyValue(p);
+    const attributes = {};
+    for (const a of el.attributes) attributes[a.name] = a.value;
+    return {
+      selector: cssPath(el),
+      xpath: xPath(el),
+      tagName: el.tagName.toLowerCase(),
+      id: el.id || undefined,
+      classes: Array.from(el.classList || []),
+      attributes,
+      textPreview: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 200),
+      rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
+      visible: !!(r.width || r.height) && cs.visibility !== 'hidden' && cs.display !== 'none',
+      style,
+    };
+  }
+
+  function toolDomQuery(params) {
+    const selector = typeof params.selector === 'string' ? params.selector : '';
+    if (!selector) throw new Error('dom.query: params.selector (CSS) is required');
+    const maxCount = Math.min(50, Math.max(1, Number(params.maxCount) || 10));
+    const styleProps = Array.isArray(params.styleProps) && params.styleProps.length
+      ? params.styleProps.filter((s) => typeof s === 'string').slice(0, 30)
+      : DEFAULT_STYLE_PROPS;
+    const all = document.querySelectorAll(selector);   // invalid selector throws → surfaced as the response error
+    const nodes = Array.from(all).slice(0, maxCount);
+    return {
+      selector,
+      matched: all.length,
+      returned: nodes.length,
+      elements: nodes.map((el) => elToolInfo(el, styleProps)),
+    };
+  }
+
+  // Pruned outerHTML: depth-capped clone so full-page dumps stay bounded.
+  function pruneClone(el, depth) {
+    const clone = el.cloneNode(false);
+    if (depth > 1) {
+      for (const child of Array.from(el.childNodes)) {
+        if (child.nodeType === 3) {
+          const t = (child.textContent || '').trim();
+          if (t) clone.appendChild(document.createTextNode(t.slice(0, 80) + ' '));
+        } else if (child.nodeType === 1) {
+          clone.appendChild(pruneClone(child, depth - 1));
+        }
+      }
+    } else if (el.childNodes && el.childNodes.length) {
+      clone.appendChild(document.createTextNode('…'));
+    }
+    return clone;
+  }
+
+  function toolDomHtml(params) {
+    const selector = typeof params.selector === 'string' ? params.selector : 'body';
+    const maxLength = Math.min(200000, Math.max(200, Number(params.maxLength) || 20000));
+    const maxDepth = Math.max(1, Math.min(20, Number(params.maxDepth) || 8));
+    const target = document.querySelector(selector);
+    if (!target) throw new Error('dom.html: no element matches ' + selector);
+    let html = pruneClone(target, maxDepth).outerHTML;
+    let truncated = false;
+    if (html.length > maxLength) { html = html.slice(0, maxLength); truncated = true; }
+    return { selector, maxDepth, length: html.length, truncated, html };
+  }
+
+  function toolConsoleLogs(params) {
+    const lastN = Math.min(500, Math.max(1, Number(params.lastN) || 50));
+    const sinceTs = typeof params.sinceTs === 'number' ? params.sinceTs : 0;
+    const level = typeof params.level === 'string' ? params.level : null;
+    const all = consoleRing.filter((e) => e.ts >= sinceTs && (!level || e.level === level));
+    return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
+  }
+
+  function toolNetworkLog(params) {
+    const lastN = Math.min(500, Math.max(1, Number(params.lastN) || 50));
+    const filter = typeof params.urlFilter === 'string' ? params.urlFilter.toLowerCase() : null;
+    const all = netRing.filter((e) => !filter || e.url.toLowerCase().includes(filter));
+    return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
+  }
+
+  // Component chains live in the page realm — re-resolve through unsafeWindow
+  // when the sandbox element hides the expandos (same fallback as sourceInfo).
+  function chainTargetEl(el) {
+    try {
+      const uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : null;
+      if (!uw || !uw.document) return el;
+      const pageEl = uw.document.querySelector(cssPath(el));
+      return pageEl || el;
+    } catch (e) { return el; }
+  }
+  function reactChain(el, maxDepth, withProps) {
+    const chain = [];
+    try {
+      for (const k of Object.getOwnPropertyNames(el)) {
+        if (!k.startsWith('__reactFiber$') && !k.startsWith('__reactInternalInstance$')) continue;
+        let f = el[k], guard = 0;
+        while (f && guard++ < 200 && chain.length < maxDepth) {
+          const t = f.type;
+          if (t && (t.name || t.displayName)) {
+            const src = f._debugSource;
+            const level = { component: t.displayName || t.name || '' };
+            if (src && src.fileName) { level.file = src.fileName; level.line = src.lineNumber || 0; }
+            if (withProps && f.memoizedProps !== undefined) level.props = f.memoizedProps;
+            chain.push(level);
+          }
+          f = f.return;
+        }
+        if (chain.length) break;
+      }
+    } catch (e) { /* fiber unwrapping is best-effort */ }
+    return chain;
+  }
+  function vueChain(el, maxDepth, withProps) {
+    const chain = [];
+    try {
+      let vm = el.__vueParentComponent || el.__vue__ || null, guard = 0;
+      while (vm && guard++ < 200 && chain.length < maxDepth) {
+        const opts = vm.$options || {};
+        const name = (vm.type && (vm.type.name || vm.type.__name)) || opts.name || opts.__name || '';
+        if (opts.__file || name) {
+          const level = { component: name };
+          if (opts.__file) level.file = opts.__file;
+          if (withProps && vm.$props !== undefined) level.props = vm.$props;
+          chain.push(level);
+        }
+        vm = vm.$parent || null;
+      }
+    } catch (e) { /* vm walking is best-effort */ }
+    return chain;
+  }
+  function toolFrameworkInspect(params) {
+    const selector = typeof params.selector === 'string' ? params.selector : '';
+    if (!selector) throw new Error('framework.inspect: params.selector (CSS) is required');
+    const el = document.querySelector(selector);
+    if (!el) throw new Error('framework.inspect: no element matches ' + selector);
+    const maxDepth = Math.max(1, Math.min(10, Number(params.maxDepth) || 5));
+    const withProps = params.props !== undefined ? !!params.props : gm.get(GM_FPROPS, false) === true;
+    const target = chainTargetEl(el);
+    let chain = reactChain(target, maxDepth, withProps);
+    let framework = chain.length ? 'react' : null;
+    if (!chain.length) {
+      chain = vueChain(target, maxDepth, withProps);
+      framework = chain.length ? 'vue' : null;
+    }
+    return { selector, framework, withProps, depth: chain.length, chain };
+  }
+
+  const PAGE_TOOLS = {
+    [PAGE_OPS.INFO]: toolPageInfo,
+    [PAGE_OPS.DOM_QUERY]: toolDomQuery,
+    [PAGE_OPS.DOM_HTML]: toolDomHtml,
+    [PAGE_OPS.CONSOLE_LOGS]: toolConsoleLogs,
+    [PAGE_OPS.NETWORK_LOG]: toolNetworkLog,
+    [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect,
+  };
+
+  // page.request{tool:{op,params}} → run the fixed op → exactly one page.response.
+  function handlePageToolRequest(f) {
+    const tool = f.tool && typeof f.tool === 'object' && !Array.isArray(f.tool) ? f.tool : null;
+    if (!tool || typeof tool.op !== 'string') {
+      sendFrame(framePageResponse(f.id, false, 'invalid_tool: missing tool.op'));
+      return;
+    }
+    const handler = PAGE_TOOLS[tool.op];
+    if (!handler) {
+      sendFrame(framePageResponse(f.id, false, 'unknown_op: ' + tool.op + ' (available: ' + Object.keys(PAGE_TOOLS).join(', ') + ')'));
+      return;
+    }
+    let text;
+    try {
+      const params = tool.params && typeof tool.params === 'object' && !Array.isArray(tool.params) ? tool.params : {};
+      text = jsonSafe(handler(params)).text;
+    } catch (e) {
+      sendFrame(framePageResponse(f.id, false, e && e.message ? String(e.message) : String(e)));
+      return;
+    }
+    if (text.length > RESULT_MAX_CHARS) { sendFrame(framePageResponse(f.id, false, 'result_too_large')); return; }
+    sendFrame(framePageResponse(f.id, true, text));
+  }
 
   elOk.addEventListener('click', () => { if (groupCard) submitGroup(); else submit(); });
   elCancel.addEventListener('click', () => { if (groupCard) closeGroupCard(); else unpin(); });
@@ -1321,15 +1664,6 @@
     }
     if (panelOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault(); closePanel(); return;
-    }
-    if (askReq && !e.isComposing && e.keyCode !== 229) {
-      const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
-      if (e.key === 'Enter' && !e.shiftKey && firstTarget === elAskTxt) {
-        e.preventDefault(); e.stopPropagation(); replyAsk(); return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault(); e.stopPropagation(); dismissAsk(); return;
-      }
     }
     if (!pickMode) return;
     if (groupCard) {
@@ -1388,9 +1722,14 @@
     settings: openSettings,
     send: (prompt, target) => submitToAgent(prompt, target),
     targets: () => targets.slice(),
-    ask: () => (askReq ? Object.assign({}, askReq) : null),
+    targets: () => targets.slice(),
     refreshTargets: refreshTargets,
     snapshot: loadBatch,
+    tools: () => Object.keys(PAGE_TOOLS),
+    consoleLog: () => consoleRing.slice(),
+    netLog: () => netRing.slice(),
+    frameworkProps: () => gm.get(GM_FPROPS, false) === true,
+    setFrameworkProps: (on) => { gm.set(GM_FPROPS, !!on); elSProps.checked = !!on; return !!on; },
     setDebug: (on) => { gm.set(GM_DEBUG, !!on); return !!on; },
   };
 

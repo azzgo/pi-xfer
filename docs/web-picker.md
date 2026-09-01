@@ -12,8 +12,13 @@ page side:
   responds to each pick's note, or explains the element's rendering) plus the
   picked annotations, delivered as an xfer handoff into a local pi session
   (`annotation.submit` → `ack`).
-- **Reverse channel** — agent questions arrive as `page.request` frames and
-  surface as an in-page ask modal; your answer goes back as `page.response`.
+- **Page tools (v1.6)** — agent tool calls arrive as `page.request{tool:{op, params}}`
+  frames and run against this page: `page.info` · `dom.query` · `dom.html` ·
+  `console.logs` · `network.log` · `framework.inspect` (fixed read-only op
+  table — no free-form eval, no human modal). The result goes back as
+  `page.response{ok:true, text:<JSON>}`. Console and network captures are
+  always-on ring buffers (200 entries), so the agent sees pre-request
+  history too. The v1.2 ask modal was removed.
 
 Wire protocol: **v0, localhost-trust (no token)**. Every frame carries
 `{v, type}`; every request gets exactly one reply. The userscript builds all
@@ -24,7 +29,7 @@ shapes below match `mock-broker.mjs`, `.pi/wayfinder/prototypes/`).
 |-----------|-------|-------|
 | page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` |
 | page → broker | `targets.list` | `{id}` |
-| broker → page | `page.request` | `{id, handoff_id, from, kind:"question", text, timeoutMs}` |
+| broker → page | `page.request` | `{id, handoff_id, from, tool:{op, params?}, timeoutMs}` |
 | page → broker | `page.response` | `{id, ok:true, text}` / `{id, ok:false, error}` |
 
 ---
@@ -75,9 +80,9 @@ warns and falls back to an ephemeral port — `/xfer broker start` toasts the
 actual port, and it is always recorded in `broker.json`.
 
 Until the `/xfer broker` command group is wired you can run the daemon
-directly: `node pi/agent/extensions/xfer/broker-main.ts`. For the reverse
-channel round trip, the prototype broker is the working oracle today:
-`node .pi/wayfinder/prototypes/mock-broker.mjs` (stdin `ask <question>`).
+directly: `node pi/agent/extensions/xfer/broker-main.ts`. Page-tool calls go
+through the same daemon (HTTP `/page-tool` + CLI `page-tool`), so no separate
+oracle is needed.
 
 ## Verify
 
@@ -89,11 +94,13 @@ channel round trip, the prototype broker is the working oracle today:
    rendering), choose the target session in the dropdown (⟳ refreshes), 发送 →
    the toast shows the `handoff_id` and the target session receives a
    `📨 [Xfer from web-picker]` handoff.
-4. **Ask-page round trip** — with the mock broker, type `ask <question>` on its
-   stdin → the page shows the ask modal (question + from/handoff meta) → answer
-   and press Enter (or 回复) → the broker prints `[page.response …] ok=true`
-   (the real broker additionally pushes your answer as a notify into the asking
-   session). Dismiss paths: 忽略 button or Esc → `ok=false error:"dismissed"`.
+4. **Page-tool round trip** — with the tab connected, from any shell:
+   `node pi/agent/extensions/xfer/broker-main.ts page-tool <session-name> page.info`
+   → the broker prints the result JSON (`url`, `title`, `viewport`, …). Try
+   `dom.query '{"selector":"a","maxCount":3}'` or `console.logs`. The broker log
+   shows `[page.request r… ] → 1 tab(s): …` and `[page.response r…] ok=true`.
+   A timeout (default 30s, `--timeout-ms` override) or no connected tabs exits 1
+   with the error on stderr.
 
 ## Troubleshooting
 
@@ -105,6 +112,7 @@ channel round trip, the prototype broker is the working oracle today:
 | https page won't connect | ws to `127.0.0.1` is loopback-exempt from mixed-content blocking in Chromium, and Tampermonkey's `@connect 127.0.0.1` covers the request — https pages normally work. If a page still refuses, trial on a non-https page or double-check the URL is exactly `ws://127.0.0.1:4719` (not `wss://`, not `http://`). |
 | After a broker restart the dot stays grey | **Reconnect is manual only** — the userscript never auto-reconnects. Click the status row / Tampermonkey menu → 连接, or re-save 连接设置. |
 
-> The ask modal and pick mode are mutually exclusive: opening one dismisses the
-> other, so an open question is always answered (or `dismissed`) rather than
-> left hanging.
+> Page-tool handlers are strictly read-only and JSON-safe-capped (depth, string
+> and array limits) so a single call can never throw against the 1MB broker
+> frame budget. `framework.inspect` only attaches component props/state when
+> opted in via 连接设置 checkbox or `__PI_WP_API__.setFrameworkProps(true)`.

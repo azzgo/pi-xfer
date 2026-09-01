@@ -1,13 +1,13 @@
 /**
  * broker-reverse.test.ts — integration tests for the xfer broker's reverse
- * channel (goal 014 task 030): routePageRequest → page.request broadcast to
- * every welcomed tab, first page.response wins, timeout synthesis, late
- * responses ignored, and the no-tabs short circuit.
+ * tool channel: routePageTool → page.request{tool} broadcast to every
+ * welcomed tab, first page.response wins, timeout synthesis, late responses
+ * ignored, and the no-tabs short circuit.
  *
  * Harness mirrors broker-delivery.test.ts's RawWs (RFC 6455 by hand over a
  * raw net.Socket) and fakeSession helpers, but runs the broker IN-PROCESS via
- * startBroker({port: 0}) — the reverse channel is driven by routePageRequest,
- * the same exported API the ask-page CLI (task 031) calls.
+ * startBroker({port: 0}) — the reverse channel is driven by routePageTool,
+ * the same exported API the page-tool CLI/HTTP layer calls.
  */
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
@@ -16,10 +16,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
-  askPage,
   awaitPageResult,
   DEFAULT_PAGE_TIMEOUT_MS,
-  routePageRequest,
+  routePageTool,
+  runPageTool,
   startBroker,
   type BrokerHandle,
 } from "./broker-main.js";
@@ -278,7 +278,7 @@ describe("broker reverse channel (integration)", () => {
     await welcome(tab1);
     await welcome(tab2);
 
-    const requestId = routePageRequest("alpha", "what color is the button?", 5_000);
+    const requestId = routePageTool("alpha", { op: "dom.query", params: { selector: ".btn" } }, 5_000);
     assert.equal(typeof requestId, "string");
     assert.match(requestId!, /^r[0-9a-z]+$/);
 
@@ -289,8 +289,7 @@ describe("broker reverse channel (integration)", () => {
       assert.equal(frame.id, requestId);
       assert.equal(frame.handoff_id, "demo");
       assert.equal(frame.from, "alpha");
-      assert.equal(frame.kind, "question");
-      assert.equal(frame.text, "what color is the button?");
+      assert.deepEqual(frame.tool, { op: "dom.query", params: { selector: ".btn" } });
       assert.equal(frame.timeoutMs, 5_000);
     }
 
@@ -314,13 +313,13 @@ describe("broker reverse channel (integration)", () => {
   });
 
   it("timeout: explicit short override resolves {ok:false, error:'timeout'}, late response ignored", async () => {
-    assert.equal(DEFAULT_PAGE_TIMEOUT_MS, 120_000);
+    assert.equal(DEFAULT_PAGE_TIMEOUT_MS, 30_000);
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
     await welcome(tab);
 
     const started = Date.now();
-    const requestId = routePageRequest("alpha", "slow question?", 100);
+    const requestId = routePageTool("alpha", { op: "console.logs" }, 100);
     assert.ok(requestId);
     assert.equal(parseFrame(await tab.next()).timeoutMs, 100);
 
@@ -340,7 +339,7 @@ describe("broker reverse channel (integration)", () => {
     assert.deepEqual(await awaitPageResult(requestId!), { ok: false, error: "timeout" });
   });
 
-  it("timeout default: BROKER_PAGE_TIMEOUT_MS env fallback, else 120s on the wire", async () => {
+  it("timeout default: BROKER_PAGE_TIMEOUT_MS env fallback, else 30s on the wire", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
     await welcome(tab);
@@ -348,7 +347,7 @@ describe("broker reverse channel (integration)", () => {
     const previous = process.env.BROKER_PAGE_TIMEOUT_MS;
     process.env.BROKER_PAGE_TIMEOUT_MS = "60";
     try {
-      const requestId = routePageRequest("alpha", "env timeout?");
+      const requestId = routePageTool("alpha", { op: "page.info" });
       assert.ok(requestId);
       assert.equal(parseFrame(await tab.next()).timeoutMs, 60);
       assert.deepEqual(await awaitPageResult(requestId!), { ok: false, error: "timeout" });
@@ -357,21 +356,21 @@ describe("broker reverse channel (integration)", () => {
       else process.env.BROKER_PAGE_TIMEOUT_MS = previous;
     }
 
-    // With no env and no explicit timeout the frame carries the 120s default.
-    const defaultId = routePageRequest("alpha", "default timeout?");
+    // With no env and no explicit timeout the frame carries the 30s default.
+    const defaultId = routePageTool("alpha", { op: "page.info" });
     assert.ok(defaultId);
     assert.equal(parseFrame(await tab.next()).timeoutMs, DEFAULT_PAGE_TIMEOUT_MS);
   });
 
-  it("no tabs connected → routePageRequest returns null, askPage resolves {ok:false, error:'no_tabs'}", async () => {
+  it("no tabs connected → routePageTool returns null, runPageTool resolves {ok:false, error:'no_tabs'}", async () => {
     const daemon = await startTestBroker();
-    assert.equal(routePageRequest("alpha", "anyone there?"), null);
-    assert.deepEqual(await askPage("alpha", "anyone there?"), { ok: false, error: "no_tabs" });
+    assert.equal(routePageTool("alpha", { op: "page.info" }), null);
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }), { ok: false, error: "no_tabs" });
 
     // Sanity: once a tab connects, requests flow again (no stale no_tabs state).
     const tab = await RawWs.connect(daemon.port);
     await welcome(tab);
-    const requestId = routePageRequest("alpha", "now?");
+    const requestId = routePageTool("alpha", { op: "page.info" });
     assert.ok(requestId);
     assert.equal(parseFrame(await tab.next()).id, requestId);
   });
@@ -397,12 +396,12 @@ describe("broker reverse channel (integration)", () => {
     assert.equal(ack.type, "ack");
     const handoffId = (ack.result as { handoff_id?: unknown }).handoff_id as string;
 
-    const requestId = routePageRequest("alpha", "which pick is the note?");
+    const requestId = routePageTool("alpha", { op: "dom.html", params: { selector: "#app" } });
     assert.ok(requestId);
     assert.equal(parseFrame(await tab.next()).handoff_id, handoffId);
 
     // A target with no handoff yet falls back to "demo".
-    const otherId = routePageRequest("ghost", "hello?");
+    const otherId = routePageTool("ghost", { op: "page.info" });
     assert.ok(otherId);
     assert.equal(parseFrame(await tab.next()).handoff_id, "demo");
   });
