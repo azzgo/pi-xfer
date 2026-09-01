@@ -1,4 +1,4 @@
-# Web Picker userscript — install, verify, troubleshoot
+# Xfer Web Picker userscript — install, verify, troubleshoot
 
 `web-picker.user.js` is a Tampermonkey userscript that gives the xfer broker a
 page side:
@@ -31,10 +31,19 @@ shapes below match `mock-broker.mjs`, `.pi/wayfinder/prototypes/`).
 
 ## Install (Tampermonkey)
 
-1. Open Tampermonkey → Dashboard → **+** (Create a new script).
-2. Replace the editor content with the **entire contents of `web-picker.user.js`**
-   and save (Ctrl/Cmd+S).
-3. Reload any page — a round fab appears near the bottom-right corner.
+**Easiest** — open the raw URL in a browser with Tampermonkey enabled; the
+`.user.js` suffix triggers the install prompt automatically:
+
+<https://raw.githubusercontent.com/azzgo/dotfiles/main/pi/agent/extensions/xfer/web-picker.user.js>
+
+Manual: open Tampermonkey → Dashboard → **+** (Create a new script), replace
+the editor content with the **entire contents of `web-picker.user.js`**, save
+(Ctrl/Cmd+S). Then reload any page — a round fab appears near the bottom-right
+corner.
+
+> Renamed from "PI Web Picker" (v1.5): name change = new script entry in
+> Tampermonkey. Delete the old one after installing; its GM storage (broker
+> URL, last target) resets once because storage is scoped per script.
 
 | Shortcut | Action |
 |----------|--------|

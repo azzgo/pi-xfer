@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         PI Web Picker
+// @name         Xfer Web Picker
 // @namespace    pi.dotfiles
 // @version      1.5.0
 // @description  元素拾取 + 备注批注 + broker 连接/send/提问应答（v1.5：Shift 聚合多元素成组、整组共享一条备注；broker 端口 fallback 后改这里）
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /**
- * PI Web Picker — userscript v1.2: pick/note core + broker connection + send flow + ask modal.
+ * Xfer Web Picker — userscript: pick/note core + broker connection + send flow + ask modal.
  *
  * Pick/note core (unchanged from v1.0.0): Shadow-DOM overlay UI, fab with drag +
  * pick entry, frozen pick mode with layer switching (and 1-9 batch picks), IME-safe

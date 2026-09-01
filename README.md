@@ -14,6 +14,18 @@ tunnel) — see `docs/bridging.md`. Without that file behavior is unchanged.
 just install-pi    # auto symlink ~/.pi/agent/extensions/xfer → repo folder
 ```
 
+## Web Picker (page side)
+
+`web-picker.user.js` is the Tampermonkey page side of the broker: pick
+elements, annotate (solo or shift-group), send handoffs, answer ask-page
+questions. Install — open the raw URL in a browser with Tampermonkey enabled;
+the `.user.js` suffix triggers the install prompt automatically:
+
+<https://raw.githubusercontent.com/azzgo/dotfiles/main/pi/agent/extensions/xfer/web-picker.user.js>
+
+Manual install, shortcuts and troubleshooting:
+[`docs/web-picker.md`](docs/web-picker.md).
+
 ## Usage
 
 | Command | Meaning |
@@ -83,3 +95,4 @@ npm test    # node --test, zero deps (inline .js→.ts resolve hook)
 | `utils.ts` | pure helpers: name encoding, endpoints, peer listing |
 | `constants.ts` | paths + timeouts |
 | `types.ts` | `PeerInfo`, `XferNotifyMessage`, `Identity`, settings types |
+| `web-picker.user.js` | Tampermonkey page-side picker — see [docs/web-picker.md](docs/web-picker.md) |
