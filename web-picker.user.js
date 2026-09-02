@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.6.1
-// @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.6：page.request 改为固定 op 工具通道，console/network 常开捕获，移除 ask 弹窗）
+// @version      1.7.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.7：发送成功自动收起面板；未连接点击状态先直连默认地址，失败才弹连接设置）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -32,8 +32,9 @@
  *     the port — relevant since the broker falls back to an ephemeral port when
  *     4719 is squatted by another program, see /xfer broker status) editable in
  *     the settings modal (GM `wp.brokerUrl`); hello on open → welcome → green
- *     status dot on the fab. Reconnect is NEVER automatic. Connection failure
- *     toasts the URL and points at the settings pill.
+ *     status dot on the fab. Reconnect is NEVER automatic. Clicking the panel's
+ *     conn pill while off dials the saved/default URL first; only a failed
+ *     attempt opens the settings modal.
  *   - send box at the bottom of the note panel: prompt textarea (optional —
  *     empty sends DEFAULT_PROMPT: respond to each pick's note, or explain the
  *     element's rendering) + searchable
@@ -41,7 +42,8 @@
  *     `cwd · status`; type-to-filter, ↑↓/Enter 或点击选择), last-used
  *     target persisted in GM `wp.lastTarget`, ⟳ manual refresh.
  *   - annotation.submit (picks reuse the payloadFor schema verbatim) → ack toasts
- *     the handoff_id and clears the local batch; error frames toast code + message.
+ *     the handoff_id, closes the note panel and clears the local batch; error
+ *     frames toast code + message and keep the panel open.
  *   - page tools (v1.6): inbound page.request{tool:{op, params}} runs ONE of the
  *     fixed read-only ops (page.info / dom.query / dom.html / console.logs /
  *     network.log / framework.inspect) against this page and replies
@@ -527,7 +529,7 @@
           <button class="ghost icon" id="trefresh" title="刷新 target 列表">⟳</button>
         </div>
         <div class="srow">
-          <span id="connstate"><span class="dot"></span><span id="conntext">未连接 · 点击设置</span></span>
+          <span id="connstate"><span class="dot"></span><span id="conntext">未连接 · 点击连接</span></span>
           <button class="ghost" id="clearbtn">清空</button>
           <button class="primary" id="sendbtn">发送 →</button>
         </div>
@@ -958,6 +960,7 @@
   // ---------- broker connection (protocol v0.1, no token — manual connect only) ----------
   let ws = null;
   let wsState = 'off';                 // off | connecting | on
+  let connectSettle = null;            // 在途 connect 的结算回调（welcome→true / close→false）
   const pending = new Map();           // request id → { kind:'submit'|'targets', resolve }
   let targets = [];                    // [{name, sessionName, cwd, status}] from targets.list
 
@@ -972,20 +975,31 @@
     wsState = s;
     elDot.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : '';
     elConn.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : '';
-    elConn.title = s === 'on' ? '点击断开 broker' : s === 'connecting' ? '连接中…' : '点击打开连接设置';
+    elConn.title = s === 'on' ? '点击断开 broker' : s === 'connecting' ? '连接中…' : '点击连接 broker（失败会打开连接设置）';
     elConnText.textContent = s === 'on' ? 'broker 已连接'
       : s === 'connecting' ? '连接中…'
-      : '未连接 · 点击设置';
+      : '未连接 · 点击连接';
     if (s !== 'on') { targets = []; renderTargetCombo(); }
   }
 
+  // 返回 Promise：welcome 兑现 true；构造失败/close（含 onerror 后的必然 close）兑现 false。
+  // fire-and-forget 调用方（菜单、settings 保存、API）照旧忽略返回值。
   function connectBroker() {
     if (ws) { try { ws.close(); } catch (e) {} ws = null; }
     const url = brokerUrl().replace(/\/+$/, '') + '/ws';
     setWsState('connecting');
+    let settle;
+    const attempt = new Promise((resolve) => { settle = resolve; });
+    connectSettle = settle;
     let sock;
     try { sock = new WebSocket(url); }
-    catch (e) { setWsState('off'); toast('WS 创建失败: ' + e.message); return; }
+    catch (e) {
+      connectSettle = null;
+      setWsState('off');
+      toast('WS 创建失败: ' + e.message);
+      settle(false);
+      return attempt;
+    }
     ws = sock;
     sock.onopen = () => { sendFrame(frameHello()); };
     sock.onmessage = (ev) => {
@@ -995,6 +1009,8 @@
       if (f.type === PROTOCOL.KIND_WELCOME) {
         setWsState('on');
         toast('broker 已连接');
+        const settled = connectSettle; connectSettle = null;
+        if (settled) settled(true);
         refreshTargets();
         return;
       }
@@ -1031,6 +1047,8 @@
         ? { ok: false, code: 'closed', message: 'broker 连接已断开' }
         : []);
       pending.clear();
+      const settled = connectSettle; connectSettle = null;
+      if (settled) settled(false);           // 握手未完成即断开 = 配对失败
       if (wsState !== 'off') { setWsState('off'); toast('broker 连接已断开'); }
     };
     sock.onerror = () => {
@@ -1039,6 +1057,7 @@
         toast('broker 连不上: ' + url + '（连接设置里可改地址）');
       }
     };
+    return attempt;
   }
 
   function disconnectBroker() {
@@ -1228,7 +1247,7 @@
       toast('已送达 agent（handoff ' + (res.result && res.result.handoff_id ? res.result.handoff_id : '?') + '）');
       elPrompt.value = '';
       clearBatch();
-      renderPanel();
+      closePanel();                              // 发送成功即收起面板；重开显示空态
     } else {
       toast('发送失败: ' + res.code + (res.message ? ' — ' + res.message : ''));
     }
@@ -1238,9 +1257,12 @@
     if (!n) return;
     if (confirm('清空本页全部 ' + n + ' 条标注？')) { clearBatch(); renderPanel(); }
   });
+  // 未连接时点击 = 直接按已存/默认地址发起连接（不再先弹设置）；仅配对失败才打开设置
   elConn.addEventListener('click', () => {
-    if (wsState === 'on') disconnectBroker();
-    else if (wsState === 'off') openSettings();
+    if (wsState === 'on') { disconnectBroker(); return; }
+    if (wsState !== 'off') return;                 // connecting 中：等本次尝试出结果
+    toast('正在连接 ' + brokerUrl() + ' …');
+    connectBroker().then((ok) => { if (!ok) openSettings(); });
   });
 
   // ---------- settings modal (broker URL + framework props opt-in) ----------
