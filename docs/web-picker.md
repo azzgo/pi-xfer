@@ -111,6 +111,7 @@ oracle is needed.
 | Dropdown shows （无活跃 local session） | No listening session: targets come from `~/.pi/xfer/*.sock`. Start a pi session with xfer loaded (its `.sock` appears), then ⟳. Not connected at all → the dropdown shows （未连接 broker） instead. |
 | https page won't connect | ws to `127.0.0.1` is loopback-exempt from mixed-content blocking in Chromium, and Tampermonkey's `@connect 127.0.0.1` covers the request — https pages normally work. If a page still refuses, trial on a non-https page or double-check the URL is exactly `ws://127.0.0.1:4719` (not `wss://`, not `http://`). |
 | After a broker restart the dot stays grey | **Reconnect is manual only** — the userscript never auto-reconnects. Click the status row / Tampermonkey menu → 连接, or re-save 连接设置. |
+| Fab disappears after SPA navigation / HMR | The page wiped the script's shadow host. v1.8 auto re-attaches it (mutation observer); Tampermonkey menu → **重新注入 trigger** or `__PI_WP_API__.reinject()` forces it back manually. |
 
 > Page-tool handlers are strictly read-only and JSON-safe-capped (depth, string
 > and array limits) so a single call can never throw against the 1MB broker

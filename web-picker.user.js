@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.7.1
+// @version      1.8.0
 // @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.7：发送成功自动收起面板；未连接点击状态先直连默认地址，失败才弹连接设置）
 // @match        *://*/*
 // @grant        GM_getValue
@@ -595,6 +595,20 @@
     elFab.style.top = pos.y + 'px';
     try { sessionStorage.setItem(KEY_POS, JSON.stringify(pos)); } catch (err) { /* position won't persist */ }
   }, true);
+
+  // ---------- trigger 重注入 ----------
+  // SPA 路由跳转 / HMR 热更新可能把 documentElement 下的外来节点清掉，host 一旦
+  // 被移除 fab 就消失；脚本闭包里的状态都还在，把 host 重新挂回去即可整体恢复。
+  function reinjectTrigger() {
+    if (host.isConnected) return true;
+    document.documentElement.appendChild(host);
+    clampFabPos();
+    elFab.style.left = pos.x + 'px';
+    elFab.style.top = pos.y + 'px';
+    return host.isConnected;
+  }
+  new MutationObserver(() => { if (!host.isConnected) reinjectTrigger(); })
+    .observe(document.documentElement, { childList: true });
 
   function toast(msg) {
     elToast.textContent = msg;
@@ -1766,6 +1780,7 @@
     frameworkProps: () => gm.get(GM_FPROPS, false) === true,
     setFrameworkProps: (on) => { gm.set(GM_FPROPS, !!on); elSProps.checked = !!on; return !!on; },
     setDebug: (on) => { gm.set(GM_DEBUG, !!on); return !!on; },
+    reinject: reinjectTrigger,
   };
 
   // ---------- Tampermonkey menu ----------
@@ -1775,5 +1790,8 @@
     GM_registerMenuCommand('连接设置…', openSettings);
     GM_registerMenuCommand('打开标注面板 (⇧⌥L)', togglePanel);
     GM_registerMenuCommand('开始拾取 (⇧⌥P)', () => setActive(true));
+    GM_registerMenuCommand('重新注入 trigger', () => {
+      toast(reinjectTrigger() ? 'trigger 已重新注入' : 'trigger 仍在页面上');
+    });
   } catch (e) { /* menu registration unavailable in this manager */ }
 })();
