@@ -6,6 +6,7 @@ import * as path from "node:path";
 import type { XferController } from "./controller.js";
 import { getRemotePeer, listRemotePeers, type PeerSendEntry } from "./peers.js";
 import { BrokerManager } from "./broker-manager.js";
+import { collectGarbage } from "./gc.js";
 import { XFER_DIR } from "./constants.js";
 import { DEFAULT_SETTINGS_PATH, loadSettings } from "./settings.js";
 import { endpointForName, listPeers, peerDescription } from "./utils.js";
@@ -18,6 +19,8 @@ export interface XferCommandOptions {
   brokerManager?: BrokerManager;
   /** Directory holding broker.log; defaults to the broker manager's xferDir (XFER_DIR). */
   brokerXferDir?: string;
+  /** Directory scanned by `/xfer gc` for zombie peer sockets; defaults to XFER_DIR. */
+  xferDir?: string;
 }
 
 /** One-line description of a remote peer: its note, or the head of its send template. */
@@ -75,6 +78,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
   const settingsPath = options.settingsPath ?? DEFAULT_SETTINGS_PATH;
   const brokerManager = options.brokerManager ?? new BrokerManager();
   const brokerXferDir = options.brokerXferDir ?? XFER_DIR;
+  const xferDir = options.xferDir ?? XFER_DIR;
 
   pi.registerCommand("xfer", {
     description:
@@ -83,6 +87,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer list               — list peers\n" +
       "  /xfer peer <name> <req>  — send via remote peer (settings.json)\n" +
       "  /xfer name [<name>]      — show or set name\n" +
+      "  /xfer gc                 — reap zombie peer sockets (dead pid / no listener)\n" +
       "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle",
 
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
@@ -130,6 +135,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "peer", label: "peer", description: "Send to a remote peer from settings.json" },
         { value: "listener", label: "listener", description: "Bridge listener: setup / stop / logs" },
         { value: "broker", label: "broker", description: "Broker daemon: start / status / stop / logs" },
+        { value: "gc", label: "gc", description: "Reap zombie peer sockets (dead pid / no listener)" },
         { value: "status", label: "status", description: "Show listener status" },
         ...peers.map(peer => ({
           value: peer.xferName,
@@ -157,6 +163,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer status             — listener status\n" +
           "   /xfer name [<name>]      — show or set name\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
+          "   /xfer gc                 — reap zombie peer sockets\n" +
 
           "\n" +
           "💡 One-way, no wait. Reply via /xfer.",
@@ -359,6 +366,25 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         // logs — tail <xferDir>/broker.log without touching the daemon.
         ctx.ui.notify(brokerLogTail(brokerXferDir), "info");
+        return;
+      }
+
+      // ── /xfer gc (reap zombie peer sockets) ──
+      if (cmd === "gc") {
+        const report = await collectGarbage(xferDir);
+        if (report.zombies.length === 0) {
+          ctx.ui.notify(`🧹 No zombie sockets — ${report.alive.length} live peer(s)`, "info");
+          return;
+        }
+        const lines = report.zombies.map((z) => {
+          const pid = z.pid !== undefined ? `pid ${z.pid}` : "no metadata";
+          return `  ${z.name} — ${z.reason} (${pid})`;
+        });
+        ctx.ui.notify(
+          `🧹 Removed ${report.zombies.length} zombie(s):\n${lines.join("\n")}\n` +
+          `kept ${report.alive.length} live peer(s)`,
+          "info",
+        );
         return;
       }
 

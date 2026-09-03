@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { after, before, describe, it } from "node:test";
+import { spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import { XferController } from "./controller.js";
@@ -82,7 +83,7 @@ function makeIdentity(): Identity {
 }
 
 /** Register against stubs; return the captured definition plus invoke helpers. */
-function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string } = {}): {
+function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string; xferDir?: string } = {}): {
   description: string | undefined;
   handler: (args: string) => Promise<void>;
   completions: (prefix: string) => AutocompleteItem[] | null;
@@ -106,9 +107,8 @@ function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: strin
     },
   } as unknown as XferController;
 
-  registerXferCommand(pi, controller, { settingsPath, brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir });
+  registerXferCommand(pi, controller, { settingsPath, brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir });
   assert.ok(def, "registerCommand was not captured");
-
   const ctx = {
     ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
   };
@@ -553,5 +553,57 @@ describe("xfer command: broker description and help text", () => {
     assert.match(h.description ?? "", /\/xfer broker <start\|status\|stop\|logs>/);
     await h.handler("help");
     assert.match(h.notifications[0].message, /broker start\|status\|stop\|logs/);
+  });
+});
+
+describe("xfer command: gc subcommand", () => {
+  /** A pid that is guaranteed gone: spawn `true` and let it exit. */
+  function deadPid(): number {
+    const r = spawnSync("true");
+    assert.equal(r.status, 0);
+    assert.ok(typeof r.pid === "number" && r.pid > 0);
+    return r.pid;
+  }
+
+  it("reaps zombies in the injected xferDir, keeps broker files, reports the list", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-gc-"));
+    const pid = deadPid();
+    fs.writeFileSync(path.join(dir, "ghost.json"), JSON.stringify({ xferName: "ghost", pid }));
+    fs.writeFileSync(path.join(dir, "ghost.sock"), "");
+    fs.writeFileSync(path.join(dir, "broker.json"), '{"pid": 1}');
+    const h = harness({ xferDir: dir });
+    try {
+      await h.handler("gc");
+      assert.equal(h.notifications.length, 1);
+      assert.equal(h.notifications[0].type, "info");
+      assert.match(h.notifications[0].message, /Removed 1 zombie/);
+      assert.match(h.notifications[0].message, /ghost — dead-pid \(pid \d+\)/);
+      assert.match(h.notifications[0].message, /kept 0 live peer/);
+      assert.ok(!fs.existsSync(path.join(dir, "ghost.sock")), "zombie sock removed");
+      assert.ok(!fs.existsSync(path.join(dir, "ghost.json")), "zombie json removed");
+      assert.ok(fs.existsSync(path.join(dir, "broker.json")), "broker files must survive");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports no zombies for a clean dir", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-gc-"));
+    const h = harness({ xferDir: dir });
+    try {
+      await h.handler("gc");
+      assert.match(h.notifications[0].message, /No zombie sockets/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("mentions gc in the description, help and top-level completions", async () => {
+    const h = harness();
+    assert.match(h.description ?? "", /\/xfer gc/);
+    await h.handler("help");
+    assert.match(h.notifications[0].message, /\/xfer gc/);
+    const values = (h.completions("") ?? []).map((i) => i.value);
+    assert.ok(values.includes("gc"));
   });
 });

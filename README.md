@@ -39,7 +39,19 @@ Manual install, shortcuts and troubleshooting:
 | `/xfer listener setup` | start the bridge command from `listen.bridge` |
 | `/xfer listener stop` | stop the bridge + close the TCP listener |
 | `/xfer listener logs` | dump recent bridge output |
+| `/xfer gc` | reap zombie peer sockets (dead pid / no listener) |
 | `/xfer status` | listener status summary |
+
+### Zombie socket GC
+
+A peer that dies without cleaning up (crash, `kill -9`, closed terminal)
+leaves `<name>.sock` + `<name>.json` behind. `/xfer gc` reaps them:
+
+- `<name>.json` `pid` no longer alive (`kill(pid, 0)` → ESRCH) → remove both
+- metadata missing/unreadable and nothing listening on the sock → remove both
+- orphan `.sock` with no `.json` and no listener → remove the sock
+- anything ambiguous (EPERM, probe timeout) is kept — gc never removes a
+  peer that might be alive; `broker.*` and `settings.json` are never touched
 
 ### LLM tools
 
@@ -85,7 +97,8 @@ npm test    # node --test, zero deps (inline .js→.ts resolve hook)
 |------|----------------|
 | `index.ts` | entry wiring: flag, `xfer_to` + `xfer_peer_to` tools, status events, lifecycle |
 | `controller.ts` | inbound socket lifecycle: start / rename / shutdown; bridge listener + BridgeManager ownership; shutdown reap |
-| `commands.ts` | `/xfer` command (`list`, `peer`, `listener`, `status`, `name`, …) + completions |
+| `commands.ts` | `/xfer` command (`list`, `peer`, `listener`, `broker`, `gc`, `status`, `name`, …) + completions |
+| `gc.ts` | zombie-socket GC: dead-pid / orphan-sock detection + reap |
 | `settings.ts` | `~/.pi/xfer/settings.json` loader/validator + template interpolation |
 | `oneshot.ts` | remote peer send: temp frame file, template spawn, stdin/msgfile branch, waitExit |
 | `peers.ts` | peer registry: local socks + settings peers (separate namespaces) |
