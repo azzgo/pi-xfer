@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.7.0
+// @version      1.7.1
 // @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.7：发送成功自动收起面板；未连接点击状态先直连默认地址，失败才弹连接设置）
 // @match        *://*/*
 // @grant        GM_getValue
@@ -581,8 +581,20 @@
     const saved = sessionStorage.getItem(KEY_POS);
     if (saved) { const p = JSON.parse(saved); if (typeof p.x === 'number' && typeof p.y === 'number') pos = p; }
   } catch (e) { /* fall back to default position */ }
+  // 视口缩小（如打开 devtools）后保存的位置可能落在可视区外，统一 clamp 回来
+  function clampFabPos() {
+    pos.x = Math.max(4, Math.min(window.innerWidth - 50, pos.x));
+    pos.y = Math.max(4, Math.min(window.innerHeight - 50, pos.y));
+  }
+  clampFabPos();
   elFab.style.left = pos.x + 'px';
   elFab.style.top = pos.y + 'px';
+  window.addEventListener('resize', () => {
+    clampFabPos();
+    elFab.style.left = pos.x + 'px';
+    elFab.style.top = pos.y + 'px';
+    try { sessionStorage.setItem(KEY_POS, JSON.stringify(pos)); } catch (err) { /* position won't persist */ }
+  }, true);
 
   function toast(msg) {
     elToast.textContent = msg;
