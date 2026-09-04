@@ -175,6 +175,16 @@ describe("renderHandoffDoc", () => {
     assert.equal(withoutTarget.includes("undefined"), false);
   });
 
+  it("embeds the broker CLI absolute path so the agent never has to search for it", () => {
+    const doc = renderHandoffDoc(input({ brokerCliPath: "/Users/me/dev/dotfiles/pi/agent/extensions/xfer/broker-main.ts" }));
+    assert.equal(
+      doc.includes('`node /Users/me/dev/dotfiles/pi/agent/extensions/xfer/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
+      true,
+      "expected the absolute broker CLI path in the command",
+    );
+    assert.equal(doc.includes("`node broker-main.ts"), false, "bare filename must not survive when the path is given");
+  });
+
   it("renders zero picks as a well-formed (empty) Annotations section", () => {
     const doc = renderHandoffDoc(input({ picks: [] }));
     assert.equal(doc.includes("### "), false);

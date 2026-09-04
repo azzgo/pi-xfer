@@ -54,6 +54,12 @@ export interface RenderHandoffDocInput {
   picks: readonly HandoffPick[];
   /** Asking session's xfer name/socket; substituted into the page-tool example when present. */
   fromTarget?: string;
+  /**
+   * Absolute path to the broker CLI entry (broker-main.ts). The receiving agent
+   * has no way to discover this otherwise — always pass it so the doc carries a
+   * runnable command instead of a filename the agent would have to find.
+   */
+  brokerCliPath?: string;
 }
 
 /**
@@ -61,15 +67,16 @@ export interface RenderHandoffDocInput {
  * section, not a skill). Kept ≤10 lines — the bloat criterion for spinning it
  * into a skill stays in force.
  */
-function followUpSection(fromTarget: string | undefined): string[] {
+function followUpSection(fromTarget: string | undefined, brokerCliPath: string | undefined): string[] {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
+  const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "broker-main.ts";
   return [
     "## Follow-up channel",
     "",
     "The sending browser tab is still online. Collect page data by calling its fixed tool ops via the broker CLI — the command waits and prints the result JSON on stdout:",
-    `\`node broker-main.ts page-tool ${target} <op> [paramsJSON]\``,
+    `\`node ${cli} page-tool ${target} <op> [paramsJSON]\``,
     "Ops (fixed read-only table): page.info · dom.query {selector, maxCount?, styleProps?} · dom.html {selector?, maxLength?, maxDepth?} · console.logs {lastN?, sinceTs?, level?} · network.log {lastN?, urlFilter?} · framework.inspect {selector, props?, maxDepth?}. Example:",
-    `\`node broker-main.ts page-tool ${target} dom.query '{"selector":"button.primary","maxCount":5}'\``,
+    `\`node ${cli} page-tool ${target} dom.query '{"selector":"button.primary","maxCount":5}'\``,
     "A timeout or no_tabs exits 1 with an error on stderr — treat the handoff as one-way then. Multiple calls may be issued in parallel.",
   ];
 }
@@ -107,7 +114,7 @@ function pickSection(pick: HandoffPick): string[] {
 }
 
 /** Render the ticket-007 handoff doc skeleton as a markdown string (trailing newline). */
-export function renderHandoffDoc({ msgId, prompt, page, picks, fromTarget }: RenderHandoffDocInput): string {
+export function renderHandoffDoc({ msgId, prompt, page, picks, fromTarget, brokerCliPath }: RenderHandoffDocInput): string {
   const lines: string[] = [
     "# Web annotation handoff",
     "",
@@ -125,7 +132,7 @@ export function renderHandoffDoc({ msgId, prompt, page, picks, fromTarget }: Ren
     "",
   ];
   for (const pick of picks) lines.push(...pickSection(pick));
-  lines.push(...followUpSection(fromTarget), "");
+  lines.push(...followUpSection(fromTarget, brokerCliPath), "");
   lines.push("---", "", "from: web-picker", `handoff_id: ${msgId}`);
   return lines.join("\n") + "\n";
 }

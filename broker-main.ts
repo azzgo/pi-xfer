@@ -347,7 +347,13 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   };
   let content: string;
   try {
-    content = renderHandoffDoc({ msgId, prompt, page, picks: picks as HandoffPick[] });
+    content = renderHandoffDoc({
+      msgId,
+      prompt,
+      page,
+      picks: picks as HandoffPick[],
+      brokerCliPath: path.join(import.meta.dirname, "broker-main.ts"),
+    });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
     return;
