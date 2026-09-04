@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.8.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.7：发送成功自动收起面板；未连接点击状态先直连默认地址，失败才弹连接设置）
+// @version      1.9.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.9：拾取永不互相覆盖 + cssPath 同 tag 兄弟强制 nth-of-type + send 附带反向查询时机规则）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -28,6 +28,11 @@
  * backward compatible). Panel note edits sync across members of the same group.
  *
  * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
+ *   - v1.9: picks are never deduped/overwritten (each pick is an independent
+ *     record); cssPath forces nth-of-type whenever same-tag siblings exist so
+ *     same-class table cells no longer collapse into one selector; every send
+ *     appends PAGE_QUERY_RULE telling the agent to do all reverse page.request
+ *     BEFORE touching code (HMR full reload breaks the userscript↔broker link).
  *   - manual connect only: ws://127.0.0.1:4719/ws by default; broker URL (incl.
  *     the port — relevant since the broker falls back to an ephemeral port when
  *     4719 is squatted by another program, see /xfer broker status) editable in
@@ -181,12 +186,14 @@
     try { sessionStorage.setItem(KEY_PICKS, JSON.stringify(b)); }
     catch (e) { /* quota / privacy mode — batch stays in memory for this page */ }
   }
+  // 每次拾取都是独立记录，即使 selector 相同也不覆盖——同一元素重复选、或两个
+  // 元素恰好生成同一选择器（历史上出现过）时，各自的 note 都要保留。去重交给了
+  // 选择器本身的区分度（cssPath 对同 tag 兄弟强制 nth-of-type）。
   function addPick(rec) {
     const b = loadBatch();
-    const i = b.findIndex((x) => x.selector === rec.selector);
-    if (i >= 0) { b[i] = rec; toast('已更新 ' + rec.selector); }
-    else { b.push(rec); toast('已选中 ' + rec.selector); }
+    b.push(rec);
     saveBatch(b);
+    toast('已选中 ' + rec.selector);
     refreshCount();
   }
   function clearBatch() { saveBatch([]); refreshCount(); }
@@ -203,20 +210,23 @@
     while (cur && cur.nodeType === 1 && cur !== document.documentElement && depth < MAX_DEPTH) {
       let sel = cur.nodeName.toLowerCase();
       if (cur.id) { parts.unshift('#' + cssEscape(cur.id)); break; }
+      const sibs = cur.parentElement
+        ? Array.from(cur.parentElement.children).filter((s) => s.nodeName === cur.nodeName)
+        : [cur];
+      // 同 tag 兄弟 >1 时一律补 nth-of-type——class/stable-attr 分支也要，否则
+      // 同一 table 里同 class 的不同单元格会生成完全相同的选择器（互相覆盖、
+      // agent 反解时也只能命中第一个）。
+      const nth = sibs.length > 1 ? ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')' : '';
       const stable = ['data-testid', 'data-test', 'data-component', 'data-cy', 'name']
         .find((a) => cur.getAttribute && cur.getAttribute(a));
       if (stable) {
-        parts.unshift(sel + '[' + stable + '="' + cssEscape(String(cur.getAttribute(stable))) + '"]');
+        parts.unshift(sel + '[' + stable + '="' + cssEscape(String(cur.getAttribute(stable))) + '"]' + nth);
       } else {
         const cls = Array.from(cur.classList || []).filter((c) => c.length > 1).slice(0, 2);
         if (cls.length) {
-          parts.unshift(sel + '.' + cls.map(cssEscape).join('.'));
+          parts.unshift(sel + '.' + cls.map(cssEscape).join('.') + nth);
         } else {
-          const sibs = cur.parentElement
-            ? Array.from(cur.parentElement.children).filter((s) => s.nodeName === cur.nodeName)
-            : [cur];
-          if (sibs.length > 1) sel += ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')';
-          parts.unshift(sel);
+          parts.unshift(sel + nth);
         }
       }
       cur = cur.parentElement;
@@ -1096,12 +1106,16 @@
   // prompt 可留空：留空时落 DEFAULT_PROMPT——逐条回应标注 note / 解释元素渲染逻辑。
   // broker 端 v0 校验要求 prompt 非空，所以默认值在这一侧补齐，线上帧始终带具体指令。
   const DEFAULT_PROMPT = '请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。';
+  // 反向查询规则随每次 send 下发（prompt 尾部追加）：HMR 改代码失败会整页刷新，
+  // 刷新即断开 userscript ↔ broker 连接，此后的 page.request 全部无人应答。
+  const PAGE_QUERY_RULE = '\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / framework.inspect 等）只能在开始修改代码之前进行；需要 DOM、样式、组件链信息时请在动第一行代码前一次性查完。一旦开始改代码，HMR 无法热更新时浏览器会整页刷新，userscript 与 broker 的连接会随刷新断开，此后的 page.request 不会再有响应，不要浪费尝试。';
   function submitToAgent(prompt, targetName) {
     return new Promise((resolve) => {
       if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
       const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'submit', resolve });
-      if (!sendFrame(frameSubmit(id, prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT, targetName))) {
+      const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
+      if (!sendFrame(frameSubmit(id, promptText, targetName))) {
         pending.delete(id);
         resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
         return;
@@ -1770,7 +1784,6 @@
     disconnect: disconnectBroker,
     settings: openSettings,
     send: (prompt, target) => submitToAgent(prompt, target),
-    targets: () => targets.slice(),
     targets: () => targets.slice(),
     refreshTargets: refreshTargets,
     snapshot: loadBatch,
