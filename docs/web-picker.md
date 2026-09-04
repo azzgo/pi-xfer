@@ -11,7 +11,15 @@ page side:
 - **Send flow** — a prompt (optional — leaving it empty sends a default that
   responds to each pick's note, or explains the element's rendering) plus the
   picked annotations, delivered as an xfer handoff into a local pi session
-  (`annotation.submit` → `ack`).
+  (`annotation.submit` → `ack`). ⌘/Ctrl+Enter in the prompt textarea sends.
+- **Copy handoff prompt (v1.10)** — the send button is a split button group
+  (发送 → + ▾). The ▾ dropdown's **复制 handoff prompt** asks the broker to
+  render the exact handoff document a submit would deliver
+  (`annotation.compose` → `ack{prompt}` — render only, nothing is written or
+  delivered) and copies it to the clipboard. Non-pi coding agents that have
+  bash but no xfer can then receive the same handoff: paste the prompt and
+  they can call `node broker-main.ts page-tool <target> <op>` for follow-up
+  page queries themselves.
 - **Page tools (v1.6)** — agent tool calls arrive as `page.request{tool:{op, params}}`
   frames and run against this page: `page.info` · `dom.query` · `dom.html` ·
   `console.logs` · `network.log` · `framework.inspect` (fixed read-only op
@@ -28,6 +36,7 @@ shapes below match `mock-broker.mjs`, `.pi/wayfinder/prototypes/`).
 | Direction | Frame | Shape |
 |-----------|-------|-------|
 | page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` |
+| page → broker | `annotation.compose` | `{id, page, picks, prompt, target?}` → `ack{result:{prompt:<handoff doc>}}`（只渲染，不落盘不投递） |
 | page → broker | `targets.list` | `{id}` |
 | broker → page | `page.request` | `{id, handoff_id, from, tool:{op, params?}, timeoutMs}` |
 | page → broker | `page.response` | `{id, ok:true, text}` / `{id, ok:false, error}` |
@@ -57,6 +66,7 @@ corner.
 | ⇧Enter / ⇧click (pick mode) | add / remove the highlighted element to the pending group |
 | Enter (with a pending group) | open the group note card → one shared note for all members |
 | Enter (no pending group) | pin the highlighted element for a solo note, as before |
+| ⌘/Ctrl+Enter (prompt textarea) | send the batch (same as clicking 发送 →) |
 
 The fab's top-left dot is the broker status: grey = off, amber = connecting,
 green = connected.

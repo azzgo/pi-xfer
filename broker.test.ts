@@ -484,6 +484,66 @@ describe("broker daemon (integration)", () => {
     ws.destroy();
   });
 
+  it("annotation.compose returns the rendered handoff doc without writing or notifying", async () => {
+    const xferDir = freshXferDir();
+    const daemon = await spawnDaemon(xferDir);
+    const ws = await RawWs.connect(daemon.port);
+    ws.sendText(JSON.stringify({ v: 0, type: "hello" }));
+    await ws.next(); // welcome
+
+    ws.sendText(
+      JSON.stringify({
+        v: 0,
+        type: "annotation.compose",
+        id: "c1",
+        prompt: "inspect these",
+        page: { url: "https://example.com/", title: "Example", ts: 1_700_000_000_000 },
+        picks: [
+          { selector: "#cta", xpath: '//*[@id="cta"]', textPreview: "Go", rect: { x: 0, y: 0, w: 10, h: 10 }, note: "look" },
+        ],
+        target: { namespace: "local", name: "someone" },
+      }),
+    );
+    const reply = JSON.parse((await ws.next(5000)).payload.toString("utf-8")) as {
+      type: string;
+      id: string;
+      result?: { prompt?: string };
+    };
+    assert.equal(reply.type, "ack");
+    assert.equal(reply.id, "c1");
+    const doc = reply.result?.prompt ?? "";
+    assert.match(doc, /# Web annotation handoff/);
+    assert.match(doc, /inspect these/);
+    assert.match(doc, /### #cta/);
+    assert.match(doc, /broker-main\.ts page-tool someone/);
+    assert.match(doc, /handoff_id: /);
+
+    const handoffId = /handoff_id: (\S+)/.exec(doc)?.[1] ?? "";
+    assert.ok(handoffId, "compose doc carries a handoff_id footer");
+    assert.equal(fs.existsSync(path.join(os.tmpdir(), `pi-xfer-${handoffId}.md`)), false, "no doc file written for a compose");
+    assert.match(daemon.stdout(), /\[compose\]/);
+    assert.doesNotMatch(daemon.stdout(), /\[xfer\] delivered/);
+    ws.destroy();
+  });
+
+  it("annotation.compose validates like submit and rejects a missing prompt", async () => {
+    const daemon = await spawnDaemon(freshXferDir());
+    const ws = await RawWs.connect(daemon.port);
+    ws.sendText(JSON.stringify({ v: 0, type: "hello" }));
+    await ws.next(); // welcome
+
+    ws.sendText(JSON.stringify({ v: 0, type: "annotation.compose", id: "c2", picks: [] }));
+    const reply = JSON.parse((await ws.next(5000)).payload.toString("utf-8")) as {
+      type: string;
+      id: string;
+      code?: string;
+    };
+    assert.equal(reply.type, "error");
+    assert.equal(reply.id, "c2");
+    assert.equal(reply.code, "invalid_payload");
+    ws.destroy();
+  });
+
   it("removes broker.pid and broker.json on SIGTERM and exits 0", async () => {
     const xferDir = freshXferDir();
     const daemon = await spawnDaemon(xferDir);

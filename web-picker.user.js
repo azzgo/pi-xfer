@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.9.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 页面工具只读采集（v1.9：拾取永不互相覆盖 + cssPath 同 tag 兄弟强制 nth-of-type + send 附带反向查询时机规则）
+// @version      1.10.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.10：发送按钮组（更多下拉：复制 handoff prompt）+ ⌘/Ctrl+Enter 发送）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_setClipboard
 // @grant        unsafeWindow
 // @connect      127.0.0.1
 // @run-at       document-idle
@@ -28,6 +29,14 @@
  * backward compatible). Panel note edits sync across members of the same group.
  *
  * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
+ *   - v1.10: the send button becomes a split button group (发送 → + ▾ more
+ *     dropdown). The dropdown's 复制 handoff prompt asks the broker to render
+ *     the EXACT handoff doc a submit would deliver (annotation.compose —
+ *     broker-only info like the page-tool CLI path and follow-up channel
+ *     instructions are baked in) and copies it to the clipboard, so a non-pi
+ *     coding agent with bash access can receive the same handoff: paste it,
+ *     and it can call `node broker-main.ts page-tool <target> <op>` itself.
+ *     The prompt textarea sends with ⌘/Ctrl+Enter.
  *   - v1.9: picks are never deduped/overwritten (each pick is an independent
  *     record); cssPath forces nth-of-type whenever same-tag siblings exist so
  *     same-class table cells no longer collapse into one selector; every send
@@ -113,6 +122,7 @@
     KIND_HELLO: 'hello',
     KIND_WELCOME: 'welcome',
     KIND_SUBMIT: 'annotation.submit',
+    KIND_COMPOSE: 'annotation.compose',
     KIND_ACK: 'ack',
     KIND_ERROR: 'error',
     KIND_TARGETS_LIST: 'targets.list',
@@ -144,6 +154,17 @@
       picks: loadBatch(),
       prompt,
       target: { namespace: PROTOCOL.NS_LOCAL, name: targetName },
+    });
+  }
+  // 与 submit 同构（page/picks/prompt/target），但 target 可省略——compose 只用
+  // 它渲染 follow-up 示例里的 fromTarget，没有目标也能渲染。
+  function frameCompose(id, prompt, targetName) {
+    return frame(PROTOCOL.KIND_COMPOSE, {
+      id,
+      page: { url: location.href, title: document.title },
+      picks: loadBatch(),
+      prompt,
+      ...(targetName ? { target: { namespace: PROTOCOL.NS_LOCAL, name: targetName } } : {}),
     });
   }
   function frameTargetsList(id) {
@@ -478,6 +499,19 @@
       #sendbox textarea { background: #fff; }
       #sendbox .trow { display: flex; gap: 6px; align-items: center; }
       #sendbox .srow { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+      /* ---- split send button group（发送 + ▾ 更多下拉）---- */
+      #sendgroup { position: relative; display: flex; flex: none; }
+      #sendgroup #sendbtn { border-radius: 8px 0 0 8px; }
+      #sendgroup #sendmore { border-radius: 0 8px 8px 0; padding: 7px 8px; font-size: 10px;
+        border-left: 1px solid rgba(255,255,255,.30); }
+      #sendmenu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20;
+        background: #fff; border: 1px solid var(--wp-line); border-radius: 10px;
+        box-shadow: var(--wp-shadow); padding: 4px; min-width: 230px; display: none; }
+      #sendmenu.open { display: block; }
+      #sendmenu .mitem { padding: 7px 10px; border-radius: 7px; cursor: pointer;
+        font: 600 12px/1.5 var(--wp-font); color: var(--wp-ink); }
+      #sendmenu .mitem:hover { background: #eaf1ff; }
+      #sendmenu .msub { font: 400 10px/1.5 var(--wp-font); color: var(--wp-muted); margin-top: 1px; }
       #connstate { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500;
         color: var(--wp-muted); flex: 1; cursor: pointer; user-select: none; white-space: nowrap; }
       #connstate .dot { flex: none; width: 9px; height: 9px; border-radius: 50%;
@@ -528,7 +562,7 @@
       <div class="ph"><b>已选备注</b><span class="cnt2" id="pcount"></span><button id="pclose" title="关闭 Esc">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
-        <div class="lbl">发送到 agent（prompt 指令，可留空）</div>
+        <div class="lbl">发送到 agent（⌘/Ctrl+Enter 发送 · prompt 可留空）</div>
         <textarea id="prompt" placeholder="要让 agent 做什么？留空 = 回应各标注的 note / 解释元素渲染逻辑"></textarea>
         <div class="trow">
           <span class="lbl">目标</span>
@@ -541,7 +575,13 @@
         <div class="srow">
           <span id="connstate"><span class="dot"></span><span id="conntext">未连接 · 点击连接</span></span>
           <button class="ghost" id="clearbtn">清空</button>
-          <button class="primary" id="sendbtn">发送 →</button>
+          <div id="sendgroup">
+            <button class="primary" id="sendbtn">发送 →</button>
+            <button class="primary more" id="sendmore" title="更多操作">▾</button>
+            <div id="sendmenu">
+              <div class="mitem" id="copyprompt">⧉ 复制 handoff prompt<div class="msub">broker 拼好完整 handoff 文档 → 剪贴板（发给任意有 bash 的 agent）</div></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -573,6 +613,7 @@
         elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
         elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
+        elSendGroup = $('sendgroup'), elSendMore = $('sendmore'), elSendMenu = $('sendmenu'), elCopyPrompt = $('copyprompt'),
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
         elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops');
 
@@ -952,7 +993,7 @@
     elPanel.style.display = 'flex';
     if (wsState === 'on') refreshTargets(); else renderTargetCombo();
   }
-  function closePanel() { panelOpen = false; closeDrop(); elPanel.style.display = 'none'; }
+  function closePanel() { panelOpen = false; closeDrop(); closeSendMenu(); elPanel.style.display = 'none'; }
   function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
   elPclose.addEventListener('click', closePanel);
   elPlist.addEventListener('change', (e) => {
@@ -1053,13 +1094,18 @@
       if (f.type === PROTOCOL.KIND_ACK) {
         const p = pending.get(f.id);
         if (p && p.kind === 'submit') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
+        else if (p && p.kind === 'compose') {
+          pending.delete(f.id);
+          p.resolve({ ok: true, text: f.result && typeof f.result.prompt === 'string' ? f.result.prompt : '' });
+        }
         return;
       }
       if (f.type === PROTOCOL.KIND_ERROR) {
         const p = pending.get(f.id);
         if (p) {
           pending.delete(f.id);
-          p.resolve(p.kind === 'submit' ? { ok: false, code: f.code, message: f.message } : []);
+          p.resolve(p.kind === 'submit' ? { ok: false, code: f.code, message: f.message }
+            : p.kind === 'compose' ? { ok: false, code: f.code, message: f.message } : []);
         } else {
           toast('broker 错误: ' + (f.code || '?'));
         }
@@ -1124,6 +1170,51 @@
         if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: 'broker 无响应' }); }
       }, 10000);
     });
+  }
+
+  // ---------- compose flow（v1.10）：broker 拼完整 handoff 文档 → 剪贴板 ----------
+  // prompt 组装与 submit 完全一致（留空落 DEFAULT_PROMPT + PAGE_QUERY_RULE），
+  // broker 侧用同一个 renderHandoffDoc 渲染，但不落盘不投递——只是把最终发给
+  // agent 的完整 prompt 交还给页面。这样非 pi 的 code agent（有 bash 无 xfer）
+  // 拿到的信息与真正 handoff 等价：文档里已含 page-tool CLI 路径与用法。
+  function requestCompose(prompt, targetName) {
+    return new Promise((resolve) => {
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
+      const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pending.set(id, { kind: 'compose', resolve });
+      const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
+      if (!sendFrame(frameCompose(id, promptText, targetName))) {
+        pending.delete(id);
+        resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
+        return;
+      }
+      setTimeout(() => {
+        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: 'broker 无响应' }); }
+      }, 10000);
+    });
+  }
+  function copyText(text) {
+    try { GM_setClipboard(text, 'text'); return true; } catch (e) { /* fall through to web clipboard */ }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+        return true;
+      }
+    } catch (e) { /* clipboard API unavailable */ }
+    return false;
+  }
+  async function copyHandoffPrompt() {
+    closeSendMenu();
+    if (wsState !== 'on') { toast('先连接 broker（点击左下状态）'); return; }
+    const prompt = elPrompt.value.trim();
+    const target = comboSel;
+    const hasPicks = loadBatch().length > 0;
+    if (!prompt && !hasPicks) { toast('先标注元素或写 prompt'); return; }
+    toast('正在向 broker 请求完整 handoff prompt…');
+    const res = await requestCompose(prompt, target);
+    if (!res.ok) { toast('拼 prompt 失败: ' + res.code + (res.message ? ' — ' + res.message : '')); return; }
+    if (!copyText(res.text)) { toast('剪贴板不可用（需 GM_setClipboard 或 https/localhost）'); return; }
+    toast('handoff prompt 已复制（' + res.text.length + ' 字符 · 可粘贴给任意 agent）');
   }
 
   // ---------- targets (targets.list → targets.result) + searchable combobox ----------
@@ -1267,7 +1358,7 @@
       toast(targets.length ? '目标列表已刷新（' + targets.length + '）' : '没有发现活跃 local session'));
   });
 
-  elSend.addEventListener('click', async () => {
+  async function doSend() {
     const prompt = elPrompt.value.trim();            // 可留空 → submitToAgent 落到 DEFAULT_PROMPT
     const target = comboSel;
     if (!target) {
@@ -1291,7 +1382,32 @@
     } else {
       toast('发送失败: ' + res.code + (res.message ? ' — ' + res.message : ''));
     }
+  }
+  elSend.addEventListener('click', doSend);
+  // ⌘/Ctrl+Enter 发送——写完 prompt 不必再伸手点鼠标
+  elPrompt.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); doSend(); }
   });
+
+  // ---------- 更多下拉（split button 的 ▾）----------
+  let sendMenuOpen = false;
+  function closeSendMenu() {
+    if (!sendMenuOpen) return;
+    sendMenuOpen = false;
+    elSendMenu.classList.remove('open');
+  }
+  elSendMore.addEventListener('click', () => {
+    sendMenuOpen = !sendMenuOpen;
+    elSendMenu.classList.toggle('open', sendMenuOpen);
+  });
+  elCopyPrompt.addEventListener('click', copyHandoffPrompt);
+  window.addEventListener('pointerdown', (e) => {
+    if (!sendMenuOpen) return;
+    const path = e.composedPath ? e.composedPath() : [];
+    if (path.indexOf(elSendGroup) >= 0) return;
+    closeSendMenu();
+  }, true);
   elClear.addEventListener('click', () => {
     const n = loadBatch().length;
     if (!n) return;
@@ -1721,6 +1837,10 @@
   }, true);
 
   document.addEventListener('keydown', (e) => {
+    // Esc 收起「更多」下拉（在 target 下拉/面板之前处理）
+    if (sendMenuOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault(); e.stopPropagation(); closeSendMenu(); return;
+    }
     // Esc 优先收起 target 下拉（capture 阶段拦截，避免顺带把整个面板也关了）
     if (comboOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault(); e.stopPropagation(); closeDrop(); return;
@@ -1784,6 +1904,7 @@
     disconnect: disconnectBroker,
     settings: openSettings,
     send: (prompt, target) => submitToAgent(prompt, target),
+    copyPrompt: copyHandoffPrompt,
     targets: () => targets.slice(),
     refreshTargets: refreshTargets,
     snapshot: loadBatch,

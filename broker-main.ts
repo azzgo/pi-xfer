@@ -10,11 +10,14 @@
  *                          any frame before hello → error{auth_failed} (nothing
  *                          is actually authenticated — localhost-trust model —
  *                          the branch is kept for protocol compat).
- *   - annotation.submit → validates {prompt, picks, target}, writes the handoff
- *                          doc (os.tmpdir()/pi-xfer-<msg_id>.md, 0600), pushes an
- *                          xfer-notify frame to <xfer-dir>/<target>.sock, then
- *                          acks {handoff_id, doc} or errors (invalid_payload,
- *                          bad_target, target_not_found, delivery_failed).
+   *   - annotation.submit → validates {prompt, picks, target}, writes the handoff
+   *                          doc (os.tmpdir()/pi-xfer-<msg_id>.md, 0600), pushes an
+   *                          xfer-notify frame to <xfer-dir>/<target>.sock, then
+   *                          acks {handoff_id, doc} or errors (invalid_payload,
+   *                          bad_target, target_not_found, delivery_failed).
+   *   - annotation.compose → render-only twin: the same handoff doc returned in
+   *                          the ack as {prompt} (no write, no notify) for the
+   *                          web picker's copy-prompt flow.
  *   - page.request/page.response — reverse tool channel: routePageTool()
  *                          broadcasts a tool call {tool:{op, params}} (MCP-style
  *                          fixed op table — no free-form code) to every welcomed
@@ -64,6 +67,7 @@ const WIRE_WELCOME = "welcome";
 const WIRE_ERROR = "error";
 const WIRE_ACK = "ack";
 const WIRE_ANNOTATION_SUBMIT = "annotation.submit";
+const WIRE_ANNOTATION_COMPOSE = "annotation.compose";
 const WIRE_TARGETS_LIST = "targets.list";
 const WIRE_TARGETS_RESULT = "targets.result";
 const WIRE_PAGE_REQUEST = "page.request";
@@ -387,6 +391,56 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
     });
 }
 
+/**
+ * annotation.compose — render-only twin of annotation.submit: the same handoff
+ * doc (renderHandoffDoc, incl. the broker-only bits: brokerCliPath, follow-up
+ * channel section) returned in the ack as `result.prompt`, but no file write,
+ * no xfer-notify, no latestHandoffByTarget registration. The web picker uses
+ * it for the "copy prompt" flow so a non-pi agent (bash-only) gets the exact
+ * document a delivered handoff would carry. Target is optional: it only
+ * substitutes into the page-tool example as `fromTarget`.
+ */
+function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
+  const id = frameId(frame);
+  const prompt = frame.prompt;
+  const picks = frame.picks;
+
+  const missing: string[] = [];
+  if (typeof prompt !== "string" || prompt.trim() === "") missing.push("prompt");
+  if (!Array.isArray(picks)) missing.push("picks");
+  if (missing.length > 0) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `missing or invalid: ${missing.join(", ")}`);
+    return;
+  }
+
+  const target =
+    typeof frame.target === "object" && frame.target !== null ? (frame.target as Record<string, unknown>) : null;
+  const targetName = typeof target?.name === "string" && target.name.trim() !== "" ? target.name : undefined;
+
+  const msgId = nextMsgId();
+  const pageRaw = typeof frame.page === "object" && frame.page !== null ? (frame.page as Record<string, unknown>) : {};
+  let content: string;
+  try {
+    content = renderHandoffDoc({
+      msgId,
+      prompt,
+      page: {
+        url: typeof pageRaw.url === "string" ? pageRaw.url : "",
+        title: typeof pageRaw.title === "string" ? pageRaw.title : "",
+        ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now(),
+      },
+      picks: picks as HandoffPick[],
+      fromTarget: targetName,
+      brokerCliPath: path.join(import.meta.dirname, "broker-main.ts"),
+    });
+  } catch (error) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id, result: { prompt: content } });
+  console.log(`[compose] rendered handoff preview ${msgId} (${(picks as unknown[]).length} picks${targetName ? ` → local:${targetName}` : ""}, not delivered)`);
+}
+
 function handleTargetsList(connection: WsConnection, frame: Frame, xferDir: string): void {
   const targets = listTargets(xferDir);
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_TARGETS_RESULT, id: frameId(frame), targets });
@@ -650,6 +704,7 @@ function handleInboundPageRequest(): void {
 function buildFrameHandlers(xferDir: string): Record<string, FrameHandler> {
   return {
     [WIRE_ANNOTATION_SUBMIT]: (connection, frame) => handleAnnotationSubmit(connection, frame, xferDir),
+    [WIRE_ANNOTATION_COMPOSE]: (connection, frame) => handleAnnotationCompose(connection, frame),
     [WIRE_TARGETS_LIST]: (connection, frame) => handleTargetsList(connection, frame, xferDir),
     [WIRE_PAGE_REQUEST]: () => handleInboundPageRequest(),
     [WIRE_PAGE_RESPONSE]: (connection, frame) => handlePageResponse(connection, frame),
