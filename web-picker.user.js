@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.10.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.10：发送按钮组（更多下拉：复制 handoff prompt）+ ⌘/Ctrl+Enter 发送）
+// @version      1.11.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.11：工具栏/卡片/面板可拖动 + 待处理组合 ⌫/点组号/工具栏清空 + 清空标注免确认）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -27,6 +27,16 @@
  * member submits as a regular payloadFor record plus an optional `group` id string
  * linking members (solo picks never carry `group`, so the wire schema stays
  * backward compatible). Panel note edits sync across members of the same group.
+ *
+ * Draggable chrome + group reset (new in v1.11): the pick toolbar, note card
+ * and note panel are drag-repositionable anywhere in the viewport (panel via
+ * its header; positions persist per-tab in sessionStorage `pi.wp.barPos` /
+ * `pi.wp.panelPos`). The toolbar now takes pointer events: tap 冻结 toggles
+ * freeze, tap 退出 leaves pick mode, and a ⌫清空组合 chip appears while a
+ * shift-group is pending (the Backspace key works too). Each amber group
+ * mark's number badge is clickable and removes that one element from the
+ * pending group. The panel's 清空 no longer asks for confirmation —
+ * annotations are lightweight by design.
  *
  * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
  *   - v1.10: the send button becomes a split button group (发送 → + ▾ more
@@ -74,6 +84,8 @@
  *   - pi.wp.picks   sessionStorage  per-tab pick batch (array of payloadFor
  *                                   records; schema below must stay stable)
  *   - pi.wp.fabPos  sessionStorage  fab position {x, y}
+ *   - pi.wp.barPos  sessionStorage  pick toolbar position {x, y} (after first drag)
+ *   - pi.wp.panelPos sessionStorage  note panel position {x, y} (after first drag)
  *   - pi.wp.debug   GM storage      debug flag (boolean; toggle at runtime via
  *                                   window.__PI_WP_API__.setDebug(true|false))
  *   - wp.brokerUrl  GM storage      broker WS URL override (settings modal)
@@ -86,7 +98,9 @@
  *   2. Replace the editor content with this entire file and save (Ctrl/Cmd+S).
  *   3. Reload any page: the round fab appears near the bottom-right corner.
  *      ⇧⌥P = enter/exit pick mode, ⇧⌥L = toggle the note panel (send box inside);
- *      in pick mode ⇧Enter/⇧click add elements to a group, Enter submits its note.
+ *      in pick mode ⇧Enter/⇧click add elements to a group, Enter submits its note,
+ *      ⌫ (or the toolbar chip / a group mark's number badge) clears pending group
+ *      members; toolbar / note card / panel are all draggable.
  */
 (() => {
   'use strict';
@@ -97,6 +111,8 @@
   // ---------- constants ----------
   const KEY_PICKS = 'pi.wp.picks';          // per-tab batch (sessionStorage)
   const KEY_POS = 'pi.wp.fabPos';           // fab position (sessionStorage)
+  const KEY_BAR_POS = 'pi.wp.barPos';       // pick toolbar position (sessionStorage)
+  const KEY_PANEL_POS = 'pi.wp.panelPos';   // note panel position (sessionStorage)
   const GM_DEBUG = 'pi.wp.debug';           // debug flag (GM storage)
   const HOST_FLAG = 'data-pi-wp-host';
   const MAX_DEPTH = 8;
@@ -366,7 +382,7 @@
         background: rgba(245,158,11,.10); border-radius: 3px; pointer-events: none; }
       .gmark .gi { position: absolute; top: -16px; left: -2px; background: var(--wp-amber);
         color: #fff; font: 700 10px/16px var(--wp-mono); padding: 0 5px;
-        border-radius: 4px 4px 4px 0; white-space: nowrap; }
+        border-radius: 4px 4px 4px 0; white-space: nowrap; pointer-events: auto; cursor: pointer; }
       #badge { position: fixed; top: 0; left: 0; transform: translate(-50%, -150%);
         background: var(--wp-dark); color: #fff; font: 600 11px/1.4 var(--wp-font);
         padding: 4px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; display: none;
@@ -381,12 +397,15 @@
       #bar { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
         background: rgba(15,21,34,.96); color: #cbd5e1; font: 12px/1 var(--wp-font);
         padding: 9px 16px; border-radius: 999px; display: none; gap: 14px; align-items: center;
-        box-shadow: 0 8px 24px rgba(15,23,42,.35); user-select: none; pointer-events: none;
-        backdrop-filter: blur(6px); }
+        box-shadow: 0 8px 24px rgba(15,23,42,.35); user-select: none; pointer-events: auto;
+        cursor: move; backdrop-filter: blur(6px); }
       #bar b { color: #fff; letter-spacing: .08em; font-size: 11px; }
       #bar kbd { background: #1e293b; border: 1px solid #334155; border-bottom-width: 2px;
         border-radius: 4px; padding: 1px 5px; font: 10.5px var(--wp-mono); color: #e2e8f0; }
       #bar .muted { color: #94a3b8; display: inline-flex; gap: 3px; align-items: center; }
+      /* 可点的提示块（清空组合 / 冻结 / 退出）给 pointer 反馈；其余纯提示保持 move */
+      #bar #gclear, #bar #fz, #bar #escx { cursor: pointer; }
+      #bar #gclear:hover, #bar #fz:hover, #bar #escx:hover { color: #fff; }
       #bar #fz.on kbd { background: #0c4a6e; border-color: #0369a1; color: #e0f2fe; }
       #bar #gh.on kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
       /* ---- fab ---- */
@@ -414,7 +433,7 @@
         box-shadow: var(--wp-shadow); color: var(--wp-ink);
         font: 13px/1.5 var(--wp-font); z-index: 2147483647; pointer-events: auto;
       }
-      #card { position: fixed; width: 300px; padding: 14px; display: none; }
+      #card { position: fixed; width: 300px; padding: 14px; display: none; cursor: move; }
       #card .sel { font: 11px/1.5 var(--wp-mono); color: #475569; background: var(--wp-soft);
         border: 1px solid var(--wp-line); padding: 6px 8px; border-radius: 8px;
         word-break: break-all; white-space: pre-wrap; margin-bottom: 10px; max-height: 70px; overflow: auto; }
@@ -465,7 +484,7 @@
         display: none; flex-direction: column; }
       #panel .ph { display: flex; align-items: center; gap: 8px; padding: 11px 14px;
         background: var(--wp-soft); border-bottom: 1px solid var(--wp-line); user-select: none;
-        border-radius: var(--wp-radius) var(--wp-radius) 0 0; }
+        cursor: move; border-radius: var(--wp-radius) var(--wp-radius) 0 0; }
       #panel .ph b { flex: 1; font-size: 13px; font-weight: 600; }
       #panel .ph .cnt2 { color: var(--wp-muted); font-size: 11px; }
       #panel .ph button { background: transparent; color: var(--wp-muted); padding: 3px 8px; border-radius: 6px; }
@@ -546,9 +565,10 @@
       <span class="muted"><kbd>[</kbd><kbd>]</kbd>切层</span>
       <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>跳层</span>
       <span class="muted"><kbd>Enter</kbd>选中</span>
-      <span class="muted" id="gh"><kbd>⇧Enter</kbd>加组</span>
+      <span class="muted" id="gh"><kbd>⇧Enter</kbd>加组/移出</span>
+      <span class="muted" id="gclear" style="display:none" title="清空待处理组合（也可按 ⌫）"><kbd>⌫</kbd>清空组合</span>
       <span class="muted" id="fz"><kbd>F</kbd>冻结</span>
-      <span class="muted"><kbd>Esc</kbd>退出</span>
+      <span class="muted" id="escx" title="退出拾取模式"><kbd>Esc</kbd>退出</span>
     </div>
     <div id="card">
       <div class="sel" id="sel"></div>
@@ -559,7 +579,7 @@
       </div>
     </div>
     <div id="panel">
-      <div class="ph"><b>已选备注</b><span class="cnt2" id="pcount"></span><button id="pclose" title="关闭 Esc">✕</button></div>
+      <div class="ph" id="ph"><b>已选备注</b><span class="cnt2" id="pcount"></span><button id="pclose" title="关闭 Esc">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
         <div class="lbl">发送到 agent（⌘/Ctrl+Enter 发送 · prompt 可留空）</div>
@@ -607,9 +627,10 @@
 
   const $ = (id) => root.getElementById(id);
   const elHL = $('hl'), elGWrap = $('gwrap'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
+        elGCLEAR = $('gclear'), elEscX = $('escx'),
         elFab = $('fab'), elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
-        elPanel = $('panel'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
+        elPanel = $('panel'), elPH = $('ph'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
         elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
         elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
@@ -713,6 +734,7 @@
     pickMode = on;
     host.style.pointerEvents = 'none';
     elBar.style.display = on ? 'flex' : 'none';
+    if (on) barDrag.clamp();               // 隐藏期间视口可能缩小过，先拉回可视区
     elFab.style.display = on ? 'none' : 'block';
     document.body.style.cursor = on ? 'crosshair' : '';
     if (on) { frozen = true; closePanel(); renderGroupMarks(); }
@@ -774,6 +796,87 @@
   window.addEventListener('pointerdown', fabPointerDown, true);
   window.addEventListener('pointermove', fabPointerMove, true);
   window.addEventListener('pointerup', fabPointerUp, true);
+
+  // ---------- 浮层拖动（pick 工具栏 / 备注卡片 / 标注面板） ----------
+  // 统一拖动实现：按住 handle 移动 el（fixed + left/top，拖动时清掉 right/
+  // transform 这类锚定样式），位移超过 4px 才算拖动，否则 pointerup 时触发
+  // onTap（工具栏上的可点提示块靠它工作）。刻意不用 setPointerCapture：capture
+  // 会把 pointerup/click 重定向到 handle，handle 内部的可点块就收不到 click 了；
+  // 改挂 window 级 move/up，事件对页面侧已有 isOurUI / host 吞事件兜底。
+  function makeDraggable(el, handle, opts) {
+    const o = opts || {};
+    let drag = null;
+    function clampPos(x, y) {
+      const r = el.getBoundingClientRect();
+      return {
+        x: Math.max(4, Math.min(window.innerWidth - Math.max(48, r.width) - 4, x)),
+        y: Math.max(4, Math.min(window.innerHeight - Math.max(28, r.height) - 4, y)),
+      };
+    }
+    function apply(x, y) {
+      const p = clampPos(x, y);
+      el.style.left = p.x + 'px';
+      el.style.top = p.y + 'px';
+      el.style.right = 'auto';
+      el.style.transform = 'none';
+    }
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest && e.target.closest('button, textarea, input, select')) return;
+      const r = el.getBoundingClientRect();
+      drag = { sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, target: e.target, moved: false };
+      e.preventDefault();
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) <= 4) return;
+      drag.moved = true;
+      apply(drag.ox + e.clientX - drag.sx, drag.oy + e.clientY - drag.sy);
+    }, true);
+    window.addEventListener('pointerup', (e) => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      if (!d.moved) { if (o.onTap) o.onTap(d.target, e); return; }
+      if (!o.key) return;
+      try {
+        const r = el.getBoundingClientRect();
+        sessionStorage.setItem(o.key, JSON.stringify({ x: r.left, y: r.top }));
+      } catch (err) { /* position won't persist */ }
+    }, true);
+    window.addEventListener('pointercancel', () => { drag = null; }, true);
+    if (o.key) {
+      try {
+        const s = sessionStorage.getItem(o.key);
+        if (s) { const p = JSON.parse(s); if (typeof p.x === 'number' && typeof p.y === 'number') apply(p.x, p.y); }
+      } catch (err) { /* fall back to the CSS default position */ }
+    }
+    return {
+      // 视口变小（打开 devtools 等）后把浮层拉回可视区；隐藏中的浮层跳过，
+      // 由 setActive/openPanel 显示时补 clamp
+      clamp() {
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        const p = clampPos(r.left, r.top);
+        if (p.x !== r.left || p.y !== r.top) apply(p.x, p.y);
+      },
+    };
+  }
+  const barDrag = makeDraggable(elBar, elBar, {
+    key: KEY_BAR_POS,
+    onTap(target) {
+      const t = target && target.closest ? target : null;
+      if (!t) return;
+      if (t.closest('#gclear')) clearPendingGroup();
+      else if (t.closest('#fz')) toggleFreeze();
+      else if (t.closest('#escx')) setActive(false);
+    },
+  });
+  const cardDrag = makeDraggable(elCard, elCard, {});
+  const panelDrag = makeDraggable(elPanel, elPH, { key: KEY_PANEL_POS });
+  window.addEventListener('resize', () => {
+    barDrag.clamp(); panelDrag.clamp(); cardDrag.clamp();
+  }, true);
 
   function moveCapture(e) {
     if (!pickMode) return;
@@ -867,6 +970,17 @@
     renderGroupMarks();
     updateGroupUI();
   }
+  // 一次性清空待处理组合（⌫ / 工具栏 chip）。组合只存内存，之前唯一的移出方式是
+  // 重新 hover 回原元素再按 ⇧Enter，实际用起来等于"无法取消"。
+  function clearPendingGroup() {
+    if (!groupEls.length) return;
+    const n = groupEls.length;
+    groupEls = [];
+    if (groupCard) closeGroupCard();       // 组都没了，组备注卡片一并收起
+    renderGroupMarks();
+    updateGroupUI();
+    toast('已清空待处理组合（' + n + ' 项）');
+  }
   function groupAt(x, y) {
     const st = stackAt(x, y);
     if (!st.length) return;
@@ -887,15 +1001,29 @@
       const tag = document.createElement('span');
       tag.className = 'gi';
       tag.textContent = String(i + 1);
+      tag.setAttribute('data-gi', String(i));     // 点徽标按它移出对应元素
+      tag.title = '点击移出组合';
       m.appendChild(tag);
       elGWrap.appendChild(m);
     });
   }
+  // 点琥珀色 mark 的序号徽标 = 把该元素移出组合（不必再 hover 回原元素按 ⇧Enter）
+  elGWrap.addEventListener('click', (e) => {
+    const tag = e.target && e.target.closest ? e.target.closest('.gi') : null;
+    if (!tag) return;
+    const i = +tag.getAttribute('data-gi');
+    if (!(i >= 0) || !groupEls[i]) return;
+    groupEls.splice(i, 1);
+    renderGroupMarks();
+    updateGroupUI();
+    toast('已移出组合（剩 ' + groupEls.length + ' 项）');
+  });
   function updateGroupUI() {
     const n = groupEls.length;
     elGH.classList.toggle('on', n > 0);
-    elGH.innerHTML = '<kbd>⇧Enter</kbd>加组' +
+    elGH.innerHTML = '<kbd>⇧Enter</kbd>加组/移出' +
       (n ? ' · <kbd>Enter</kbd>组备注(' + n + ')' : '');
+    elGCLEAR.style.display = n ? 'inline-flex' : 'none';
   }
   function openGroupCard() {
     if (!groupEls.length || pinned) return;
@@ -991,6 +1119,7 @@
     panelOpen = true;
     renderPanel();
     elPanel.style.display = 'flex';
+    panelDrag.clamp();
     if (wsState === 'on') refreshTargets(); else renderTargetCombo();
   }
   function closePanel() { panelOpen = false; closeDrop(); closeSendMenu(); elPanel.style.display = 'none'; }
@@ -1411,7 +1540,9 @@
   elClear.addEventListener('click', () => {
     const n = loadBatch().length;
     if (!n) return;
-    if (confirm('清空本页全部 ' + n + ' 条标注？')) { clearBatch(); renderPanel(); }
+    clearBatch();                          // 标注是轻量草稿，清空不做二次确认
+    renderPanel();
+    toast('已清空 ' + n + ' 条标注');
   });
   // 未连接时点击 = 直接按已存/默认地址发起连接（不再先弹设置）；仅配对失败才打开设置
   elConn.addEventListener('click', () => {
@@ -1816,7 +1947,12 @@
     const fz = $('fz');
     if (!fz) return;
     fz.classList.toggle('on', frozen);
-    fz.title = frozen ? '冻结：页面交互已屏蔽，浮层不会因点击/hover 关闭' : '实时：hover 可触发页面（展开子菜单等）';
+    fz.title = frozen ? '冻结：页面交互已屏蔽，浮层不会因点击/hover 关闭（点击此提示可切换）' : '实时：hover 可触发页面（展开子菜单等）（点击此提示可切换）';
+  }
+  function toggleFreeze() {
+    frozen = !frozen;
+    updateFreezeUI();
+    toast(frozen ? '冻结：页面交互已屏蔽' : '实时：hover 可触发页面');
   }
   window.addEventListener('keydown', (e) => {
     const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
@@ -1830,9 +1966,7 @@
     }
     if (pickMode && !pinned && e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       e.preventDefault(); e.stopPropagation();
-      frozen = !frozen;
-      updateFreezeUI();
-      toast(frozen ? '冻结：页面交互已屏蔽' : '实时：hover 可触发页面');
+      toggleFreeze();
     }
   }, true);
 
@@ -1869,6 +2003,11 @@
       }
       return;
     }
+    if (e.key === 'Backspace' && groupEls.length && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault(); e.stopPropagation();
+      clearPendingGroup();                 // ⌫：清空待处理组合（工具栏 chip 同款）
+      return;
+    }
     if (e.key === 'Enter' && e.shiftKey && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault(); e.stopPropagation();
       toggleGroup(currentEl());          // ⇧Enter：当前高亮元素加入/移出组合
@@ -1893,7 +2032,7 @@
   refreshCount();
   updateGroupUI();
   renderTargetCombo();
-  debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ' + location.host);
+  debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ⌫ 清组 · ' + location.host);
 
   // ---------- programmatic API (DevTools console) ----------
   window.__PI_WP_API__ = {
