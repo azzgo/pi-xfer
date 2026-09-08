@@ -50,11 +50,11 @@ import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.js";
-import { renderHandoffDoc, type HandoffPick } from "./handoff-doc.js";
-import { listTargets } from "./targets.js";
-import { encodeAgentName } from "./utils.js";
-import { attachWsServer, type WsConnection } from "./ws-server.js";
+import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
+import { renderHandoffDoc, type HandoffPick } from "./handoff-doc.ts";
+import { listTargets } from "./targets.ts";
+import { encodeAgentName } from "./utils.ts";
+import { attachWsServer, type WsConnection } from "./ws-server.ts";
 
 /** Broker software version (welcome + /status + broker.json). */
 export const VERSION = "0.1.0";

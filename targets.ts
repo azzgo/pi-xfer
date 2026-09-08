@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { XFER_DIR } from "./constants.js";
-import type { TargetInfo } from "./types.js";
-import { decodeAgentName } from "./utils.js";
+import { XFER_DIR } from "./constants.ts";
+import type { TargetInfo } from "./types.ts";
+import { decodeAgentName } from "./utils.ts";
 
 /** Metadata-less fields used when the sibling `<name>.json` is absent or unreadable. */
 type SiblingMetadata = Pick<TargetInfo, "sessionName" | "cwd" | "status">;

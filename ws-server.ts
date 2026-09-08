@@ -17,7 +17,7 @@
 import * as crypto from "node:crypto";
 import * as http from "node:http";
 import type { Socket } from "node:net";
-import { MAX_FRAME_BYTES } from "./constants.js";
+import { MAX_FRAME_BYTES } from "./constants.ts";
 
 export const OPCODE_TEXT = 0x1;
 export const OPCODE_CLOSE = 0x8;
