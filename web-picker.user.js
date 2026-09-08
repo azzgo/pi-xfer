@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.11.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.11：工具栏/卡片/面板可拖动 + 待处理组合 ⌫/点组号/工具栏清空 + 清空标注免确认）
+// @version      1.11.5
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.11.5：仅当卡片/面板/设置浮层出现时才启用 focusin 与按下事件拦截（弹窗下可聚焦写 note、不误关 Radix 弹窗）；浮层不在时键盘/鼠标行为完全回到 v1.10）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -351,7 +351,19 @@
   const host = document.createElement('div');
   host.setAttribute(HOST_FLAG, '');
   Object.assign(host.style, { position: 'fixed', inset: '0', zIndex: '2147483647', pointerEvents: 'none' });
-  document.documentElement.appendChild(host);
+  // document-start 注入时 documentElement 可能尚未挂出——先注入一次（能的话），
+  // 否则等 DOMContentLoaded；MutationObserver 也等 documentElement 存在后再挂
+  function injectHost() {
+    if (host.isConnected || !document.documentElement) return;
+    document.documentElement.appendChild(host);
+  }
+  injectHost();
+  if (!host.isConnected) {
+    document.addEventListener('DOMContentLoaded', injectHost, { once: true });
+  } else {
+    new MutationObserver(() => { if (!host.isConnected) injectHost(); })
+      .observe(document.documentElement, { childList: true });
+  }
 
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `
@@ -679,8 +691,13 @@
     elFab.style.top = pos.y + 'px';
     return host.isConnected;
   }
-  new MutationObserver(() => { if (!host.isConnected) reinjectTrigger(); })
-    .observe(document.documentElement, { childList: true });
+  function observeHostRemoval() {
+    if (!document.documentElement) return;
+    new MutationObserver(() => { if (!host.isConnected) reinjectTrigger(); })
+      .observe(document.documentElement, { childList: true });
+  }
+  if (document.documentElement) observeHostRemoval();
+  else document.addEventListener('DOMContentLoaded', observeHostRemoval, { once: true });
 
   function toast(msg) {
     elToast.textContent = msg;
@@ -1970,6 +1987,7 @@
     }
   }, true);
 
+  // 挂 document capture（保持 v1.10 原样：卡片未出现时键盘行为与旧版一致）
   document.addEventListener('keydown', (e) => {
     // Esc 收起「更多」下拉（在 target 下拉/面板之前处理）
     if (sendMenuOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
@@ -2025,6 +2043,63 @@
         if (/^[1-9]$/.test(e.key)) { e.preventDefault(); idx = Math.min(stack.length - 1, +e.key - 1); refresh(); }
     }
   }, true);
+  // Radix 等模态弹窗的 FocusScope 会在 document 上监听 focusin（capture），发现焦点
+  // 落到弹窗容器之外就把焦点拉回去——host 挂在 documentElement 下，天然在 trap 外，
+  // 备注卡片/面板的输入框一聚焦就被抢走。window capture 先于 document 上的页面监听
+  // 执行，这里把指向自家 shadow root 的 focusin 拦下，弹窗就看不见这次聚焦。
+  // 仅在自家浮层（卡片/面板/设置）出现时启用新式拦截——按约定，浮层不在时
+  // 键盘/鼠标行为与 v1.10 完全一致。
+  function overlayActive() {
+    return pinned != null || groupCard || panelOpen || elSettings.style.display === 'block';
+  }
+  window.addEventListener('focusin', (e) => {
+    if (!overlayActive()) return;
+    const path = e.composedPath ? e.composedPath() : [];
+    if (path.indexOf(root) < 0) return;
+    e.stopPropagation();
+    // stopPropagation 在 window capture 会连「向 shadow 内部 descent」一起掐掉，
+    // 自家监听（如 target 输入框的 focus → 展开下拉）就收不到了——往真实目标
+    // 补发一个 composed:false 克隆，事件只在 shadow 内传播，页面侧仍然不可见。
+    const t = path[0];
+    if (!t || !t.dispatchEvent) return;
+    try {
+      t.dispatchEvent(new FocusEvent('focusin', {
+        bubbles: true, composed: false, cancelable: false,
+      }));
+    } catch (err) { /* shadow 内监听收不到这次的克隆，主流程不受影响 */ }
+  }, true);
+
+  // Radix DismissableLayer 一类「点外面即关闭」的层在 document 上监听
+  // pointerdown/mousedown（capture）。shadow 里发出的事件离开 shadow 边界时
+  // target 被重定向成 host，永远不在它的层内 → 点备注卡片就被当成「点击弹窗
+  // 外部」，页面弹窗当场关闭并把焦点还给自己的 dismiss 按钮，看起来像点击
+  // 穿透了浮层。这里在 window capture 末端把指向自家 UI 的按下事件拦下并
+  // 阻止传播，再在真实目标上补发一个 composed:false 的克隆：事件只在 shadow
+  // 内部传播（自家处理器照常工作），页面侧完全不可见。stopPropagation 不
+  // 取消默认行为，textarea 的点击聚焦照旧；同节点的其它 window 监听（fab
+  // 拖动、combo 外点收起）不受影响。
+  function isolatePress(e) {
+    if (!overlayActive()) return;
+    const path = e.composedPath ? e.composedPath() : [];
+    if (path.indexOf(root) < 0) return;
+    e.stopPropagation();
+    const t = path[0];
+    if (!t || !t.dispatchEvent) return;
+    const base = {
+      bubbles: true, composed: false, cancelable: true,
+      clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
+      button: e.button, buttons: e.buttons, detail: e.detail,
+    };
+    try {
+      t.dispatchEvent(new PointerEvent(e.type, Object.assign(base, {
+        pointerId: e.pointerId, pointerType: e.pointerType,
+        isPrimary: e.isPrimary, pressure: e.pressure,
+      })));
+    } catch (err) {
+      try { t.dispatchEvent(new MouseEvent(e.type, base)); } catch (err2) { /* keep the press local-only */ }
+    }
+  }
+  ['pointerdown', 'mousedown'].forEach((t) => window.addEventListener(t, isolatePress, true));
 
   window.addEventListener('scroll', () => { if (pickMode) { refresh(); renderGroupMarks(); } }, true);
   window.addEventListener('resize', () => { if (pickMode) { refresh(); renderGroupMarks(); } }, true);
