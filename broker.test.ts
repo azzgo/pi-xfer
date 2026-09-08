@@ -521,6 +521,8 @@ describe("broker daemon (integration)", () => {
     const handoffId = /handoff_id: (\S+)/.exec(doc)?.[1] ?? "";
     assert.ok(handoffId, "compose doc carries a handoff_id footer");
     assert.equal(fs.existsSync(path.join(os.tmpdir(), `pi-xfer-${handoffId}.md`)), false, "no doc file written for a compose");
+    // the daemon logs [compose] after sending the ack; let the stdout pipe drain before asserting
+    await new Promise((resolve) => setTimeout(resolve, 25));
     assert.match(daemon.stdout(), /\[compose\]/);
     assert.doesNotMatch(daemon.stdout(), /\[xfer\] delivered/);
     ws.destroy();
