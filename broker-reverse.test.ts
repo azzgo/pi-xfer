@@ -405,4 +405,97 @@ describe("broker reverse channel (integration)", () => {
     assert.ok(otherId);
     assert.equal(parseFrame(await tab.next()).handoff_id, "demo");
   });
+
+  it("tab addressing: page.request after a submit routes to the submitting tab, not other tabs", async () => {
+    const daemon = await startTestBroker();
+    await fakeSession(daemon.xferDir, "alpha");
+    const picker = await RawWs.connect(daemon.port);
+    const bystander = await RawWs.connect(daemon.port);
+    // hello with a stable page-lifetime tab id (as the userscript sends it)
+    picker.sendText(JSON.stringify({ v: 0, type: "hello", client: { tab: { id: "tab-abc", url: "https://example.com", title: "Example" } } }));
+    const pw = parseFrame(await picker.next());
+    assert.equal(pw.type, "welcome");
+    await welcome(bystander);
+
+    picker.sendText(
+      JSON.stringify({
+        v: 0,
+        type: "annotation.submit",
+        id: "a1",
+        prompt: "fix the button",
+        picks: [],
+        target: { name: "alpha" },
+        page: { url: "https://example.com", title: "Example", ts: 1_720_000_000_000 },
+      }),
+    );
+    const ack = parseFrame(await picker.next());
+    assert.equal(ack.type, "ack");
+
+    // Follow-up query goes ONLY to the submitting tab.
+    const requestId = routePageTool("alpha", { op: "dom.query", params: { selector: ".btn" } });
+    assert.ok(requestId);
+    const routed = parseFrame(await picker.next());
+    assert.equal(routed.type, "page.request");
+    assert.equal(routed.id, requestId);
+
+    // The bystander tab stays silent: no page.request within a short window.
+    await assert.rejects(bystander.next(200), /no frame within/);
+
+    // Resolve so the pending request does not linger.
+    picker.sendText(JSON.stringify({ v: 0, type: "page.response", id: requestId, ok: true, text: "{}" }));
+  });
+
+  it("tab addressing survives a same-id reload: reconnected tab keeps receiving the target's requests", async () => {
+    const daemon = await startTestBroker();
+    await fakeSession(daemon.xferDir, "alpha");
+    const first = await RawWs.connect(daemon.port);
+    first.sendText(JSON.stringify({ v: 0, type: "hello", client: { tab: { id: "tab-abc", url: "https://example.com", title: "Example" } } }));
+    parseFrame(await first.next()); // welcome
+    first.sendText(
+      JSON.stringify({
+        v: 0, type: "annotation.submit", id: "a1", prompt: "p", picks: [],
+        target: { name: "alpha" }, page: { url: "u", title: "t", ts: 0 },
+      }),
+    );
+    assert.equal(parseFrame(await first.next()).type, "ack");
+
+    // HMR full reload: the old connection drops, a new one hello's with the
+    // SAME tab id (userscript persists it in sessionStorage).
+    first.sendClose();
+    await sleep(150);
+    const reloaded = await RawWs.connect(daemon.port);
+    reloaded.sendText(JSON.stringify({ v: 0, type: "hello", client: { tab: { id: "tab-abc", url: "https://example.com", title: "Example" } } }));
+    assert.equal(parseFrame(await reloaded.next()).type, "welcome");
+
+    const requestId = routePageTool("alpha", { op: "page.info" });
+    assert.ok(requestId);
+    const routed = parseFrame(await reloaded.next());
+    assert.equal(routed.type, "page.request");
+    assert.equal(routed.id, requestId);
+    reloaded.sendText(JSON.stringify({ v: 0, type: "page.response", id: requestId, ok: true, text: "{}" }));
+  });
+
+  it("tab addressing falls back to broadcast when the recorded tab id never reconnects", async () => {
+    const daemon = await startTestBroker();
+    await fakeSession(daemon.xferDir, "alpha");
+    const picker = await RawWs.connect(daemon.port);
+    picker.sendText(JSON.stringify({ v: 0, type: "hello", client: { tab: { id: "tab-gone", url: "u", title: "t" } } }));
+    parseFrame(await picker.next());
+    picker.sendText(
+      JSON.stringify({
+        v: 0, type: "annotation.submit", id: "a1", prompt: "p", picks: [],
+        target: { name: "alpha" }, page: { url: "u", title: "t", ts: 0 },
+      }),
+    );
+    assert.equal(parseFrame(await picker.next()).type, "ack");
+    picker.sendClose();
+    await sleep(150);
+
+    const other = await RawWs.connect(daemon.port);
+    await welcome(other);
+    const requestId = routePageTool("alpha", { op: "page.info" });
+    assert.ok(requestId);
+    // Recorded tab is gone → broadcast reaches any live tab.
+    assert.equal(parseFrame(await other.next()).id, requestId);
+  });
 });

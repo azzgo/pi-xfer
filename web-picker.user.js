@@ -226,8 +226,21 @@
   }
   function frameHello() {
     return frame(PROTOCOL.KIND_HELLO, {
-      client: { ua: "tampermonkey", tab: { id: String(Date.now()), url: location.href, title: document.title } }
+      client: { ua: "tampermonkey", tab: { id: pageTabId(), url: location.href, title: document.title } }
     });
+  }
+  function pageTabId() {
+    const KEY = "pi.wp.tabId";
+    try {
+      let id = sessionStorage.getItem(KEY);
+      if (!id) {
+        id = "tab-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        sessionStorage.setItem(KEY, id);
+      }
+      return id;
+    } catch (e) {
+      return "tab-" + Date.now().toString(36);
+    }
   }
   function frameSubmit(id, prompt, targetName) {
     return frame(PROTOCOL.KIND_SUBMIT, {

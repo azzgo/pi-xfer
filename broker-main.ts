@@ -370,6 +370,12 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   }
   console.log(`[doc] ${doc} (${picks.length} picks → local:${targetName})`);
   latestHandoffByTarget.set(targetName, msgId); // the doc exists → page.requests can reference it
+  // Record the submitting tab so follow-up page.requests route back to it
+  // (survives same-id reloads; unknown tab id → broadcast fallback).
+  const submittingTab = activeConns?.get(connection);
+  if (submittingTab && typeof submittingTab.id === "string" && submittingTab.id !== "") {
+    latestTabIdByTarget.set(targetName, submittingTab.id);
+  }
 
   void pushXferNotify(xferDir, targetName, {
     type: WIRE_XFER_NOTIFY,
@@ -469,6 +475,18 @@ export const DEFAULT_PAGE_TIMEOUT_MS = 30_000;
 const latestHandoffByTarget = new Map<string, string>();
 
 /**
+ * Latest submitting tab (stable page-lifetime id) for each target. Set from
+ * the submitting connection's hello tab.id at annotation.submit; the follow-up
+ * page.requests route back to that tab instead of broadcasting — the page
+ * keeps the same id across HMR full reloads (sessionStorage), so verification
+ * queries land on the reloaded page, not on whichever tab answers first.
+ */
+const latestTabIdByTarget = new Map<string, string>();
+
+/** Live tab id → connection.hello registration map (module-level, mirrors activeConns). */
+let tabConns: Map<string, WsConnection> | null = null;
+
+/**
  * In-flight page.requests: requestId → entry. Settled entries stay put (so the
  * HTTP layer can still read the result and late responses are recognized as
  * such) until the map exceeds MAX_PENDING_PAGE_REQUESTS, when settled ones are
@@ -522,6 +540,13 @@ export function routePageTool(target: string, tool: PageTool, timeoutMs?: number
     console.log(`[page.request] no tabs connected → no_tabs (target ${target})`);
     return null;
   }
+  // Targeted routing: the tab that submitted the latest handoff for this
+  // target gets the call; fall back to broadcast when that tab is gone
+  // (never connected, or the page closed without a same-id reload).
+  const lastTabId = latestTabIdByTarget.get(target);
+  const targeted =
+    lastTabId !== undefined && tabConns !== null && tabConns.has(lastTabId) && activeConns!.has(tabConns.get(lastTabId)!);
+  const routed = targeted ? [tabConns.get(lastTabId!)] : tabs;
   const id = nextRequestId();
   const resolvedTimeout = timeoutMs ?? envPageTimeoutMs();
   const frame = {
@@ -534,12 +559,13 @@ export function routePageTool(target: string, tool: PageTool, timeoutMs?: number
     timeoutMs: resolvedTimeout,
   };
   let sent = 0;
-  for (const conn of tabs) {
+  for (const conn of routed) {
     conn.send(frame);
     sent++;
   }
+  const routedNote = routed.length === 1 && lastTabId !== undefined;
   console.log(
-    `[page.request ${id}] → ${sent} tab(s): ${tool.op} ${JSON.stringify(tool.params ?? {})} (handoff ${frame.handoff_id}, timeout ${resolvedTimeout}ms)`,
+    `[page.request ${id}] → ${sent} tab(s) ${routedNote ? `[tab ${lastTabId}]` : "(broadcast)"}: ${tool.op} ${JSON.stringify(tool.params ?? {})} (handoff ${frame.handoff_id}, timeout ${resolvedTimeout}ms)`,
   );
 
   let resolve!: (result: PageResult) => void;
@@ -728,8 +754,11 @@ export function handleFrame(
     if (conns.has(connection)) return; // already welcomed — ignore duplicates
     const tab = tabFromFrame(frame);
     conns.set(connection, tab);
+    // Stable page-lifetime tab id → live connection (targeted page.request).
+    const tabId = typeof tab.id === "string" && tab.id !== "" ? tab.id : null;
+    if (tabId !== null && tabConns !== null) tabConns.set(tabId, connection);
     connection.send({ v: PROTOCOL_VERSION, type: WIRE_WELCOME, broker: { version: VERSION } });
-    console.log(`[ws] hello: tab "${tab.title ?? "?"}" (${tab.url ?? "?"})`);
+    console.log(`[ws] hello: tab "${tab.title ?? "?"}" (${tab.url ?? "?"})${tabId !== null ? ` [${tabId}]` : ""}`);
     return;
   }
 
@@ -755,6 +784,7 @@ export function handleFrame(
 export async function startBroker(options: BrokerOptions): Promise<BrokerHandle> {
   const conns = new Map<WsConnection, TabInfo>();
   activeConns = conns;
+  tabConns = new Map();
   frameHandlers = buildFrameHandlers(options.xferDir);
   const startedAt = new Date().toISOString();
 
@@ -780,6 +810,11 @@ export async function startBroker(options: BrokerOptions): Promise<BrokerHandle>
     onMessage: (connection, message) => handleFrame(connection, message, conns),
     onClose: (connection) => {
       conns.delete(connection);
+      if (tabConns !== null) {
+        for (const [tabId, conn] of tabConns) {
+          if (conn === connection) tabConns.delete(tabId);
+        }
+      }
       console.log(`[ws] tab disconnected (${conns.size} remaining)`);
     },
   });
