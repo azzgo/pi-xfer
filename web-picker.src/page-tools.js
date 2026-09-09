@@ -22,6 +22,7 @@ export function createPageTools(env) {
   const e = env || {};
   const gm = e.gm;
   const doc = e.doc || document;
+  const debugLog = e.debugLog || (() => {});
   const rings = { consoleRing: e.consoleRing || consoleRing, netRing: e.netRing || netRing };
 
   function writeAllowed() { return !!(gm && gm.get(writeOpsKey(location.origin), false) === true); }
@@ -92,16 +93,20 @@ export function createPageTools(env) {
   }
 
   // Pruned outerHTML: depth-capped clone so full-page dumps stay bounded.
+  // Per-child try/catch: 页面框架可能给 DOM 原型挂插桩 getter（textContent 等），
+  // 深读时页面自身代码可能抛错——跳过坏节点，绝不让一次 dom.html 失控。
   function pruneClone(el, depth) {
     const clone = el.cloneNode(false);
     if (depth > 1) {
       for (const child of Array.from(el.childNodes)) {
-        if (child.nodeType === 3) {
-          const t = (child.textContent || '').trim();
-          if (t) clone.appendChild(doc.createTextNode(t.slice(0, 80) + ' '));
-        } else if (child.nodeType === 1) {
-          clone.appendChild(pruneClone(child, depth - 1));
-        }
+        try {
+          if (child.nodeType === 3) {
+            const t = (child.textContent || '').trim();
+            if (t) clone.appendChild(doc.createTextNode(t.slice(0, 80) + ' '));
+          } else if (child.nodeType === 1) {
+            clone.appendChild(pruneClone(child, depth - 1));
+          }
+        } catch (err) { /* skip the poisoned node, keep serializing the rest */ }
       }
     } else if (el.childNodes && el.childNodes.length) {
       clone.appendChild(doc.createTextNode('…'));
@@ -115,7 +120,12 @@ export function createPageTools(env) {
     const maxDepth = Math.max(1, Math.min(20, Number(params.maxDepth) || 8));
     const target = doc.querySelector(selector);
     if (!target) throw new Error('dom.html: no element matches ' + selector);
-    let html = pruneClone(target, maxDepth).outerHTML;
+    let html;
+    try {
+      html = pruneClone(target, maxDepth).outerHTML;
+    } catch (err) {
+      throw new Error('dom.html: serialization failed on ' + selector + ' (' + (err && err.message ? err.message : String(err)) + ')');
+    }
     let truncated = false;
     if (html.length > maxLength) { html = html.slice(0, maxLength); truncated = true; }
     return { selector, maxDepth, length: html.length, truncated, html };
@@ -284,6 +294,7 @@ export function createPageTools(env) {
     let text;
     try {
       const params = tool.params && typeof tool.params === 'object' && !Array.isArray(tool.params) ? tool.params : {};
+      debugLog('page-tool op:', tool.op, JSON.stringify(params).slice(0, 200));
       text = jsonSafe(handler(params)).text;
     } catch (err) {
       send(f.id, false, err && err.message ? String(err.message) : String(err));

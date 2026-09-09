@@ -29,7 +29,7 @@ if (!window.__PI_WEBPICKER__) {
   const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
 
   // page.request → 固定 op 表 → 恰一次 page.response（send 由 conn 注入）
-  const pageTools = createPageTools({ gm, consoleRing, netRing });
+  const pageTools = createPageTools({ gm, consoleRing, netRing, debugLog });
   ctx.pageTools = pageTools;
 
   const conn = createBrokerConn({
@@ -43,9 +43,17 @@ if (!window.__PI_WEBPICKER__) {
     },
     onWelcome: () => { if (ctx.refreshTargets) void ctx.refreshTargets(); },
     onPageRequest: (f) => {
-      pageTools.handlePageToolRequest(f, (id, ok, payload) => {
-        conn.sendFrame(framePageResponse(id, ok, payload));
-      });
+      // Last line of defense: an op is never allowed to become an uncaught
+      // page error (handlePageToolRequest already catches handler failures;
+      // this guards the dispatch machinery itself and page-realm side effects).
+      try {
+        pageTools.handlePageToolRequest(f, (id, ok, payload) => {
+          conn.sendFrame(framePageResponse(id, ok, payload));
+        });
+      } catch (err) {
+        debugLog('page.request dispatch failed:', err && err.message ? err.message : err);
+        conn.sendFrame(framePageResponse(f.id, false, 'dispatch_failed: ' + (err && err.message ? err.message : String(err))));
+      }
     },
   });
   ctx.conn = conn;

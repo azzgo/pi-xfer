@@ -555,6 +555,8 @@
     const e = env || {};
     const gm2 = e.gm;
     const doc = e.doc || document;
+    const debugLog2 = e.debugLog || (() => {
+    });
     const rings = { consoleRing: e.consoleRing || consoleRing, netRing: e.netRing || netRing };
     function writeAllowed() {
       return !!(gm2 && gm2.get(writeOpsKey(location.origin), false) === true);
@@ -620,11 +622,14 @@
       const clone = el.cloneNode(false);
       if (depth > 1) {
         for (const child of Array.from(el.childNodes)) {
-          if (child.nodeType === 3) {
-            const t = (child.textContent || "").trim();
-            if (t) clone.appendChild(doc.createTextNode(t.slice(0, 80) + " "));
-          } else if (child.nodeType === 1) {
-            clone.appendChild(pruneClone(child, depth - 1));
+          try {
+            if (child.nodeType === 3) {
+              const t = (child.textContent || "").trim();
+              if (t) clone.appendChild(doc.createTextNode(t.slice(0, 80) + " "));
+            } else if (child.nodeType === 1) {
+              clone.appendChild(pruneClone(child, depth - 1));
+            }
+          } catch (err) {
           }
         }
       } else if (el.childNodes && el.childNodes.length) {
@@ -638,7 +643,12 @@
       const maxDepth = Math.max(1, Math.min(20, Number(params.maxDepth) || 8));
       const target = doc.querySelector(selector);
       if (!target) throw new Error("dom.html: no element matches " + selector);
-      let html = pruneClone(target, maxDepth).outerHTML;
+      let html;
+      try {
+        html = pruneClone(target, maxDepth).outerHTML;
+      } catch (err) {
+        throw new Error("dom.html: serialization failed on " + selector + " (" + (err && err.message ? err.message : String(err)) + ")");
+      }
       let truncated = false;
       if (html.length > maxLength) {
         html = html.slice(0, maxLength);
@@ -800,6 +810,7 @@
       let text;
       try {
         const params = tool.params && typeof tool.params === "object" && !Array.isArray(tool.params) ? tool.params : {};
+        debugLog2("page-tool op:", tool.op, JSON.stringify(params).slice(0, 200));
         text = jsonSafe(handler(params)).text;
       } catch (err) {
         send(f.id, false, err && err.message ? String(err.message) : String(err));
@@ -2663,7 +2674,7 @@
     installCapture();
     const ui = buildUI();
     const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
-    const pageTools = createPageTools({ gm, consoleRing, netRing });
+    const pageTools = createPageTools({ gm, consoleRing, netRing, debugLog });
     ctx.pageTools = pageTools;
     const conn = createBrokerConn({
       gm,
@@ -2678,9 +2689,14 @@
         if (ctx.refreshTargets) void ctx.refreshTargets();
       },
       onPageRequest: (f) => {
-        pageTools.handlePageToolRequest(f, (id, ok, payload) => {
-          conn.sendFrame(framePageResponse(id, ok, payload));
-        });
+        try {
+          pageTools.handlePageToolRequest(f, (id, ok, payload) => {
+            conn.sendFrame(framePageResponse(id, ok, payload));
+          });
+        } catch (err) {
+          debugLog("page.request dispatch failed:", err && err.message ? err.message : err);
+          conn.sendFrame(framePageResponse(f.id, false, "dispatch_failed: " + (err && err.message ? err.message : String(err))));
+        }
       }
     });
     ctx.conn = conn;
