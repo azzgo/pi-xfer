@@ -63,6 +63,52 @@ shapes below match `mock-broker.mjs`, `.pi/wayfinder/prototypes/`).
 
 ---
 
+## Record mode (v1.13)
+
+Pick markers capture *where*; Record mode captures *when*. The user reproduces
+the problem by hand; the picker records the timeline and scene data as one
+submit. No replay step — the human operation IS the evidence (rationale:
+ADR 0007).
+
+- **Usage** — ⇧⌥R (or fab menu 「开始/停止录制」/ `__PI_WP_API__.record()`)
+  enters record mode and starts immediately (the banner is the start marker).
+  A banner at the bottom shows ● REC · N events with 停止/丢弃 buttons; operate
+  the page freely, then 停止 → the record appears as a summary card at the top
+  of the note panel (per-event preview, 删除 to discard) and rides the next
+  发送 / 复制 handoff prompt. A record is one-shot: it clears after a
+  successful send and a new recording replaces an unsent one.
+- **Captured events** (listeners attached only while recording): `click`
+  (selector + text snippet), `input` (final field value — debounce to 1s
+  silence or `change`; `type=password` masked as `***`, no heuristic masking
+  of other fields — the panel summary is the review point), SPA route changes
+  (500ms href poll — pushState fires nothing), `submit`, bare `Enter`
+  (not in textareas). Events carry `seq` + millisecond offset `t`, and a
+  `ref` pointing at the matching pick (1-based) when a submitted pick shares
+  the selector. Hard cap: 50 events.
+- **Wire** — no new frame: `annotation.submit`/`.compose` gain an optional
+  `record` field `{id, start, end, url0, url1, events[], console[], net[]}`.
+  The broker validates the structural minimum (`parseRecord` in
+  `broker-main.ts`) and renders it as the handoff doc's "Operation timeline"
+  section (scene slices capped at 40 lines each).
+- **SSE / long-poll (v1.13 netRing change)** — netRing used to record only
+  *completed* requests, so never-ending responses were invisible. It is now
+  pending-first: a record is pushed when the request starts and mutated in
+  place on completion (ordering by start time). A fetch whose response is
+  `content-type: text/event-stream` stays `pending:true, kind:'sse'`;
+  `EventSource` wrappers add a `msgs` counter; long-poll XHR is pushed on
+  send and completed on loadend. The timeline shows a brief mark
+  (`GET /api/events → pending sse msgs=37`); the agent digs deeper via
+  `page-tool network.log '{"urlFilter":…}'` — the pending entry is what
+  makes that reverse query possible.
+- **Surviving full page loads** — record state is mirrored to
+  `sessionStorage` (`pi.wp.rec`) after every event and restored on
+  reinjection (same precedent as `pi.wp.tabId`); a URL change becomes a
+  `nav` event in the same record. Cross-origin navigation deliberately
+  breaks the record (sessionStorage is per-origin) — unsupported; needs
+  broker-side staging if it ever matters.
+
+---
+
 ## Install (Tampermonkey)
 
 **Easiest** — open the raw URL in a browser with Tampermonkey enabled; the
@@ -83,6 +129,7 @@ corner.
 |----------|--------|
 | ⇧⌥P | enter / exit pick mode |
 | ⇧⌥L | toggle the note panel (send box inside) |
+| ⇧⌥R | start / stop record mode (temporal marker sequence, see Record mode above) |
 | ⇧Enter / ⇧click (pick mode) | add / remove the highlighted element to the pending group |
 | Enter (with a pending group) | open the group note card → one shared note for all members |
 | Enter (no pending group) | pin the highlighted element for a solo note, as before |
