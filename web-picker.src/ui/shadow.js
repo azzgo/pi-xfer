@@ -288,6 +288,7 @@ export function buildUI() {
       <input id="sburl" placeholder="ws://127.0.0.1:4719" />
       <label class="chk"><input type="checkbox" id="sprops" /> framework.inspect 附带组件 props/state（默认关）</label>
       <label class="chk"><input type="checkbox" id="sauto" /> 本域名自动连接 broker（手动连上过一次即授权，页面刷新后静默重连）</label>
+      <label class="chk"><input type="checkbox" id="swrite" /> 允许 agent 操作本页（dom.click / dom.setValue，默认关）</label>
       <div class="row">
         <button class="ghost" id="scancel">取消</button>
         <button class="primary" id="ssave">保存并连接</button>
@@ -307,7 +308,7 @@ export function buildUI() {
         elSendGroup = $('sendgroup'), elSendMore = $('sendmore'), elSendMenu = $('sendmenu'), elCopyPrompt = $('copyprompt'),
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
         elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops'),
-        elSAuto = $('sauto');
+        elSAuto = $('sauto'), elSWrite = $('swrite');
 
   let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
   try {
@@ -340,7 +341,7 @@ export function buildUI() {
     elFab, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
     elPanel, elPH, elPlist, elPcount, elPclose, elPrompt, elTCombo, elTInput,
     elTDrop, elTRefresh, elSend, elClear, elSendGroup, elSendMore, elSendMenu,
-    elCopyPrompt, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto };
+    elCopyPrompt, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite };
 
   // ---------- trigger 重注入 ----------
   // SPA 路由跳转 / HMR 热更新可能把 documentElement 下的外来节点清掉，host 一旦

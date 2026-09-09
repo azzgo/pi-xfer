@@ -4,16 +4,18 @@
 import { GM_FPROPS, DEFAULT_BROKER_URL } from '../constants.js';
 import { gm } from '../storage.js';
 import { autoLinkKey } from '../broker-conn.js';
+import { writeOpsKey } from '../page-tools.js';
 
 export function initSettings(ctx) {
   const { els, toast } = ctx;
-  const { elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto } = els;
+  const { elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite } = els;
   const conn = ctx.conn;
 
   function openSettings() {
     elSUrl.value = conn.brokerUrl();
     elSProps.checked = gm.get(GM_FPROPS, false) === true;
     elSAuto.checked = conn.autoLinkAllowed();
+    elSWrite.checked = gm.get(writeOpsKey(location.origin), false) === true;
     elSettings.style.display = 'block';
     setTimeout(() => elSUrl.focus(), 0);
   }
@@ -30,6 +32,10 @@ export function initSettings(ctx) {
     // immediate persist — 撤销授权即刻生效（退避循环由 allowed() 门控）
     gm.set(autoLinkKey(location.origin), elSAuto.checked);
     toast('本页自动连接 ' + (elSAuto.checked ? '已开启' : '已撤销'));
+  });
+  elSWrite.addEventListener('change', () => {
+    gm.set(writeOpsKey(location.origin), elSWrite.checked);
+    toast('agent 页面操作权限 ' + (elSWrite.checked ? '已开启' : '已关闭'));
   });
   elSSave.addEventListener('click', () => {
     const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;

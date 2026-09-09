@@ -8,16 +8,35 @@
 // module globals — that seam is what makes the op table testable in node and
 // what the per-origin authorization gate (v1.12) dispatches through.
 
-import { DEFAULT_STYLE_PROPS, RESULT_MAX_CHARS, GM_FPROPS } from './constants.js';
-import { PAGE_OPS } from './wire.js';
+import { DEFAULT_STYLE_PROPS, RESULT_MAX_CHARS, GM_FPROPS, HOST_FLAG } from './constants.js';
+import { PAGE_OPS, PAGE_OP_KINDS } from './wire.js';
 import { jsonSafe } from './json-safe.js';
 import { cssPath, xPath } from './dom-utils.js';
 import { consoleRing, netRing } from './capture.js';
 
+// Per-origin page-write authorization key (GM storage). Mirrors auto-link:
+// off by default, explicitly enabled per origin in the settings modal.
+export function writeOpsKey(origin) { return 'wp.writeOps.' + origin; }
+
 export function createPageTools(env) {
   const e = env || {};
   const gm = e.gm;
+  const doc = e.doc || document;
   const rings = { consoleRing: e.consoleRing || consoleRing, netRing: e.netRing || netRing };
+
+  function writeAllowed() { return !!(gm && gm.get(writeOpsKey(location.origin), false) === true); }
+
+  // Agent 驱动的点击/填值绝不能落在 picker 自己的浮层上：host 挂在 light DOM，
+  // document.querySelector 就能选中它，命中即拒。
+  function findOutside(selector) {
+    if (typeof selector !== 'string' || !selector) throw new Error('params.selector (CSS) is required');
+    const el = doc.querySelector(selector);
+    if (!el) return null;
+    if (el.closest && el.closest('[' + HOST_FLAG + ']')) {
+      throw new Error('refused: target is the picker overlay itself');
+    }
+    return el;
+  }
 
   function toolPageInfo() {
     return {
@@ -62,7 +81,7 @@ export function createPageTools(env) {
     const styleProps = Array.isArray(params.styleProps) && params.styleProps.length
       ? params.styleProps.filter((s) => typeof s === 'string').slice(0, 30)
       : DEFAULT_STYLE_PROPS;
-    const all = document.querySelectorAll(selector);   // invalid selector throws → surfaced as the response error
+    const all = doc.querySelectorAll(selector);   // invalid selector throws → surfaced as the response error
     const nodes = Array.from(all).slice(0, maxCount);
     return {
       selector,
@@ -79,13 +98,13 @@ export function createPageTools(env) {
       for (const child of Array.from(el.childNodes)) {
         if (child.nodeType === 3) {
           const t = (child.textContent || '').trim();
-          if (t) clone.appendChild(document.createTextNode(t.slice(0, 80) + ' '));
+          if (t) clone.appendChild(doc.createTextNode(t.slice(0, 80) + ' '));
         } else if (child.nodeType === 1) {
           clone.appendChild(pruneClone(child, depth - 1));
         }
       }
     } else if (el.childNodes && el.childNodes.length) {
-      clone.appendChild(document.createTextNode('…'));
+      clone.appendChild(doc.createTextNode('…'));
     }
     return clone;
   }
@@ -94,7 +113,7 @@ export function createPageTools(env) {
     const selector = typeof params.selector === 'string' ? params.selector : 'body';
     const maxLength = Math.min(200000, Math.max(200, Number(params.maxLength) || 20000));
     const maxDepth = Math.max(1, Math.min(20, Number(params.maxDepth) || 8));
-    const target = document.querySelector(selector);
+    const target = doc.querySelector(selector);
     if (!target) throw new Error('dom.html: no element matches ' + selector);
     let html = pruneClone(target, maxDepth).outerHTML;
     let truncated = false;
@@ -170,7 +189,7 @@ export function createPageTools(env) {
   function toolFrameworkInspect(params) {
     const selector = typeof params.selector === 'string' ? params.selector : '';
     if (!selector) throw new Error('framework.inspect: params.selector (CSS) is required');
-    const el = document.querySelector(selector);
+    const el = doc.querySelector(selector);
     if (!el) throw new Error('framework.inspect: no element matches ' + selector);
     const maxDepth = Math.max(1, Math.min(10, Number(params.maxDepth) || 5));
     const withProps = params.props !== undefined ? !!params.props : (gm ? gm.get(GM_FPROPS, false) === true : false);
@@ -184,6 +203,52 @@ export function createPageTools(env) {
     return { selector, framework, withProps, depth: chain.length, chain };
   }
 
+  // ---------- write ops (v1.12, gated by per-origin authorization) ----------
+
+  // 派发完整的 pointer/mouse 序列再补原生 click()：React onClick / 原生按钮 /
+  // 框架代理监听都能命中，不依赖具体框架。
+  function toolDomClick(params) {
+    const el = findOutside(params.selector);
+    if (!el) throw new Error('dom.click: no element matches ' + params.selector);
+    const r = el.getBoundingClientRect();
+    const opts = { bubbles: true, cancelable: true, view: window,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+      try { el.dispatchEvent(new Ctor(type, opts)); }
+      catch (err) { el.dispatchEvent(new MouseEvent(type, opts)); }
+    }
+    el.click();
+    return { selector: cssPath(el), clicked: true, tagName: el.tagName.toLowerCase(), disabled: !!el.disabled };
+  }
+
+  // React 受控组件兼容：走 native setter（绕过 React 对 value 的 own-property
+  // 检测）再派发 input/change，组件状态才会真正更新。
+  function toolDomSetValue(params) {
+    const el = findOutside(params.selector);
+    if (!el) throw new Error('dom.setValue: no element matches ' + params.selector);
+    if (!('value' in el)) throw new Error('dom.setValue: element has no value property (' + el.tagName.toLowerCase() + ')');
+    const value = params.value === undefined || params.value === null ? '' : String(params.value);
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+      : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype
+      : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { selector: cssPath(el), value, tagName: el.tagName.toLowerCase() };
+  }
+
+  // 等元素出现（agent 改完代码后验证渲染的最常用原语）。同步快路径：已存在立
+  // 即返回；不存在则报错，由 agent 侧按重试节奏再查（page.response 是同步应答，
+  // 页面侧不做长轮询）。
+  function toolPageWait(params) {
+    const selector = typeof params.selector === 'string' ? params.selector : '';
+    if (!selector) throw new Error('page.wait: params.selector (CSS) is required');
+    if (doc.querySelector(selector)) return { selector, found: true, waitedMs: 0 };
+    throw new Error('page.wait: no element matches ' + selector + ' yet — retry shortly (e.g. every 1-2s, ≤ retry budget)');
+  }
+
   const PAGE_TOOLS = {
     [PAGE_OPS.INFO]: toolPageInfo,
     [PAGE_OPS.DOM_QUERY]: toolDomQuery,
@@ -191,10 +256,14 @@ export function createPageTools(env) {
     [PAGE_OPS.CONSOLE_LOGS]: toolConsoleLogs,
     [PAGE_OPS.NETWORK_LOG]: toolNetworkLog,
     [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect,
+    [PAGE_OPS.DOM_CLICK]: toolDomClick,
+    [PAGE_OPS.DOM_SET_VALUE]: toolDomSetValue,
+    [PAGE_OPS.PAGE_WAIT]: toolPageWait,
   };
 
-  // page.request{tool:{op,params}} → run the fixed op → exactly one page.response.
-  // `send` is injected by the caller (the broker connection owns the wire).
+  // page.request{tool:{op,params}} → authorization gate → fixed op → exactly
+  // one page.response. `send` is injected by the caller (the broker connection
+  // owns the wire).
   function handlePageToolRequest(f, send) {
     const tool = f.tool && typeof f.tool === 'object' && !Array.isArray(f.tool) ? f.tool : null;
     if (!tool || typeof tool.op !== 'string') {
@@ -204,6 +273,12 @@ export function createPageTools(env) {
     const handler = PAGE_TOOLS[tool.op];
     if (!handler) {
       send(f.id, false, 'unknown_op: ' + tool.op + ' (available: ' + Object.keys(PAGE_TOOLS).join(', ') + ')');
+      return;
+    }
+    // Per-origin gate: write ops require explicit page-write authorization
+    // (settings modal checkbox → GM wp.writeOps.<origin>); read ops stay open.
+    if (PAGE_OP_KINDS[tool.op] === 'write' && !writeAllowed()) {
+      send(f.id, false, 'denied_op: ' + tool.op + ' requires page-write authorization for ' + location.origin + ' (enable it in the picker settings modal)');
       return;
     }
     let text;
@@ -218,5 +293,5 @@ export function createPageTools(env) {
     send(f.id, true, text);
   }
 
-  return { PAGE_TOOLS, handlePageToolRequest };
+  return { PAGE_TOOLS, handlePageToolRequest, writeAllowed };
 }

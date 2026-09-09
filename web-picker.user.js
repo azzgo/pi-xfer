@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.11.5
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.11.5：仅当卡片/面板/设置浮层出现时才启用 focusin 与按下事件拦截（弹窗下可聚焦写 note、不误关 Radix 弹窗）；浮层不在时键盘/鼠标行为完全回到 v1.10）
+// @version      1.12.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.12.0：broker 自动重连——手动连上过一次的域名在页面刷新/HMR 整页刷新后静默重连（指数退避），设置弹窗/GM 菜单可按域名撤销；PAGE_QUERY_RULE 改为允许 agent 修改后反向验证）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -202,7 +202,22 @@
     DOM_HTML: "dom.html",
     CONSOLE_LOGS: "console.logs",
     NETWORK_LOG: "network.log",
-    FRAMEWORK_INSPECT: "framework.inspect"
+    FRAMEWORK_INSPECT: "framework.inspect",
+    // v1.12 — write ops, gated by per-origin page-write authorization
+    DOM_CLICK: "dom.click",
+    DOM_SET_VALUE: "dom.setValue",
+    PAGE_WAIT: "page.wait"
+  };
+  var PAGE_OP_KINDS = {
+    [PAGE_OPS.INFO]: "read",
+    [PAGE_OPS.DOM_QUERY]: "read",
+    [PAGE_OPS.DOM_HTML]: "read",
+    [PAGE_OPS.CONSOLE_LOGS]: "read",
+    [PAGE_OPS.NETWORK_LOG]: "read",
+    [PAGE_OPS.FRAMEWORK_INSPECT]: "read",
+    [PAGE_OPS.DOM_CLICK]: "write",
+    [PAGE_OPS.DOM_SET_VALUE]: "write",
+    [PAGE_OPS.PAGE_WAIT]: "read"
   };
 
   // web-picker.src/protocol.js
@@ -521,10 +536,26 @@
   var escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
   // web-picker.src/page-tools.js
+  function writeOpsKey(origin) {
+    return "wp.writeOps." + origin;
+  }
   function createPageTools(env) {
     const e = env || {};
     const gm2 = e.gm;
+    const doc = e.doc || document;
     const rings = { consoleRing: e.consoleRing || consoleRing, netRing: e.netRing || netRing };
+    function writeAllowed() {
+      return !!(gm2 && gm2.get(writeOpsKey(location.origin), false) === true);
+    }
+    function findOutside(selector) {
+      if (typeof selector !== "string" || !selector) throw new Error("params.selector (CSS) is required");
+      const el = doc.querySelector(selector);
+      if (!el) return null;
+      if (el.closest && el.closest("[" + HOST_FLAG + "]")) {
+        throw new Error("refused: target is the picker overlay itself");
+      }
+      return el;
+    }
     function toolPageInfo() {
       return {
         url: location.href,
@@ -564,7 +595,7 @@
       if (!selector) throw new Error("dom.query: params.selector (CSS) is required");
       const maxCount = Math.min(50, Math.max(1, Number(params.maxCount) || 10));
       const styleProps = Array.isArray(params.styleProps) && params.styleProps.length ? params.styleProps.filter((s) => typeof s === "string").slice(0, 30) : DEFAULT_STYLE_PROPS;
-      const all = document.querySelectorAll(selector);
+      const all = doc.querySelectorAll(selector);
       const nodes = Array.from(all).slice(0, maxCount);
       return {
         selector,
@@ -579,13 +610,13 @@
         for (const child of Array.from(el.childNodes)) {
           if (child.nodeType === 3) {
             const t = (child.textContent || "").trim();
-            if (t) clone.appendChild(document.createTextNode(t.slice(0, 80) + " "));
+            if (t) clone.appendChild(doc.createTextNode(t.slice(0, 80) + " "));
           } else if (child.nodeType === 1) {
             clone.appendChild(pruneClone(child, depth - 1));
           }
         }
       } else if (el.childNodes && el.childNodes.length) {
-        clone.appendChild(document.createTextNode("…"));
+        clone.appendChild(doc.createTextNode("…"));
       }
       return clone;
     }
@@ -593,7 +624,7 @@
       const selector = typeof params.selector === "string" ? params.selector : "body";
       const maxLength = Math.min(2e5, Math.max(200, Number(params.maxLength) || 2e4));
       const maxDepth = Math.max(1, Math.min(20, Number(params.maxDepth) || 8));
-      const target = document.querySelector(selector);
+      const target = doc.querySelector(selector);
       if (!target) throw new Error("dom.html: no element matches " + selector);
       let html = pruneClone(target, maxDepth).outerHTML;
       let truncated = false;
@@ -674,7 +705,7 @@
     function toolFrameworkInspect(params) {
       const selector = typeof params.selector === "string" ? params.selector : "";
       if (!selector) throw new Error("framework.inspect: params.selector (CSS) is required");
-      const el = document.querySelector(selector);
+      const el = doc.querySelector(selector);
       if (!el) throw new Error("framework.inspect: no element matches " + selector);
       const maxDepth = Math.max(1, Math.min(10, Number(params.maxDepth) || 5));
       const withProps = params.props !== void 0 ? !!params.props : gm2 ? gm2.get(GM_FPROPS, false) === true : false;
@@ -687,13 +718,57 @@
       }
       return { selector, framework, withProps, depth: chain.length, chain };
     }
+    function toolDomClick(params) {
+      const el = findOutside(params.selector);
+      if (!el) throw new Error("dom.click: no element matches " + params.selector);
+      const r = el.getBoundingClientRect();
+      const opts = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: r.left + r.width / 2,
+        clientY: r.top + r.height / 2,
+        button: 0
+      };
+      for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+        const Ctor = type.startsWith("pointer") ? PointerEvent : MouseEvent;
+        try {
+          el.dispatchEvent(new Ctor(type, opts));
+        } catch (err) {
+          el.dispatchEvent(new MouseEvent(type, opts));
+        }
+      }
+      el.click();
+      return { selector: cssPath(el), clicked: true, tagName: el.tagName.toLowerCase(), disabled: !!el.disabled };
+    }
+    function toolDomSetValue(params) {
+      const el = findOutside(params.selector);
+      if (!el) throw new Error("dom.setValue: no element matches " + params.selector);
+      if (!("value" in el)) throw new Error("dom.setValue: element has no value property (" + el.tagName.toLowerCase() + ")");
+      const value = params.value === void 0 || params.value === null ? "" : String(params.value);
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+      setter.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return { selector: cssPath(el), value, tagName: el.tagName.toLowerCase() };
+    }
+    function toolPageWait(params) {
+      const selector = typeof params.selector === "string" ? params.selector : "";
+      if (!selector) throw new Error("page.wait: params.selector (CSS) is required");
+      if (doc.querySelector(selector)) return { selector, found: true, waitedMs: 0 };
+      throw new Error("page.wait: no element matches " + selector + " yet — retry shortly (e.g. every 1-2s, ≤ retry budget)");
+    }
     const PAGE_TOOLS = {
       [PAGE_OPS.INFO]: toolPageInfo,
       [PAGE_OPS.DOM_QUERY]: toolDomQuery,
       [PAGE_OPS.DOM_HTML]: toolDomHtml,
       [PAGE_OPS.CONSOLE_LOGS]: toolConsoleLogs,
       [PAGE_OPS.NETWORK_LOG]: toolNetworkLog,
-      [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect
+      [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect,
+      [PAGE_OPS.DOM_CLICK]: toolDomClick,
+      [PAGE_OPS.DOM_SET_VALUE]: toolDomSetValue,
+      [PAGE_OPS.PAGE_WAIT]: toolPageWait
     };
     function handlePageToolRequest(f, send) {
       const tool = f.tool && typeof f.tool === "object" && !Array.isArray(f.tool) ? f.tool : null;
@@ -704,6 +779,10 @@
       const handler = PAGE_TOOLS[tool.op];
       if (!handler) {
         send(f.id, false, "unknown_op: " + tool.op + " (available: " + Object.keys(PAGE_TOOLS).join(", ") + ")");
+        return;
+      }
+      if (PAGE_OP_KINDS[tool.op] === "write" && !writeAllowed()) {
+        send(f.id, false, "denied_op: " + tool.op + " requires page-write authorization for " + location.origin + " (enable it in the picker settings modal)");
         return;
       }
       let text;
@@ -720,10 +799,15 @@
       }
       send(f.id, true, text);
     }
-    return { PAGE_TOOLS, handlePageToolRequest };
+    return { PAGE_TOOLS, handlePageToolRequest, writeAllowed };
   }
 
   // web-picker.src/broker-conn.js
+  var BACKOFF_STEPS = [1e3, 4e3, 16e3];
+  var BACKOFF_CAP = 6e4;
+  function autoLinkKey(origin) {
+    return "wp.autoLink." + origin;
+  }
   function createBrokerConn(deps) {
     const gm2 = deps.gm;
     const debugLog2 = deps.debugLog || (() => {
@@ -736,6 +820,32 @@
     let wsState = "off";
     let connectSettle = null;
     const pending = /* @__PURE__ */ new Map();
+    let silent = false;
+    let manualDown = false;
+    let backoffTimer = null;
+    let backoffStep = 0;
+    function autoLinkAllowed() {
+      return gm2.get(autoLinkKey(location.origin), false) === true;
+    }
+    function clearBackoff() {
+      if (backoffTimer) {
+        clearTimeout(backoffTimer);
+        backoffTimer = null;
+      }
+      backoffStep = 0;
+    }
+    function scheduleReconnect() {
+      if (manualDown || !autoLinkAllowed() || backoffTimer) return;
+      const delay = backoffStep < BACKOFF_STEPS.length ? BACKOFF_STEPS[backoffStep] : BACKOFF_CAP;
+      backoffStep++;
+      debugLog2("auto-link: reconnect in", delay, "ms");
+      backoffTimer = setTimeout(() => {
+        backoffTimer = null;
+        if (manualDown || wsState !== "off") return;
+        silent = true;
+        connect();
+      }, delay);
+    }
     function brokerUrl() {
       return gm2.get(GM_BROKER, DEFAULT_BROKER_URL);
     }
@@ -753,6 +863,8 @@
       deps.onState(s);
     }
     function connect() {
+      clearBackoff();
+      manualDown = false;
       if (ws) {
         try {
           ws.close();
@@ -773,8 +885,12 @@
       } catch (e) {
         connectSettle = null;
         setState("off");
-        toast("WS 创建失败: " + e.message);
+        if (!silent) toast("WS 创建失败: " + e.message);
         settle(false);
+        if (silent) {
+          silent = false;
+          scheduleReconnect();
+        }
         return attempt;
       }
       ws = sock;
@@ -791,7 +907,12 @@
         if (!f || typeof f.type !== "string") return;
         if (f.type === PROTOCOL.KIND_WELCOME) {
           setState("on");
-          toast("broker 已连接");
+          if (!silent) gm2.set(autoLinkKey(location.origin), true);
+          clearBackoff();
+          const wasSilent = silent;
+          silent = false;
+          if (!wasSilent) toast("broker 已连接");
+          debugLog2("auto-link: connected", wasSilent ? "(auto)" : "(manual)");
           const settled = connectSettle;
           connectSettle = null;
           if (settled) settled(true);
@@ -841,20 +962,34 @@
         const settled = connectSettle;
         connectSettle = null;
         if (settled) settled(false);
+        const wasSilent = silent;
+        silent = false;
         if (wsState !== "off") {
           setState("off");
-          toast("broker 连接已断开");
+        }
+        if (wasSilent) {
+          debugLog2("auto-link: attempt failed");
+          scheduleReconnect();
+        } else if (wsState === "off") {
+          if (autoLinkAllowed() && !manualDown) {
+            scheduleReconnect();
+          } else {
+            toast("broker 连接已断开");
+          }
         }
       };
       sock.onerror = () => {
         if (ws === sock && wsState !== "off") {
           setState("off");
-          toast("broker 连不上: " + url + "（连接设置里可改地址）");
+          if (!silent) toast("broker 连不上: " + url + "（连接设置里可改地址）");
         }
       };
       return attempt;
     }
     function disconnect() {
+      manualDown = true;
+      clearBackoff();
+      silent = false;
       setState("off");
       if (ws) {
         try {
@@ -865,8 +1000,17 @@
       }
       toast("已断开");
     }
+    function maybeAutoConnect() {
+      if (!autoLinkAllowed() || manualDown) return false;
+      silent = true;
+      connect();
+      return true;
+    }
+    function revokeAutoLink() {
+      gm2.set(autoLinkKey(location.origin), false);
+    }
     const DEFAULT_PROMPT = "请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。";
-    const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / framework.inspect 等）只能在开始修改代码之前进行；需要 DOM、样式、组件链信息时请在动第一行代码前一次性查完。一旦开始改代码，HMR 无法热更新时浏览器会整页刷新，userscript 与 broker 的连接会随刷新断开，此后的 page.request 不会再有响应，不要浪费尝试。";
+    const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：本页已授权 broker 自动重连，修改代码导致页面刷新后，连接会自动恢复（重连期间 page.request 可能短暂返回 no_tabs/timeout，等几秒重试即可，重试上限 3 次）。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。";
     function submitToAgent(prompt, targetName) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
@@ -938,6 +1082,9 @@
       disconnect,
       sendFrame,
       getState: () => wsState,
+      autoLinkAllowed,
+      revokeAutoLink,
+      maybeAutoConnect,
       submitToAgent,
       requestCompose,
       requestTargets
@@ -1226,6 +1373,8 @@
       <div class="lbl">BROKER 地址（WS）</div>
       <input id="sburl" placeholder="ws://127.0.0.1:4719" />
       <label class="chk"><input type="checkbox" id="sprops" /> framework.inspect 附带组件 props/state（默认关）</label>
+      <label class="chk"><input type="checkbox" id="sauto" /> 本域名自动连接 broker（手动连上过一次即授权，页面刷新后静默重连）</label>
+      <label class="chk"><input type="checkbox" id="swrite" /> 允许 agent 操作本页（dom.click / dom.setValue，默认关）</label>
       <div class="row">
         <button class="ghost" id="scancel">取消</button>
         <button class="primary" id="ssave">保存并连接</button>
@@ -1233,7 +1382,7 @@
     </div>
   `;
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
     let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
     try {
       const saved = sessionStorage.getItem(KEY_POS);
@@ -1305,7 +1454,9 @@
       elSUrl,
       elSSave,
       elSCancel,
-      elSProps
+      elSProps,
+      elSAuto,
+      elSWrite
     };
     function reinjectTrigger() {
       if (host.isConnected) return true;
@@ -2128,11 +2279,13 @@
   // web-picker.src/ui/settings.js
   function initSettings(ctx) {
     const { els, toast } = ctx;
-    const { elSettings, elSUrl, elSSave, elSCancel, elSProps } = els;
+    const { elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite } = els;
     const conn = ctx.conn;
     function openSettings() {
       elSUrl.value = conn.brokerUrl();
       elSProps.checked = gm.get(GM_FPROPS, false) === true;
+      elSAuto.checked = conn.autoLinkAllowed();
+      elSWrite.checked = gm.get(writeOpsKey(location.origin), false) === true;
       elSettings.style.display = "block";
       setTimeout(() => elSUrl.focus(), 0);
     }
@@ -2145,6 +2298,14 @@
     elSProps.addEventListener("change", () => {
       gm.set(GM_FPROPS, elSProps.checked);
       toast("framework.inspect props/state " + (elSProps.checked ? "已开启" : "已关闭"));
+    });
+    elSAuto.addEventListener("change", () => {
+      gm.set(autoLinkKey(location.origin), elSAuto.checked);
+      toast("本页自动连接 " + (elSAuto.checked ? "已开启" : "已撤销"));
+    });
+    elSWrite.addEventListener("change", () => {
+      gm.set(writeOpsKey(location.origin), elSWrite.checked);
+      toast("agent 页面操作权限 " + (elSWrite.checked ? "已开启" : "已关闭"));
     });
     elSSave.addEventListener("click", () => {
       const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;
@@ -2521,6 +2682,7 @@
     ctx.refreshCount();
     ctx.updateGroupUI();
     ctx.renderTargetCombo();
+    conn.maybeAutoConnect();
     debugLog("ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ⌫ 清组 · " + location.host);
     window.__PI_WP_API__ = {
       start: () => {
@@ -2559,6 +2721,10 @@
       GM_registerMenuCommand("连接 broker", () => conn.connect());
       GM_registerMenuCommand("断开 broker", () => conn.disconnect());
       GM_registerMenuCommand("连接设置…", ctx.openSettings);
+      GM_registerMenuCommand("撤销本页自动连接", () => {
+        conn.revokeAutoLink();
+        ui.toast("已撤销 " + location.origin + " 的自动连接授权");
+      });
       GM_registerMenuCommand("打开标注面板 (⇧⌥L)", ctx.togglePanel);
       GM_registerMenuCommand("开始拾取 (⇧⌥P)", () => ctx.setActive(true));
       GM_registerMenuCommand("重新注入 trigger", () => {
