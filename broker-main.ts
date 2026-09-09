@@ -52,7 +52,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
 import { ERR, WIRE } from "./wire.ts";
-import { renderHandoffDoc, type HandoffPick } from "./handoff-doc.ts";
+import { renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./handoff-doc.ts";
 import { listTargets } from "./targets.ts";
 import { encodeAgentName } from "./utils.ts";
 import { attachWsServer, type WsConnection } from "./ws-server.ts";
@@ -329,6 +329,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   const id = frameId(frame);
   const prompt = frame.prompt;
   const picks = frame.picks;
+  const record = parseRecord(frame.record);
   const target =
     typeof frame.target === "object" && frame.target !== null ? (frame.target as Record<string, unknown>) : null;
 
@@ -340,6 +341,10 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   if (typeof targetName !== "string" || targetName.trim() === "") missing.push("target.name");
   if (missing.length > 0) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `missing or invalid: ${missing.join(", ")}`);
+    return;
+  }
+  if (record === null && frame.record !== undefined) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "malformed record: expected {id, start, events:[{seq,t,kind}...]}");
     return;
   }
 
@@ -364,6 +369,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
       prompt,
       page,
       picks: picks as HandoffPick[],
+      record: record ?? undefined,
       brokerCliPath: path.join(import.meta.dirname, "broker-main.ts"),
     });
   } catch (error) {
@@ -376,7 +382,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
     sendError(connection, frame, ERR_DELIVERY_FAILED, `cannot write doc: ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
-  console.log(`[doc] ${doc} (${picks.length} picks → local:${targetName})`);
+  console.log(`[doc] ${doc} (${picks.length} picks${record ? ` + record ${record.id} (${record.events.length} events)` : ""} → local:${targetName})`);
   latestHandoffByTarget.set(targetName, msgId); // the doc exists → page.requests can reference it
   // Record the submitting tab so follow-up page.requests route back to it
   // (survives same-id reloads; unknown tab id → broadcast fallback).
@@ -418,12 +424,17 @@ function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
   const id = frameId(frame);
   const prompt = frame.prompt;
   const picks = frame.picks;
+  const record = parseRecord(frame.record);
 
   const missing: string[] = [];
   if (typeof prompt !== "string" || prompt.trim() === "") missing.push("prompt");
   if (!Array.isArray(picks)) missing.push("picks");
   if (missing.length > 0) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `missing or invalid: ${missing.join(", ")}`);
+    return;
+  }
+  if (record === null && frame.record !== undefined) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "malformed record: expected {id, start, events:[{seq,t,kind}...]}");
     return;
   }
 
@@ -444,6 +455,7 @@ function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
         ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now(),
       },
       picks: picks as HandoffPick[],
+      record: record ?? undefined,
       fromTarget: targetName,
       brokerCliPath: path.join(import.meta.dirname, "broker-main.ts"),
     });
@@ -452,7 +464,25 @@ function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
     return;
   }
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id, result: { prompt: content } });
-  console.log(`[compose] rendered handoff preview ${msgId} (${(picks as unknown[]).length} picks${targetName ? ` → local:${targetName}` : ""}, not delivered)`);
+  console.log(`[compose] rendered handoff preview ${msgId} (${(picks as unknown[]).length} picks${record ? ` + record ${record.id}` : ""}${targetName ? ` → local:${targetName}` : ""}, not delivered)`);
+}
+
+// Optional `record` field (v1.13): undefined = absent (pick-only submit);
+// null = present but malformed (caller answers invalid_payload); otherwise a
+// minimally-normalized HandoffRecord. Deep field sanitization is the
+// renderer's job — here we only gate the structural minimum.
+function parseRecord(raw: unknown): HandoffRecord | null | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || r.id === "") return null;
+  if (typeof r.start !== "number") return null;
+  if (!Array.isArray(r.events)) return null;
+  if (!r.events.every((ev) => typeof ev === "object" && ev !== null &&
+    typeof (ev as Record<string, unknown>).seq === "number" &&
+    typeof (ev as Record<string, unknown>).t === "number" &&
+    typeof (ev as Record<string, unknown>).kind === "string")) return null;
+  return raw as HandoffRecord;
 }
 
 function handleTargetsList(connection: WsConnection, frame: Frame, xferDir: string): void {

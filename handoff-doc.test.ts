@@ -195,6 +195,63 @@ describe("renderHandoffDoc", () => {
   });
 });
 
+describe("renderHandoffDoc record section (v1.13)", () => {
+  const RECORD = {
+    id: "r1",
+    start: 1725148800000,
+    end: 1725148846000,
+    url0: "https://example.com/login",
+    url1: "https://example.com/dashboard",
+    events: [
+      { seq: 1, t: 12, kind: "input", sel: "input[name=\"email\"]", value: "ison@example.com" },
+      { seq: 2, t: 140, kind: "click", sel: "#login-btn", text: "登录" },
+      { seq: 3, t: 800, kind: "nav", from: "https://example.com/login", to: "https://example.com/dashboard" },
+      { seq: 4, t: 820, kind: "click", sel: "#login-btn", ref: 2 },
+    ],
+    net: [
+      { method: "POST", url: "/api/login", status: 200, durationMs: 640, ts: 1725148800150 },
+      { method: "GET", url: "/api/events", status: 200, durationMs: 46000, ts: 1725148800900, pending: true, kind: "sse", msgs: 37 },
+    ],
+    console: [
+      { level: "warn", text: "[dashboard] slow render 412ms", ts: 1725148801200 },
+    ],
+  };
+
+  it("renders the timeline, scene slices, and pick cross-reference", () => {
+    const doc = renderHandoffDoc(input({ record: RECORD }));
+    assert.ok(doc.includes("## Operation timeline"), "missing timeline heading");
+    assert.ok(doc.includes("- record: r1"));
+    assert.ok(doc.includes("- url: https://example.com/login → https://example.com/dashboard"));
+    assert.ok(doc.includes("+`12ms` `input` `input[name=\"email\"]` value=`ison@example.com`"));
+    assert.ok(doc.includes("+`140ms` `click` `#login-btn` — \"登录\""));
+    assert.ok(doc.includes("+`800ms` `nav` → https://example.com/dashboard"));
+    assert.ok(doc.includes("(pick #2)"), "missing pick cross-reference");
+    assert.ok(doc.includes("- POST /api/login → 200 640ms"));
+    assert.ok(doc.includes("- GET /api/events → pending sse msgs=37"), "pending SSE entry must stay visible");
+    assert.ok(doc.includes("- [warn] [dashboard] slow render 412ms"));
+    assert.ok(doc.indexOf("## Operation timeline") < doc.indexOf("## Follow-up channel"));
+  });
+
+  it("omits the section entirely when no record is attached", () => {
+    const doc = renderHandoffDoc(input());
+    assert.equal(doc.includes("## Operation timeline"), false);
+  });
+
+  it("renders a record with no scene slices", () => {
+    const doc = renderHandoffDoc(input({ record: { ...RECORD, console: undefined, net: undefined } }));
+    assert.ok(doc.includes("## Operation timeline"));
+    assert.equal(doc.includes("### Network"), false);
+    assert.equal(doc.includes("### Console"), false);
+  });
+
+  it("password values arrive pre-masked and are rendered verbatim", () => {
+    const doc = renderHandoffDoc(input({
+      record: { ...RECORD, events: [{ seq: 1, t: 5, kind: "input", sel: "input[type=\"password\"]", value: "***" }] },
+    }));
+    assert.ok(doc.includes("value=`***`"));
+  });
+});
+
 describe("renderHandoffDoc purity", () => {
   it("is deterministic: same input, same output", () => {
     const first = renderHandoffDoc(input());
