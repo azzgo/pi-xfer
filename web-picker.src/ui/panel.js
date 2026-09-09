@@ -11,7 +11,7 @@ export function initPanel(ctx) {
   let panelOpen = false;
 
   function refreshCount() {
-    const n = loadBatch().length;
+    const n = loadBatch().length + (ctx.getRecord && ctx.getRecord() ? 1 : 0);
     elCnt.textContent = n;
     elCnt.style.display = n > 0 ? 'block' : 'none';
     if (panelOpen) renderPanel();
@@ -35,9 +35,10 @@ export function initPanel(ctx) {
 
   function renderPanel() {
     const b = loadBatch();
-    elPcount.textContent = b.length ? b.length + ' 条' : '';
-    if (!b.length) { elPlist.innerHTML = '<div class="empty">还没有选中任何元素</div>'; return; }
-    elPlist.innerHTML = b.map((r, i) =>
+    const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : '';
+    elPcount.textContent = (b.length || recHtml) ? (b.length + (recHtml ? 1 : 0)) + ' 条' : '';
+    if (!b.length && !recHtml) { elPlist.innerHTML = '<div class="empty">还没有选中任何元素</div>'; return; }
+    elPlist.innerHTML = recHtml + b.map((r, i) =>
       '<div class="item" data-i="' + i + '">' +
         '<div class="psel">' + escapeHtml(r.selector) + '</div>' +
         (r.group ? '<div class="pgroup">⧉ 组 ' + escapeHtml(r.group) + '</div>' : '') +
@@ -86,6 +87,13 @@ export function initPanel(ctx) {
     toast('备注已保存' + (synced ? '（已同步组内 ' + synced + ' 项）' : ''));
   });
   elPlist.addEventListener('click', (e) => {
+    const recDel = e.target && e.target.closest ? e.target.closest('[data-rec-del]') : null;
+    if (recDel) {                                   // record 摘要卡的删除
+      if (ctx.clearRecord) ctx.clearRecord();
+      renderPanel();
+      toast('已删除操作记录');
+      return;
+    }
     const del = e.target && e.target.closest ? e.target.closest('.del') : null;
     if (!del) return;
     const item = del.closest('.item');

@@ -7,7 +7,12 @@ import { CAPTURE_MAX } from './constants.js';
 import { jsonSafe } from './json-safe.js';
 
 export const consoleRing = [];   // {level, text, ts, stack?}
-export const netRing = [];       // {method, url, status, durationMs, ts, error?}
+// Pending-first semantics: a record is pushed when the request STARTS and
+// mutated in place when it completes, so a never-ending response (SSE /
+// long-poll) stays visible as {pending:true, kind:'sse'?, msgs?} instead of
+// being invisible until "completion" that never comes. Ordering is by start
+// time, not completion time.
+export const netRing = [];       // {method, url, status, ts, durationMs?, error?, pending?, kind?, msgs?}
 
 export function ringPush(ring, rec) {
   ring.push(rec);
@@ -80,13 +85,22 @@ export function installCapture() {
         const req = args[0];
         const url = typeof req === 'string' ? req : (req && req.url) || '';
         const method = (args[1] && args[1].method) || (req && req.method) || 'GET';
+        // Start-order record; completed in place. An SSE response resolves its
+        // headers like any other but the stream never "finishes" — the record
+        // keeps pending:true and kind:'sse' so reverse queries find it.
+        const rec = { method: String(method), url: String(url).slice(0, 500), ts: started, pending: true };
+        ringPush(netRing, rec);
         const done = (res, error) => {
           try {
-            const rec = { method: String(method), url: String(url).slice(0, 500), ts: Date.now() };
-            if (error) { rec.status = 0; rec.error = String((error && error.message) || error).slice(0, 200); }
-            else rec.status = res && res.status;
+            if (error) { rec.status = 0; rec.error = String((error && error.message) || error).slice(0, 200); rec.pending = false; }
+            else {
+              rec.status = res && res.status;
+              let ct = '';
+              try { ct = String((res && res.headers && res.headers.get('content-type')) || ''); } catch (e) { /* headers may be opaque */ }
+              if (ct.includes('text/event-stream')) { rec.kind = 'sse'; }   // stays pending
+              else rec.pending = false;
+            }
             rec.durationMs = Date.now() - started;
-            ringPush(netRing, rec);
           } catch (e) { /* ignore */ }
         };
         return origFetch.apply(this, args).then(
@@ -96,6 +110,26 @@ export function installCapture() {
       };
     }
   } catch (e) { /* fetch not patchable */ }
+  // EventSource: mark the stream open immediately and keep a message counter —
+  // enough for the agent to tell "this stream is alive and has delivered N
+  // events" without ever reading the stream body.
+  try {
+    const ES = realm.EventSource;
+    if (typeof ES === 'function') {
+      realm.EventSource = function (url, cfg) {
+        const es = new ES(url, cfg);
+        try {
+          const rec = { method: 'GET', url: String(url || '').slice(0, 500), status: 'pending', ts: Date.now(), pending: true, kind: 'sse', msgs: 0 };
+          ringPush(netRing, rec);
+          es.addEventListener('open', () => { rec.status = es.status || 200; });
+          es.addEventListener('message', () => { rec.msgs++; });
+          es.addEventListener('error', () => { if (es.readyState === 2) rec.pending = false; });
+        } catch (e) { /* recording must never break the stream */ }
+        return es;
+      };
+      realm.EventSource.prototype = ES.prototype;
+    }
+  } catch (e) { /* EventSource not patchable */ }
   try {
     const XHR = realm.XMLHttpRequest;
     if (XHR && XHR.prototype) {
@@ -113,12 +147,17 @@ export function installCapture() {
           if (!meta) meta = { method: 'GET', url: '', started: Date.now() };
           meta.started = Date.now();
           try {
+            // Record on send, complete on loadend (same object): long-poll XHR
+            // is visible as pending while it hangs, like fetch SSE above.
+            meta.rec = { method: meta.method, url: meta.url, ts: meta.started, pending: true };
+            ringPush(netRing, meta.rec);
             this.addEventListener('loadend', () => {
               try {
-                ringPush(netRing, {
-                  method: meta.method, url: meta.url, status: this.status,
-                  durationMs: Date.now() - (meta.started || Date.now()), ts: Date.now(),
-                });
+                const rec = meta.rec;
+                if (!rec) return;                       // evicted from the ring already
+                rec.status = this.status;
+                rec.durationMs = Date.now() - (meta.started || Date.now());
+                rec.pending = false;
               } catch (e) { /* ignore */ }
             });
           } catch (e) { /* ignore */ }

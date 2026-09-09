@@ -214,13 +214,14 @@ export function createBrokerConn(deps) {
   // 重新查询验证结果；只在 auto-link 未授权的页面才维持「改代码前一次查完」。
   const PAGE_QUERY_RULE = '\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：本页已授权 broker 自动重连，修改代码导致页面刷新后，连接会自动恢复（重连期间 page.request 可能短暂返回 no_tabs/timeout，等几秒重试即可，重试上限 3 次）。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。';
 
-  function submitToAgent(prompt, targetName) {
+  // record (v1.13)：可选的 Record-mode 时间线，随帧带出（加性字段，旧 broker 忽略）。
+  function submitToAgent(prompt, targetName, record) {
     return new Promise((resolve) => {
       if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
       const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'submit', resolve });
       const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-      if (!sendFrame(frameSubmit(id, promptText, targetName))) {
+      if (!sendFrame(frameSubmit(id, promptText, targetName, record))) {
         pending.delete(id);
         resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
         return;
@@ -235,13 +236,13 @@ export function createBrokerConn(deps) {
   // prompt 组装与 submit 完全一致（留空落 DEFAULT_PROMPT + PAGE_QUERY_RULE），
   // broker 侧用同一个 renderHandoffDoc 渲染，但不落盘不投递——只是把最终发给
   // agent 的完整 prompt 交还给页面。
-  function requestCompose(prompt, targetName) {
+  function requestCompose(prompt, targetName, record) {
     return new Promise((resolve) => {
       if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
       const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'compose', resolve });
       const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-      if (!sendFrame(frameCompose(id, promptText, targetName))) {
+      if (!sendFrame(frameCompose(id, promptText, targetName, record))) {
         pending.delete(id);
         resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
         return;

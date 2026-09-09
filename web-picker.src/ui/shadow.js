@@ -77,6 +77,23 @@ export function buildUI() {
       #bar #gclear:hover, #bar #fz:hover, #bar #escx:hover { color: #fff; }
       #bar #fz.on kbd { background: #0c4a6e; border-color: #0369a1; color: #e0f2fe; }
       #bar #gh.on kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
+      /* ---- record-mode banner ---- */
+      #recbar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        background: rgba(15,21,34,.96); color: #cbd5e1; font: 12px/1 var(--wp-font);
+        padding: 9px 16px; border-radius: 999px; display: none; gap: 12px; align-items: center;
+        box-shadow: 0 8px 24px rgba(15,23,42,.35); user-select: none; pointer-events: auto;
+        border: 1px solid rgba(239,68,68,.4); }
+      #recbar .rdot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444;
+        animation: wprecblink 1.2s ease-in-out infinite; }
+      @keyframes wprecblink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+      #recbar b { color: #fff; letter-spacing: .08em; font-size: 11px; }
+      #recbar #reccount { font: 11px/1 var(--wp-mono); color: #fca5a5; }
+      #recbar #recbadge { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+      #recbar button { padding: 4px 10px; font-size: 11px; border-radius: 6px; }
+      #recbar #recstop { background: #ef4444; color: #fff; }
+      #recbar #recstop:hover { background: #dc2626; }
+      #recbar #recdiscard { background: #1e293b; color: #94a3b8; }
+      #recbar #recdiscard:hover { background: #334155; color: #e2e8f0; }
       /* ---- fab ---- */
       #fab { position: fixed; width: 46px; height: 46px; border-radius: 14px;
         border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, #1b2230, #12161f);
@@ -173,6 +190,15 @@ export function buildUI() {
       #plist .item .pgroup { display: inline-block; margin-top: 4px; padding: 1px 7px;
         background: #fffbeb; border: 1px solid #fde68a; border-radius: 999px;
         color: #b45309; font: 600 10px/1.6 var(--wp-mono); }
+      /* ---- record summary card（v1.13）---- */
+      #plist .item.recitem { border-color: #fecaca; background: #fffafa; }
+      #plist .item.recitem .psel { color: #b91c1c; }
+      #plist .item .rsevs { max-height: 132px; overflow-y: auto; margin: 6px 0 2px;
+        border: 1px solid var(--wp-line); border-radius: 6px; padding: 4px 6px; background: #fff; }
+      #plist .item .rsev { font: 10.5px/1.7 var(--wp-mono); color: #475569;
+        word-break: break-all; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #plist .item .rsev b { color: #b91c1c; font-weight: 600; }
+      #plist .item .rst { color: #94a3b8; }
       #plist .item .pprev { color: #94a3b8; font-size: 11px; margin: 4px 0; overflow: hidden;
         text-overflow: ellipsis; white-space: nowrap; }
       #plist .item textarea { min-height: 34px; font-size: 12px; padding: 5px 8px; }
@@ -239,6 +265,13 @@ export function buildUI() {
       <span class="muted" id="fz"><kbd>F</kbd>冻结</span>
       <span class="muted" id="escx" title="退出拾取模式"><kbd>Esc</kbd>退出</span>
     </div>
+    <div id="recbar">
+      <span class="rdot"></span><b>REC</b>
+      <span id="reccount">0 events</span>
+      <span id="recbadge" title="打开标注面板">面板</span>
+      <button id="recstop">■ 停止</button>
+      <button id="recdiscard">丢弃</button>
+    </div>
     <div id="card">
       <div class="sel" id="sel"></div>
       <textarea id="txt" placeholder="备注（可选，留空直接回车提交）"></textarea>
@@ -300,6 +333,8 @@ export function buildUI() {
   const elHL = $('hl'), elGWrap = $('gwrap'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
         elGCLEAR = $('gclear'), elEscX = $('escx'),
         elFab = $('fab'), elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
+        elRecBar = $('recbar'), elRecCount = $('reccount'), elRecBadge = $('recbadge'),
+        elRecStop = $('recstop'), elRecDiscard = $('recdiscard'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
         elPanel = $('panel'), elPH = $('ph'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
         elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
@@ -338,6 +373,7 @@ export function buildUI() {
   }
 
   const els = { elHL, elGWrap, elBadge, elInfo, elBar, elGH, elGCLEAR, elEscX,
+    elRecBar, elRecCount, elRecBadge, elRecStop, elRecDiscard,
     elFab, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
     elPanel, elPH, elPlist, elPcount, elPclose, elPrompt, elTCombo, elTInput,
     elTDrop, elTRefresh, elSend, elClear, elSendGroup, elSendMore, elSendMenu,

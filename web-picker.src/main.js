@@ -19,6 +19,7 @@ import { initSend } from './ui/send.js';
 import { initSettings } from './ui/settings.js';
 import { initFab } from './ui/fab.js';
 import { initHotkeys } from './ui/hotkeys.js';
+import { initRecord } from './record.js';
 
 if (!window.__PI_WEBPICKER__) {
   window.__PI_WEBPICKER__ = true;
@@ -41,8 +42,7 @@ if (!window.__PI_WEBPICKER__) {
       if (ctx.renderConnPill) ctx.renderConnPill(s);
       if (s !== 'on' && ctx.renderTargetCombo) ctx.renderTargetCombo();
     },
-    onWelcome: () => { if (ctx.refreshTargets) void ctx.refreshTargets(); },
-    onPageRequest: (f) => {
+    onWelcome: () => { if (ctx.refreshTargets) void ctx.refreshTargets(); },    onPageRequest: (f) => {
       // Last line of defense: an op is never allowed to become an uncaught
       // page error (handlePageToolRequest already catches handler failures;
       // this guards the dispatch machinery itself and page-realm side effects).
@@ -64,6 +64,9 @@ if (!window.__PI_WEBPICKER__) {
   initSend(ctx);
   initSettings(ctx);
   initFab(ctx);
+  ctx.consoleRing = consoleRing;   // record stop 时按窗口切片用
+  ctx.netRing = netRing;
+  initRecord(ctx);       // 先于 hotkeys，⇧⌥R 才有目标
   initHotkeys(ctx);
 
   ctx.refreshCount();
@@ -79,6 +82,9 @@ if (!window.__PI_WEBPICKER__) {
     start: () => { ctx.setActive(true); return true; },
     stop: () => { ctx.setActive(false); return true; },
     panel: ctx.togglePanel,
+    record: () => ctx.toggleRecord(),
+    recordState: () => ctx.recState,
+    getRecord: () => ctx.getRecord(),
     connect: () => conn.connect(),
     disconnect: () => conn.disconnect(),
     settings: ctx.openSettings,
@@ -107,6 +113,7 @@ if (!window.__PI_WEBPICKER__) {
     });
     GM_registerMenuCommand('打开标注面板 (⇧⌥L)', ctx.togglePanel);
     GM_registerMenuCommand('开始拾取 (⇧⌥P)', () => ctx.setActive(true));
+    GM_registerMenuCommand('开始/停止录制 (⇧⌥R)', () => ctx.toggleRecord());
     GM_registerMenuCommand('重新注入 trigger', () => {
       ui.toast(ui.reinjectTrigger() ? 'trigger 已重新注入' : 'trigger 仍在页面上');
     });

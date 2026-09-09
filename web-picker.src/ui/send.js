@@ -26,9 +26,10 @@ export function initSend(ctx) {
     const prompt = elPrompt.value.trim();
     const target = ctx.getComboSel();
     const hasPicks = loadBatch().length > 0;
-    if (!prompt && !hasPicks) { toast('先标注元素或写 prompt'); return; }
+    const record = ctx.getRecord ? ctx.getRecord() : null;
+    if (!prompt && !hasPicks && !record) { toast('先标注元素、录制操作、或写 prompt'); return; }
     toast('正在向 broker 请求完整 handoff prompt…');
-    const res = await conn.requestCompose(prompt, target);
+    const res = await conn.requestCompose(prompt, target, record);
     if (!res.ok) { toast('拼 prompt 失败: ' + res.code + (res.message ? ' — ' + res.message : '')); return; }
     if (!copyText(res.text)) { toast('剪贴板不可用（需 GM_setClipboard 或 https/localhost）'); return; }
     toast('handoff prompt 已复制（' + res.text.length + ' 字符 · 可粘贴给任意 agent）');
@@ -42,11 +43,12 @@ export function initSend(ctx) {
       return;
     }
     const hasPicks = loadBatch().length > 0;
-    if (!prompt && !hasPicks) { toast('先标注元素或写 prompt'); return; }
-    if (!hasPicks && !confirm('没有标注任何元素，只发 prompt？')) return;
+    const record = ctx.getRecord ? ctx.getRecord() : null;   // v1.13：完成的 Record 随批发送
+    if (!prompt && !hasPicks && !record) { toast('先标注元素、录制操作、或写 prompt'); return; }
+    if (!hasPicks && !record && !confirm('没有标注任何元素，只发 prompt？')) return;
     elSend.disabled = true;
     elSend.textContent = '发送中…';
-    const res = await conn.submitToAgent(prompt, target);
+    const res = await conn.submitToAgent(prompt, target, record);
     elSend.disabled = false;
     elSend.textContent = '发送 →';
     if (res.ok) {
@@ -54,6 +56,7 @@ export function initSend(ctx) {
       toast('已送达 agent（handoff ' + (res.result && res.result.handoff_id ? res.result.handoff_id : '?') + '）');
       elPrompt.value = '';
       ctx.clearBatch();
+      if (record && ctx.clearRecord) ctx.clearRecord();      // record 一次性：发送成功即清
       ctx.closePanel();                              // 发送成功即收起面板；重开显示空态
     } else {
       toast('发送失败: ' + res.code + (res.message ? ' — ' + res.message : ''));

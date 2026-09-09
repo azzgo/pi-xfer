@@ -2,7 +2,7 @@
 // Radix 等模态弹窗的 FocusScope / DismissableLayer 兼容逻辑（focusin /
 // pointerdown 拦截 + composed:false 克隆补发）也在这里。
 
-import { HOTKEY } from '../constants.js';
+import { HOTKEY, HOTKEY_REC } from '../constants.js';
 
 export function initHotkeys(ctx) {
   const { root, els, toast } = ctx;
@@ -25,7 +25,9 @@ export function initHotkeys(ctx) {
 
   window.addEventListener('keydown', (e) => {
     const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
+    const isRecHot = e.code === HOTKEY_REC.code && e.altKey === HOTKEY_REC.alt && e.shiftKey === HOTKEY_REC.shift && !e.ctrlKey && !e.metaKey;
     const isList = e.code === 'KeyL' && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
+    if (isRecHot) { e.preventDefault(); e.stopPropagation(); ctx.toggleRecord(); return; }
     if (isList) { e.preventDefault(); e.stopPropagation(); ctx.togglePanel(); return; }
     if (isHot) {
       e.preventDefault(); e.stopPropagation();

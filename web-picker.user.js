@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.12.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.12.0：broker 自动重连——手动连上过一次的域名在页面刷新/HMR 整页刷新后静默重连（指数退避），设置弹窗/GM 菜单可按域名撤销；PAGE_QUERY_RULE 改为允许 agent 修改后反向验证）
+// @version      1.13.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.13.0：Record 模式——⇧⌥R 开始/停止录制，人操作页面、脚本记时序事件与 console/net 现场切片，随 annotation.submit 的 record 字段整体发给 agent；netRing 改为 pending-first，SSE/长轮询可见）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -109,16 +109,20 @@
   var KEY_POS = "pi.wp.fabPos";
   var KEY_BAR_POS = "pi.wp.barPos";
   var KEY_PANEL_POS = "pi.wp.panelPos";
+  var KEY_REC = "pi.wp.rec";
   var GM_DEBUG = "pi.wp.debug";
   var HOST_FLAG = "data-pi-wp-host";
   var MAX_DEPTH = 8;
   var HOTKEY = { code: "KeyP", alt: true, shift: true };
+  var HOTKEY_REC = { code: "KeyR", alt: true, shift: true };
   var GM_BROKER = "wp.brokerUrl";
   var GM_TARGET = "wp.lastTarget";
   var GM_FPROPS = "wp.frameworkProps";
   var DEFAULT_BROKER_URL = "ws://127.0.0.1:4719";
   var CAPTURE_MAX = 200;
   var RESULT_MAX_CHARS = 5e5;
+  var REC_MAX_EVENTS = 50;
+  var REC_SLICE_MAX = 60;
   var DEFAULT_STYLE_PROPS = [
     "display",
     "position",
@@ -241,21 +245,23 @@
       return "tab-" + Date.now().toString(36);
     }
   }
-  function frameSubmit(id, prompt, targetName) {
+  function frameSubmit(id, prompt, targetName, record) {
     return frame(WIRE.KIND_SUBMIT, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
+      ...record ? { record } : {},
       target: { namespace: WIRE.NS_LOCAL, name: targetName }
     });
   }
-  function frameCompose(id, prompt, targetName) {
+  function frameCompose(id, prompt, targetName, record) {
     return frame(WIRE.KIND_COMPOSE, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
+      ...record ? { record } : {},
       ...targetName ? { target: { namespace: WIRE.NS_LOCAL, name: targetName } } : {}
     });
   }
@@ -416,15 +422,26 @@
           const req = args[0];
           const url = typeof req === "string" ? req : req && req.url || "";
           const method = args[1] && args[1].method || req && req.method || "GET";
+          const rec = { method: String(method), url: String(url).slice(0, 500), ts: started, pending: true };
+          ringPush(netRing, rec);
           const done = (res, error) => {
             try {
-              const rec = { method: String(method), url: String(url).slice(0, 500), ts: Date.now() };
               if (error) {
                 rec.status = 0;
                 rec.error = String(error && error.message || error).slice(0, 200);
-              } else rec.status = res && res.status;
+                rec.pending = false;
+              } else {
+                rec.status = res && res.status;
+                let ct = "";
+                try {
+                  ct = String(res && res.headers && res.headers.get("content-type") || "");
+                } catch (e) {
+                }
+                if (ct.includes("text/event-stream")) {
+                  rec.kind = "sse";
+                } else rec.pending = false;
+              }
               rec.durationMs = Date.now() - started;
-              ringPush(netRing, rec);
             } catch (e) {
             }
           };
@@ -439,6 +456,31 @@
             }
           );
         };
+      }
+    } catch (e) {
+    }
+    try {
+      const ES = realm.EventSource;
+      if (typeof ES === "function") {
+        realm.EventSource = function(url, cfg) {
+          const es = new ES(url, cfg);
+          try {
+            const rec = { method: "GET", url: String(url || "").slice(0, 500), status: "pending", ts: Date.now(), pending: true, kind: "sse", msgs: 0 };
+            ringPush(netRing, rec);
+            es.addEventListener("open", () => {
+              rec.status = es.status || 200;
+            });
+            es.addEventListener("message", () => {
+              rec.msgs++;
+            });
+            es.addEventListener("error", () => {
+              if (es.readyState === 2) rec.pending = false;
+            });
+          } catch (e) {
+          }
+          return es;
+        };
+        realm.EventSource.prototype = ES.prototype;
       }
     } catch (e) {
     }
@@ -464,15 +506,15 @@
             if (!meta) meta = { method: "GET", url: "", started: Date.now() };
             meta.started = Date.now();
             try {
+              meta.rec = { method: meta.method, url: meta.url, ts: meta.started, pending: true };
+              ringPush(netRing, meta.rec);
               this.addEventListener("loadend", () => {
                 try {
-                  ringPush(netRing, {
-                    method: meta.method,
-                    url: meta.url,
-                    status: this.status,
-                    durationMs: Date.now() - (meta.started || Date.now()),
-                    ts: Date.now()
-                  });
+                  const rec = meta.rec;
+                  if (!rec) return;
+                  rec.status = this.status;
+                  rec.durationMs = Date.now() - (meta.started || Date.now());
+                  rec.pending = false;
                 } catch (e) {
                 }
               });
@@ -1034,7 +1076,7 @@
     }
     const DEFAULT_PROMPT = "请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。";
     const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：本页已授权 broker 自动重连，修改代码导致页面刷新后，连接会自动恢复（重连期间 page.request 可能短暂返回 no_tabs/timeout，等几秒重试即可，重试上限 3 次）。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。";
-    function submitToAgent(prompt, targetName) {
+    function submitToAgent(prompt, targetName, record) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
           resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
@@ -1043,7 +1085,7 @@
         const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "submit", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        if (!sendFrame(frameSubmit(id, promptText, targetName))) {
+        if (!sendFrame(frameSubmit(id, promptText, targetName, record))) {
           pending.delete(id);
           resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
           return;
@@ -1056,7 +1098,7 @@
         }, 1e4);
       });
     }
-    function requestCompose(prompt, targetName) {
+    function requestCompose(prompt, targetName, record) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
           resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
@@ -1065,7 +1107,7 @@
         const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "compose", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        if (!sendFrame(frameCompose(id, promptText, targetName))) {
+        if (!sendFrame(frameCompose(id, promptText, targetName, record))) {
           pending.delete(id);
           resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
           return;
@@ -1186,6 +1228,23 @@
       #bar #gclear:hover, #bar #fz:hover, #bar #escx:hover { color: #fff; }
       #bar #fz.on kbd { background: #0c4a6e; border-color: #0369a1; color: #e0f2fe; }
       #bar #gh.on kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
+      /* ---- record-mode banner ---- */
+      #recbar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        background: rgba(15,21,34,.96); color: #cbd5e1; font: 12px/1 var(--wp-font);
+        padding: 9px 16px; border-radius: 999px; display: none; gap: 12px; align-items: center;
+        box-shadow: 0 8px 24px rgba(15,23,42,.35); user-select: none; pointer-events: auto;
+        border: 1px solid rgba(239,68,68,.4); }
+      #recbar .rdot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444;
+        animation: wprecblink 1.2s ease-in-out infinite; }
+      @keyframes wprecblink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+      #recbar b { color: #fff; letter-spacing: .08em; font-size: 11px; }
+      #recbar #reccount { font: 11px/1 var(--wp-mono); color: #fca5a5; }
+      #recbar #recbadge { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+      #recbar button { padding: 4px 10px; font-size: 11px; border-radius: 6px; }
+      #recbar #recstop { background: #ef4444; color: #fff; }
+      #recbar #recstop:hover { background: #dc2626; }
+      #recbar #recdiscard { background: #1e293b; color: #94a3b8; }
+      #recbar #recdiscard:hover { background: #334155; color: #e2e8f0; }
       /* ---- fab ---- */
       #fab { position: fixed; width: 46px; height: 46px; border-radius: 14px;
         border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, #1b2230, #12161f);
@@ -1282,6 +1341,15 @@
       #plist .item .pgroup { display: inline-block; margin-top: 4px; padding: 1px 7px;
         background: #fffbeb; border: 1px solid #fde68a; border-radius: 999px;
         color: #b45309; font: 600 10px/1.6 var(--wp-mono); }
+      /* ---- record summary card（v1.13）---- */
+      #plist .item.recitem { border-color: #fecaca; background: #fffafa; }
+      #plist .item.recitem .psel { color: #b91c1c; }
+      #plist .item .rsevs { max-height: 132px; overflow-y: auto; margin: 6px 0 2px;
+        border: 1px solid var(--wp-line); border-radius: 6px; padding: 4px 6px; background: #fff; }
+      #plist .item .rsev { font: 10.5px/1.7 var(--wp-mono); color: #475569;
+        word-break: break-all; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #plist .item .rsev b { color: #b91c1c; font-weight: 600; }
+      #plist .item .rst { color: #94a3b8; }
       #plist .item .pprev { color: #94a3b8; font-size: 11px; margin: 4px 0; overflow: hidden;
         text-overflow: ellipsis; white-space: nowrap; }
       #plist .item textarea { min-height: 34px; font-size: 12px; padding: 5px 8px; }
@@ -1348,6 +1416,13 @@
       <span class="muted" id="fz"><kbd>F</kbd>冻结</span>
       <span class="muted" id="escx" title="退出拾取模式"><kbd>Esc</kbd>退出</span>
     </div>
+    <div id="recbar">
+      <span class="rdot"></span><b>REC</b>
+      <span id="reccount">0 events</span>
+      <span id="recbadge" title="打开标注面板">面板</span>
+      <button id="recstop">■ 停止</button>
+      <button id="recdiscard">丢弃</button>
+    </div>
     <div id="card">
       <div class="sel" id="sel"></div>
       <textarea id="txt" placeholder="备注（可选，留空直接回车提交）"></textarea>
@@ -1405,7 +1480,7 @@
     </div>
   `;
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
     let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
     try {
       const saved = sessionStorage.getItem(KEY_POS);
@@ -1446,6 +1521,11 @@
       elGH,
       elGCLEAR,
       elEscX,
+      elRecBar,
+      elRecCount,
+      elRecBadge,
+      elRecStop,
+      elRecDiscard,
       elFab,
       elCnt,
       elDot,
@@ -1508,7 +1588,7 @@
     const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
     let panelOpen = false;
     function refreshCount() {
-      const n = loadBatch().length;
+      const n = loadBatch().length + (ctx.getRecord && ctx.getRecord() ? 1 : 0);
       elCnt.textContent = n;
       elCnt.style.display = n > 0 ? "block" : "none";
       if (panelOpen) renderPanel();
@@ -1530,12 +1610,13 @@
     ctx.clearBatch = clearBatch;
     function renderPanel() {
       const b = loadBatch();
-      elPcount.textContent = b.length ? b.length + " 条" : "";
-      if (!b.length) {
+      const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : "";
+      elPcount.textContent = b.length || recHtml ? b.length + (recHtml ? 1 : 0) + " 条" : "";
+      if (!b.length && !recHtml) {
         elPlist.innerHTML = '<div class="empty">还没有选中任何元素</div>';
         return;
       }
-      elPlist.innerHTML = b.map(
+      elPlist.innerHTML = recHtml + b.map(
         (r, i) => '<div class="item" data-i="' + i + '"><div class="psel">' + escapeHtml(r.selector) + "</div>" + (r.group ? '<div class="pgroup">⧉ 组 ' + escapeHtml(r.group) + "</div>" : "") + (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + " · " + r.source.file + ":" + r.source.line) + "</div>" : "") + (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + "</div>" : "") + '<textarea placeholder="备注…（失焦自动保存）">' + escapeHtml(r.note || "") + '</textarea><div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + '</span><button class="del">删除</button></div></div>'
       ).join("");
     }
@@ -1584,6 +1665,13 @@
       toast("备注已保存" + (synced ? "（已同步组内 " + synced + " 项）" : ""));
     });
     elPlist.addEventListener("click", (e) => {
+      const recDel = e.target && e.target.closest ? e.target.closest("[data-rec-del]") : null;
+      if (recDel) {
+        if (ctx.clearRecord) ctx.clearRecord();
+        renderPanel();
+        toast("已删除操作记录");
+        return;
+      }
       const del = e.target && e.target.closest ? e.target.closest(".del") : null;
       if (!del) return;
       const item = del.closest(".item");
@@ -2202,12 +2290,13 @@
       const prompt = elPrompt.value.trim();
       const target = ctx.getComboSel();
       const hasPicks = loadBatch().length > 0;
-      if (!prompt && !hasPicks) {
-        toast("先标注元素或写 prompt");
+      const record = ctx.getRecord ? ctx.getRecord() : null;
+      if (!prompt && !hasPicks && !record) {
+        toast("先标注元素、录制操作、或写 prompt");
         return;
       }
       toast("正在向 broker 请求完整 handoff prompt…");
-      const res = await conn.requestCompose(prompt, target);
+      const res = await conn.requestCompose(prompt, target, record);
       if (!res.ok) {
         toast("拼 prompt 失败: " + res.code + (res.message ? " — " + res.message : ""));
         return;
@@ -2226,14 +2315,15 @@
         return;
       }
       const hasPicks = loadBatch().length > 0;
-      if (!prompt && !hasPicks) {
-        toast("先标注元素或写 prompt");
+      const record = ctx.getRecord ? ctx.getRecord() : null;
+      if (!prompt && !hasPicks && !record) {
+        toast("先标注元素、录制操作、或写 prompt");
         return;
       }
-      if (!hasPicks && !confirm("没有标注任何元素，只发 prompt？")) return;
+      if (!hasPicks && !record && !confirm("没有标注任何元素，只发 prompt？")) return;
       elSend.disabled = true;
       elSend.textContent = "发送中…";
-      const res = await conn.submitToAgent(prompt, target);
+      const res = await conn.submitToAgent(prompt, target, record);
       elSend.disabled = false;
       elSend.textContent = "发送 →";
       if (res.ok) {
@@ -2241,6 +2331,7 @@
         toast("已送达 agent（handoff " + (res.result && res.result.handoff_id ? res.result.handoff_id : "?") + "）");
         elPrompt.value = "";
         ctx.clearBatch();
+        if (record && ctx.clearRecord) ctx.clearRecord();
         ctx.closePanel();
       } else {
         toast("发送失败: " + res.code + (res.message ? " — " + res.message : ""));
@@ -2508,7 +2599,14 @@
     ctx.toggleFreeze = toggleFreeze;
     window.addEventListener("keydown", (e) => {
       const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
+      const isRecHot = e.code === HOTKEY_REC.code && e.altKey === HOTKEY_REC.alt && e.shiftKey === HOTKEY_REC.shift && !e.ctrlKey && !e.metaKey;
       const isList = e.code === "KeyL" && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
+      if (isRecHot) {
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.toggleRecord();
+        return;
+      }
       if (isList) {
         e.preventDefault();
         e.stopPropagation();
@@ -2668,6 +2766,263 @@
     ["pointerdown", "mousedown"].forEach((t) => window.addEventListener(t, isolatePress, true));
   }
 
+  // web-picker.src/record.js
+  var INPUT_DEBOUNCE_MS = 1e3;
+  function initRecord(ctx) {
+    const { els, toast } = ctx;
+    const { elRecBar, elRecCount, elRecStop, elRecDiscard, elRecBadge } = els;
+    let status = null;
+    let rec = null;
+    let inputTimer = null;
+    let inputEl = null;
+    let urlTimer = null;
+    ctx.recState = {
+      get active() {
+        return status === "rec";
+      },
+      get eventCount() {
+        return status === "rec" && rec ? rec.events.length : 0;
+      }
+    };
+    function save() {
+      try {
+        sessionStorage.setItem(KEY_REC, JSON.stringify({ status, rec }));
+      } catch (e) {
+      }
+    }
+    function load() {
+      try {
+        const s = sessionStorage.getItem(KEY_REC);
+        if (!s) return;
+        const v = JSON.parse(s);
+        if (v && (v.status === "rec" || v.status === "done") && v.rec && Array.isArray(v.rec.events)) {
+          status = v.status;
+          rec = v.rec;
+        }
+      } catch (e) {
+      }
+    }
+    function now() {
+      return Date.now();
+    }
+    function t0() {
+      return rec ? rec.start : 0;
+    }
+    function isOurUiEl(el) {
+      try {
+        return !!(el && el.closest && el.closest("[" + HOST_FLAG + "]"));
+      } catch (e) {
+        return false;
+      }
+    }
+    function describe(el) {
+      try {
+        return {
+          sel: cssPath(el),
+          text: (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60) || void 0
+        };
+      } catch (e) {
+        return { sel: el && el.nodeName ? el.nodeName.toLowerCase() : "unknown" };
+      }
+    }
+    function push(kind, extra) {
+      if (status !== "rec" || !rec) return;
+      if (rec.events.length >= REC_MAX_EVENTS) return;
+      rec.events.push(Object.assign({ seq: rec.events.length + 1, t: now() - t0(), kind }, extra || {}));
+      save();
+      renderRecBar();
+    }
+    function swallowByPickMode() {
+      return !!(ctx.pickState && ctx.pickState.pickMode);
+    }
+    function onCaptureClick(e) {
+      if (status !== "rec" || swallowByPickMode()) return;
+      if (isOurUiEl(e.target)) return;
+      const d = describe(e.target);
+      push("click", d);
+    }
+    function rawValue(el) {
+      try {
+        if (el.type === "password") return "***";
+        const v = String(el.value ?? "");
+        return v.slice(0, 120);
+      } catch (e) {
+        return "";
+      }
+    }
+    function onCaptureInput(e) {
+      if (status !== "rec") return;
+      const el = e.target;
+      const tag = el && el.tagName;
+      if (isOurUiEl(el) || tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") return;
+      inputEl = el;
+      clearTimeout(inputTimer);
+      inputTimer = setTimeout(() => {
+        commitInput(el);
+      }, INPUT_DEBOUNCE_MS);
+    }
+    function commitInput(el) {
+      clearTimeout(inputTimer);
+      inputTimer = null;
+      inputEl = null;
+      if (status !== "rec" || !el || isOurUiEl(el)) return;
+      const d = describe(el);
+      const prev = rec.events.find((ev) => ev.kind === "input" && ev.sel === d.sel);
+      const value = rawValue(el);
+      if (prev) {
+        prev.value = value;
+        prev.t = now() - t0();
+      } else push("input", { sel: d.sel, value });
+      save();
+    }
+    function onCaptureChange(e) {
+      if (status !== "rec") return;
+      const el = e.target;
+      if (isOurUiEl(el)) return;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT")) commitInput(el);
+    }
+    function onCaptureKey(e) {
+      if (status !== "rec" || swallowByPickMode()) return;
+      if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+      if (isOurUiEl(e.target)) return;
+      const el = e.target;
+      if (el && el.tagName === "TEXTAREA") return;
+      push("key", { sel: describe(el).sel, key: "Enter" });
+    }
+    function onCaptureSubmit(e) {
+      if (status !== "rec") return;
+      if (isOurUiEl(e.target)) return;
+      push("submit", { sel: describe(e.target).sel });
+    }
+    function startUrlWatch() {
+      stopUrlWatch();
+      let last = location.href;
+      urlTimer = setInterval(() => {
+        if (status !== "rec") return;
+        if (location.href !== last) {
+          const from = last;
+          last = location.href;
+          push("nav", { from: from.slice(0, 200), to: location.href.slice(0, 200) });
+        }
+      }, 500);
+    }
+    function stopUrlWatch() {
+      if (urlTimer) {
+        clearInterval(urlTimer);
+        urlTimer = null;
+      }
+    }
+    function renderRecBar() {
+      if (status !== "rec") {
+        elRecBar.style.display = "none";
+        return;
+      }
+      elRecBar.style.display = "flex";
+      elRecCount.textContent = rec.events.length + " events";
+    }
+    function start() {
+      if (status === "rec") return;
+      if (status === "done") {
+        rec = null;
+      }
+      status = "rec";
+      rec = {
+        id: "r" + now().toString(36) + Math.random().toString(36).slice(2, 5),
+        start: now(),
+        end: void 0,
+        url0: location.href,
+        url1: void 0,
+        events: [],
+        console: void 0,
+        net: void 0
+      };
+      save();
+      renderRecBar();
+      startUrlWatch();
+      toast("录制开始 · 操作页面，⇧⌥R 停止");
+    }
+    function stop(discard) {
+      if (status !== "rec" || !rec) return;
+      stopUrlWatch();
+      clearTimeout(inputTimer);
+      inputTimer = null;
+      inputEl = null;
+      rec.end = now();
+      rec.url1 = location.href;
+      rec.events = rec.events.slice(0, REC_MAX_EVENTS);
+      try {
+        const sels = (JSON.parse(sessionStorage.getItem("pi.wp.picks") || "[]") || []).map((p) => p && p.selector);
+        for (const ev of rec.events) {
+          if (ev.sel) {
+            const i = sels.indexOf(ev.sel);
+            if (i >= 0) ev.ref = i + 1;
+          }
+        }
+      } catch (e) {
+      }
+      if (discard) {
+        status = null;
+        rec = null;
+        try {
+          sessionStorage.removeItem(KEY_REC);
+        } catch (e) {
+        }
+        toast("录制已丢弃");
+      } else {
+        status = "done";
+        rec.console = ctx.consoleRing.filter((c) => c.ts >= rec.start).slice(-REC_SLICE_MAX);
+        rec.net = ctx.netRing.filter((n) => n.ts >= rec.start).slice(-REC_SLICE_MAX);
+        toast("录制完成 · " + rec.events.length + " 事件 · 打开面板发送");
+      }
+      save();
+      renderRecBar();
+      if (ctx.refreshCount) ctx.refreshCount();
+    }
+    ctx.startRecord = start;
+    ctx.stopRecord = stop;
+    ctx.toggleRecord = () => {
+      if (status === "rec") stop(false);
+      else start();
+    };
+    ctx.getRecord = () => status === "done" ? rec : null;
+    ctx.clearRecord = () => {
+      if (status !== "done") return;
+      status = null;
+      rec = null;
+      try {
+        sessionStorage.removeItem(KEY_REC);
+      } catch (e) {
+      }
+      if (ctx.refreshCount) ctx.refreshCount();
+    };
+    ctx.renderRecordSummary = () => {
+      if (status !== "done" || !rec) return "";
+      const ev = rec.events.map(
+        (e) => '<div class="rsev"><span class="rst">+' + e.t + "ms</span> <b>" + escapeHtml(e.kind) + "</b> " + escapeHtml(e.sel || e.to || "") + (e.value !== void 0 ? " = " + escapeHtml(e.value) : "") + "</div>"
+      ).join("");
+      return '<div class="item recitem" data-rec="1"><div class="psel">⏺ 记录 ' + escapeHtml(rec.id) + " · " + rec.events.length + ' 事件</div><div class="rsevs">' + ev + '</div><div class="prow"><span class="pts">' + new Date(rec.start).toLocaleTimeString() + " → " + new Date(rec.end).toLocaleTimeString() + '</span><button class="del" data-rec-del="1">删除</button></div></div>';
+    };
+    elRecStop.addEventListener("click", (e) => {
+      e.stopPropagation();
+      stop(false);
+    });
+    elRecDiscard.addEventListener("click", (e) => {
+      e.stopPropagation();
+      stop(true);
+    });
+    elRecBadge.addEventListener("click", () => {
+      if (ctx.togglePanel) ctx.togglePanel();
+    });
+    load();
+    renderRecBar();
+    if (status === "rec") startUrlWatch();
+    window.addEventListener("click", onCaptureClick, true);
+    window.addEventListener("input", onCaptureInput, true);
+    window.addEventListener("change", onCaptureChange, true);
+    window.addEventListener("keydown", onCaptureKey, true);
+    window.addEventListener("submit", onCaptureSubmit, true);
+  }
+
   // web-picker.src/main.js
   if (!window.__PI_WEBPICKER__) {
     window.__PI_WEBPICKER__ = true;
@@ -2706,6 +3061,9 @@
     initSend(ctx);
     initSettings(ctx);
     initFab(ctx);
+    ctx.consoleRing = consoleRing;
+    ctx.netRing = netRing;
+    initRecord(ctx);
     initHotkeys(ctx);
     ctx.refreshCount();
     ctx.updateGroupUI();
@@ -2722,6 +3080,9 @@
         return true;
       },
       panel: ctx.togglePanel,
+      record: () => ctx.toggleRecord(),
+      recordState: () => ctx.recState,
+      getRecord: () => ctx.getRecord(),
       connect: () => conn.connect(),
       disconnect: () => conn.disconnect(),
       settings: ctx.openSettings,
@@ -2755,6 +3116,7 @@
       });
       GM_registerMenuCommand("打开标注面板 (⇧⌥L)", ctx.togglePanel);
       GM_registerMenuCommand("开始拾取 (⇧⌥P)", () => ctx.setActive(true));
+      GM_registerMenuCommand("开始/停止录制 (⇧⌥R)", () => ctx.toggleRecord());
       GM_registerMenuCommand("重新注入 trigger", () => {
         ui.toast(ui.reinjectTrigger() ? "trigger 已重新注入" : "trigger 仍在页面上");
       });

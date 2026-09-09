@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.12.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.12.0：broker 自动重连——手动连上过一次的域名在页面刷新/HMR 整页刷新后静默重连（指数退避），设置弹窗/GM 菜单可按域名撤销；PAGE_QUERY_RULE 改为允许 agent 修改后反向验证）
+// @version      1.13.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.13.0：Record 模式——⇧⌥R 开始/停止录制，人操作页面、脚本记时序事件与 console/net 现场切片，随 annotation.submit 的 record 字段整体发给 agent；netRing 改为 pending-first，SSE/长轮询可见）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
