@@ -41,7 +41,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { pidAlive } from "./broker-main.js";
 import { XFER_DIR } from "./constants.js";
 
@@ -268,7 +268,11 @@ function resolveHook(): string {
   );
   const match = /--import\s+'([^']+)'/.exec(pkg.scripts?.test ?? "");
   if (!match) throw new Error("cannot find --import resolve hook in package.json test script");
-  return match[1]!;
+  // Relative hook paths (e.g. ./ts-resolve-hook.mjs) must resolve against the
+  // EXTENSION dir, not the caller's cwd — the daemon is spawned from whatever
+  // project the agent happens to be in.
+  const hook = match[1]!;
+  return hook.startsWith("data:") ? hook : pathToFileURL(path.resolve(import.meta.dirname, hook)).href;
 }
 
 const RESOLVE_HOOK = resolveHook();

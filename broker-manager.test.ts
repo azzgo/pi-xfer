@@ -17,6 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { BrokerManager, type BrokerInfo } from "./broker-manager.js";
+import { pathToFileURL } from "node:url";
 
 // ---------- resolve hook (same as `npm test` / broker.test.ts) ----------
 
@@ -26,7 +27,11 @@ function resolveHook(): string {
   );
   const match = /--import\s+'([^']+)'/.exec(pkg.scripts?.test ?? "");
   if (!match) throw new Error("cannot find --import resolve hook in package.json test script");
-  return match[1]!;
+  // Relative hook paths (e.g. ./ts-resolve-hook.mjs) must resolve against the
+  // EXTENSION dir, not the caller's cwd — the daemon is spawned from whatever
+  // project the agent happens to be in.
+  const hook = match[1]!;
+  return hook.startsWith("data:") ? hook : pathToFileURL(path.resolve(import.meta.dirname, hook)).href;
 }
 
 const RESOLVE_HOOK = resolveHook();
