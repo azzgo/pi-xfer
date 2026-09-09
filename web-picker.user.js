@@ -102,65 +102,116 @@
  *      ⌫ (or the toolbar chip / a group mark's number badge) clears pending group
  *      members; toolbar / note card / panel are all draggable.
  */
+
 (() => {
-  'use strict';
+  // web-picker.src/constants.js
+  var KEY_PICKS = "pi.wp.picks";
+  var KEY_POS = "pi.wp.fabPos";
+  var KEY_BAR_POS = "pi.wp.barPos";
+  var KEY_PANEL_POS = "pi.wp.panelPos";
+  var GM_DEBUG = "pi.wp.debug";
+  var HOST_FLAG = "data-pi-wp-host";
+  var MAX_DEPTH = 8;
+  var HOTKEY = { code: "KeyP", alt: true, shift: true };
+  var GM_BROKER = "wp.brokerUrl";
+  var GM_TARGET = "wp.lastTarget";
+  var GM_FPROPS = "wp.frameworkProps";
+  var DEFAULT_BROKER_URL = "ws://127.0.0.1:4719";
+  var CAPTURE_MAX = 200;
+  var RESULT_MAX_CHARS = 5e5;
+  var DEFAULT_STYLE_PROPS = [
+    "display",
+    "position",
+    "color",
+    "background-color",
+    "font-size",
+    "font-weight",
+    "font-family",
+    "line-height",
+    "text-align",
+    "overflow",
+    "z-index",
+    "opacity",
+    "visibility",
+    "width",
+    "height",
+    "margin",
+    "padding",
+    "border",
+    "border-radius",
+    "flex-direction",
+    "gap"
+  ];
 
-  if (window.__PI_WEBPICKER__) return;
-  window.__PI_WEBPICKER__ = true;
+  // web-picker.src/storage.js
+  var gm = {
+    get(k, d) {
+      try {
+        const v = GM_getValue(k);
+        return v === void 0 ? d : v;
+      } catch (e) {
+        return d;
+      }
+    },
+    set(k, v) {
+      try {
+        GM_setValue(k, v);
+      } catch (e) {
+      }
+    }
+  };
+  function debugLog(...args) {
+    if (gm.get(GM_DEBUG, false) !== true) return;
+    console.log("[pi.wp]", ...args);
+  }
+  function loadBatch() {
+    try {
+      const s = sessionStorage.getItem(KEY_PICKS);
+      const b = s ? JSON.parse(s) : [];
+      return Array.isArray(b) ? b : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  function saveBatch(b) {
+    try {
+      sessionStorage.setItem(KEY_PICKS, JSON.stringify(b));
+    } catch (e) {
+    }
+  }
 
-  // ---------- constants ----------
-  const KEY_PICKS = 'pi.wp.picks';          // per-tab batch (sessionStorage)
-  const KEY_POS = 'pi.wp.fabPos';           // fab position (sessionStorage)
-  const KEY_BAR_POS = 'pi.wp.barPos';       // pick toolbar position (sessionStorage)
-  const KEY_PANEL_POS = 'pi.wp.panelPos';   // note panel position (sessionStorage)
-  const GM_DEBUG = 'pi.wp.debug';           // debug flag (GM storage)
-  const HOST_FLAG = 'data-pi-wp-host';
-  const MAX_DEPTH = 8;
-  const HOTKEY = { code: 'KeyP', alt: true, shift: true };
-  const GM_BROKER = 'wp.brokerUrl';        // broker WS URL override (settings modal)
-  const GM_TARGET = 'wp.lastTarget';       // last used local target name
-  const GM_FPROPS = 'wp.frameworkProps';   // framework.inspect props/state opt-in (default off)
-  const DEFAULT_BROKER_URL = 'ws://127.0.0.1:4719';
-
-  // page-tool capture/result caps + computed-style defaults (v1.6)
-  const CAPTURE_MAX = 200;                 // ring buffer size for console/network entries
-  const RESULT_MAX_CHARS = 500000;         // page.response text budget (broker frames cap at 1MB)
-  const DEFAULT_STYLE_PROPS = ['display', 'position', 'color', 'background-color', 'font-size',
-    'font-weight', 'font-family', 'line-height', 'text-align', 'overflow', 'z-index', 'opacity',
-    'visibility', 'width', 'height', 'margin', 'padding', 'border', 'border-radius',
-    'flex-direction', 'gap'];
-
-  // ---------- wire protocol v0.1 (Ticket 007 + trial amends: no token, targets frames) ----------
-  // Every frame carries { v, type }; each request gets exactly one reply (ack | error).
-  // All protocol constants and frame builders live here — never write a frame inline.
-  const PROTOCOL = {
-    V: 0,                                          // envelope version on every frame
-    KIND_HELLO: 'hello',
-    KIND_WELCOME: 'welcome',
-    KIND_SUBMIT: 'annotation.submit',
-    KIND_COMPOSE: 'annotation.compose',
-    KIND_ACK: 'ack',
-    KIND_ERROR: 'error',
-    KIND_TARGETS_LIST: 'targets.list',
-    KIND_TARGETS_RESULT: 'targets.result',
-    KIND_PAGE_REQUEST: 'page.request',
-    KIND_PAGE_RESPONSE: 'page.response',
-    NS_LOCAL: 'local',
+  // web-picker.src/wire.js
+  var PROTOCOL = {
+    V: 0,
+    // envelope version on every frame
+    KIND_HELLO: "hello",
+    KIND_WELCOME: "welcome",
+    KIND_SUBMIT: "annotation.submit",
+    KIND_COMPOSE: "annotation.compose",
+    KIND_ACK: "ack",
+    KIND_ERROR: "error",
+    KIND_TARGETS_LIST: "targets.list",
+    KIND_TARGETS_RESULT: "targets.result",
+    KIND_PAGE_REQUEST: "page.request",
+    KIND_PAGE_RESPONSE: "page.response",
+    NS_LOCAL: "local"
+  };
+  var PAGE_OPS = {
+    INFO: "page.info",
+    DOM_QUERY: "dom.query",
+    DOM_HTML: "dom.html",
+    CONSOLE_LOGS: "console.logs",
+    NETWORK_LOG: "network.log",
+    FRAMEWORK_INSPECT: "framework.inspect"
   };
 
-  // Fixed page-tool op table (v1.6) — the only ops page.request{tool} may invoke.
-  const PAGE_OPS = {
-    INFO: 'page.info',
-    DOM_QUERY: 'dom.query',
-    DOM_HTML: 'dom.html',
-    CONSOLE_LOGS: 'console.logs',
-    NETWORK_LOG: 'network.log',
-    FRAMEWORK_INSPECT: 'framework.inspect',
-  };
-  function frame(type, extra) { return Object.assign({ v: PROTOCOL.V, type }, extra); }
+  // web-picker.src/protocol.js
+  function frame(type, extra) {
+    return Object.assign({ v: PROTOCOL.V, type }, extra);
+  }
   function frameHello() {
     return frame(PROTOCOL.KIND_HELLO, {
-      client: { ua: 'tampermonkey', tab: { id: String(Date.now()), url: location.href, title: document.title } },
+      client: { ua: "tampermonkey", tab: { id: String(Date.now()), url: location.href, title: document.title } }
     });
   }
   function frameSubmit(id, prompt, targetName) {
@@ -169,18 +220,16 @@
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      target: { namespace: PROTOCOL.NS_LOCAL, name: targetName },
+      target: { namespace: PROTOCOL.NS_LOCAL, name: targetName }
     });
   }
-  // 与 submit 同构（page/picks/prompt/target），但 target 可省略——compose 只用
-  // 它渲染 follow-up 示例里的 fromTarget，没有目标也能渲染。
   function frameCompose(id, prompt, targetName) {
     return frame(PROTOCOL.KIND_COMPOSE, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      ...(targetName ? { target: { namespace: PROTOCOL.NS_LOCAL, name: targetName } } : {}),
+      ...targetName ? { target: { namespace: PROTOCOL.NS_LOCAL, name: targetName } } : {}
     });
   }
   function frameTargetsList(id) {
@@ -190,78 +239,247 @@
     return frame(PROTOCOL.KIND_PAGE_RESPONSE, {
       id,
       ok,
-      ...(ok ? { text: payload } : { error: payload }),
+      ...ok ? { text: payload } : { error: payload }
     });
   }
 
-  // ---------- storage — all keys under pi.wp.*, all access guarded ----------
-  // GM storage survives across tabs and sessions (debug flag today; connection
-  // prefs in the broker revision). sessionStorage keeps the per-tab batch.
-  const gm = {
-    get(k, d) {
-      try { const v = GM_getValue(k); return v === undefined ? d : v; }
-      catch (e) { return d; }
-    },
-    set(k, v) {
-      try { GM_setValue(k, v); }
-      catch (e) { /* GM storage unavailable — value simply won't persist */ }
-    },
-  };
-  function debugLog(...args) {
-    if (gm.get(GM_DEBUG, false) !== true) return;
-    console.log('[pi.wp]', ...args);
-  }
-
-  function loadBatch() {
+  // web-picker.src/json-safe.js
+  var JSON_SAFE_CAPS = { maxDepth: 5, maxStr: 1e5, maxArray: 500, maxKeys: 200 };
+  function jsonSafe(value) {
+    let truncated = false;
+    function walk(v, depth) {
+      if (v === null || typeof v === "number" || typeof v === "boolean") return v;
+      if (v === void 0) return null;
+      if (typeof v === "bigint" || typeof v === "symbol") {
+        truncated = true;
+        return String(v);
+      }
+      if (typeof v === "function") {
+        truncated = true;
+        return "ƒ " + (v.name || "anonymous");
+      }
+      if (typeof v === "string") {
+        if (v.length > JSON_SAFE_CAPS.maxStr) {
+          truncated = true;
+          return v.slice(0, JSON_SAFE_CAPS.maxStr) + "…[truncated]";
+        }
+        return v;
+      }
+      if (v instanceof Error) {
+        return { name: v.name, message: v.message, stack: walk(v.stack == null ? "" : String(v.stack), depth + 1) };
+      }
+      if (depth >= JSON_SAFE_CAPS.maxDepth) {
+        truncated = true;
+        return "[maxDepth]";
+      }
+      if (Array.isArray(v)) {
+        if (v.length > JSON_SAFE_CAPS.maxArray) truncated = true;
+        return v.slice(0, JSON_SAFE_CAPS.maxArray).map((x) => walk(x, depth + 1));
+      }
+      if (typeof v !== "object") {
+        truncated = true;
+        return String(v);
+      }
+      const out = {};
+      let keys;
+      try {
+        keys = Object.keys(v);
+      } catch (e) {
+        truncated = true;
+        return "[uninspectable]";
+      }
+      if (keys.length > JSON_SAFE_CAPS.maxKeys) truncated = true;
+      for (const k of keys.slice(0, JSON_SAFE_CAPS.maxKeys)) {
+        try {
+          out[k] = walk(v[k], depth + 1);
+        } catch (e) {
+          truncated = true;
+          out[k] = "[error]";
+        }
+      }
+      return out;
+    }
+    let text;
     try {
-      const s = sessionStorage.getItem(KEY_PICKS);
-      const b = s ? JSON.parse(s) : [];
-      return Array.isArray(b) ? b : [];
-    } catch (e) { return []; }
+      text = JSON.stringify(walk(value, 0));
+    } catch (e) {
+      truncated = true;
+      text = '"[unserializable]"';
+    }
+    return { text: text === void 0 ? "null" : text, truncated };
   }
-  function saveBatch(b) {
-    try { sessionStorage.setItem(KEY_PICKS, JSON.stringify(b)); }
-    catch (e) { /* quota / privacy mode — batch stays in memory for this page */ }
-  }
-  // 每次拾取都是独立记录，即使 selector 相同也不覆盖——同一元素重复选、或两个
-  // 元素恰好生成同一选择器（历史上出现过）时，各自的 note 都要保留。去重交给了
-  // 选择器本身的区分度（cssPath 对同 tag 兄弟强制 nth-of-type）。
-  function addPick(rec) {
-    const b = loadBatch();
-    b.push(rec);
-    saveBatch(b);
-    toast('已选中 ' + rec.selector);
-    refreshCount();
-  }
-  function clearBatch() { saveBatch([]); refreshCount(); }
 
-  // ---------- DOM utils ----------
-  const cssEscape = (s) => (window.CSS && CSS.escape)
-    ? CSS.escape(s)
-    : String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
+  // web-picker.src/capture.js
+  var consoleRing = [];
+  var netRing = [];
+  function ringPush(ring, rec) {
+    ring.push(rec);
+    if (ring.length > CAPTURE_MAX) ring.splice(0, ring.length - CAPTURE_MAX);
+  }
+  function captureRealm() {
+    try {
+      return typeof unsafeWindow !== "undefined" && unsafeWindow ? unsafeWindow : window;
+    } catch (e) {
+      return window;
+    }
+  }
+  function fmtCaptureArg(v) {
+    try {
+      if (typeof v === "string") return v;
+      if (v instanceof Error) return v.stack || String(v);
+      const t = jsonSafe(v).text;
+      return t.length > 400 ? t.slice(0, 400) + "…" : t;
+    } catch (e) {
+      return String(v);
+    }
+  }
+  function installCapture() {
+    const realm = captureRealm();
+    try {
+      for (const level of ["debug", "log", "info", "warn", "error"]) {
+        const original = realm.console && typeof realm.console[level] === "function" ? realm.console[level] : null;
+        if (!original) continue;
+        realm.console[level] = function(...args) {
+          try {
+            const first = typeof args[0] === "string" ? args[0] : "";
+            if (!first.startsWith("[pi.wp]")) {
+              const rec = { level, text: args.map(fmtCaptureArg).join(" "), ts: Date.now() };
+              if (level === "error" && args[0] instanceof Error && args[0].stack) rec.stack = String(args[0].stack).slice(0, 2e3);
+              ringPush(consoleRing, rec);
+            }
+          } catch (e) {
+          }
+          return original.apply(this === void 0 ? realm.console : this, args);
+        };
+      }
+    } catch (e) {
+    }
+    try {
+      realm.addEventListener("error", (ev) => {
+        try {
+          const err = ev && ev.error;
+          ringPush(consoleRing, {
+            level: "error",
+            text: ev && ev.message || "window.onerror",
+            stack: err && err.stack ? String(err.stack).slice(0, 2e3) : void 0,
+            ts: Date.now()
+          });
+        } catch (e) {
+        }
+      });
+      realm.addEventListener("unhandledrejection", (ev) => {
+        try {
+          const reason = ev && ev.reason;
+          ringPush(consoleRing, {
+            level: "error",
+            text: "unhandledrejection: " + fmtCaptureArg(reason),
+            stack: reason && reason.stack ? String(reason.stack).slice(0, 2e3) : void 0,
+            ts: Date.now()
+          });
+        } catch (e) {
+        }
+      });
+    } catch (e) {
+    }
+    try {
+      const origFetch = realm.fetch;
+      if (typeof origFetch === "function") {
+        realm.fetch = function(...args) {
+          const started = Date.now();
+          const req = args[0];
+          const url = typeof req === "string" ? req : req && req.url || "";
+          const method = args[1] && args[1].method || req && req.method || "GET";
+          const done = (res, error) => {
+            try {
+              const rec = { method: String(method), url: String(url).slice(0, 500), ts: Date.now() };
+              if (error) {
+                rec.status = 0;
+                rec.error = String(error && error.message || error).slice(0, 200);
+              } else rec.status = res && res.status;
+              rec.durationMs = Date.now() - started;
+              ringPush(netRing, rec);
+            } catch (e) {
+            }
+          };
+          return origFetch.apply(this, args).then(
+            (res) => {
+              done(res);
+              return res;
+            },
+            (err) => {
+              done(null, err);
+              throw err;
+            }
+          );
+        };
+      }
+    } catch (e) {
+    }
+    try {
+      const XHR = realm.XMLHttpRequest;
+      if (XHR && XHR.prototype) {
+        const origOpen = XHR.prototype.open;
+        const origSend = XHR.prototype.send;
+        if (typeof origOpen === "function" && typeof origSend === "function") {
+          XHR.prototype.open = function(method, url) {
+            try {
+              this.__wpNet = { method: String(method || "GET"), url: String(url || "").slice(0, 500), started: 0 };
+            } catch (e) {
+            }
+            return origOpen.apply(this, arguments);
+          };
+          XHR.prototype.send = function() {
+            let meta = null;
+            try {
+              meta = this.__wpNet || null;
+            } catch (e) {
+            }
+            if (!meta) meta = { method: "GET", url: "", started: Date.now() };
+            meta.started = Date.now();
+            try {
+              this.addEventListener("loadend", () => {
+                try {
+                  ringPush(netRing, {
+                    method: meta.method,
+                    url: meta.url,
+                    status: this.status,
+                    durationMs: Date.now() - (meta.started || Date.now()),
+                    ts: Date.now()
+                  });
+                } catch (e) {
+                }
+              });
+            } catch (e) {
+            }
+            return origSend.apply(this, arguments);
+          };
+        }
+      }
+    } catch (e) {
+    }
+  }
 
+  // web-picker.src/dom-utils.js
+  var cssEscape = (s) => window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
   function cssPath(el) {
-    if (el.id) return '#' + cssEscape(el.id);
+    if (el.id) return "#" + cssEscape(el.id);
     const parts = [];
     let cur = el, depth = 0;
     while (cur && cur.nodeType === 1 && cur !== document.documentElement && depth < MAX_DEPTH) {
       let sel = cur.nodeName.toLowerCase();
-      if (cur.id) { parts.unshift('#' + cssEscape(cur.id)); break; }
-      const sibs = cur.parentElement
-        ? Array.from(cur.parentElement.children).filter((s) => s.nodeName === cur.nodeName)
-        : [cur];
-      // 同 tag 兄弟 >1 时一律补 nth-of-type——class/stable-attr 分支也要，否则
-      // 同一 table 里同 class 的不同单元格会生成完全相同的选择器（互相覆盖、
-      // agent 反解时也只能命中第一个）。
-      const nth = sibs.length > 1 ? ':nth-of-type(' + (sibs.indexOf(cur) + 1) + ')' : '';
-      const stable = ['data-testid', 'data-test', 'data-component', 'data-cy', 'name']
-        .find((a) => cur.getAttribute && cur.getAttribute(a));
+      if (cur.id) {
+        parts.unshift("#" + cssEscape(cur.id));
+        break;
+      }
+      const sibs = cur.parentElement ? Array.from(cur.parentElement.children).filter((s) => s.nodeName === cur.nodeName) : [cur];
+      const nth = sibs.length > 1 ? ":nth-of-type(" + (sibs.indexOf(cur) + 1) + ")" : "";
+      const stable = ["data-testid", "data-test", "data-component", "data-cy", "name"].find((a) => cur.getAttribute && cur.getAttribute(a));
       if (stable) {
-        parts.unshift(sel + '[' + stable + '="' + cssEscape(String(cur.getAttribute(stable))) + '"]' + nth);
+        parts.unshift(sel + "[" + stable + '="' + cssEscape(String(cur.getAttribute(stable))) + '"]' + nth);
       } else {
         const cls = Array.from(cur.classList || []).filter((c) => c.length > 1).slice(0, 2);
         if (cls.length) {
-          parts.unshift(sel + '.' + cls.map(cssEscape).join('.') + nth);
+          parts.unshift(sel + "." + cls.map(cssEscape).join(".") + nth);
         } else {
           parts.unshift(sel + nth);
         }
@@ -269,20 +487,21 @@
       cur = cur.parentElement;
       depth++;
     }
-    return parts.join(' > ') || el.nodeName.toLowerCase();
+    return parts.join(" > ") || el.nodeName.toLowerCase();
   }
-
   function xPath(el) {
     if (el.id) return '//*[@id="' + el.id + '"]';
     const parts = [];
     let cur = el;
     while (cur && cur.nodeType === 1 && cur !== document.documentElement) {
       let i = 1, sib = cur;
-      while ((sib = sib.previousElementSibling)) { if (sib.nodeName === cur.nodeName) i++; }
-      parts.unshift(cur.nodeName.toLowerCase() + '[' + i + ']');
+      while (sib = sib.previousElementSibling) {
+        if (sib.nodeName === cur.nodeName) i++;
+      }
+      parts.unshift(cur.nodeName.toLowerCase() + "[" + i + "]");
       cur = cur.parentElement;
     }
-    return '/' + parts.join('/');
+    return "/" + parts.join("/");
   }
   function nearestScrollable(el) {
     let cur = el;
@@ -295,78 +514,455 @@
   }
   function selectorPreview(el) {
     let s = el.tagName.toLowerCase();
-    if (el.id) s += '#' + el.id;
-    if (el.classList && el.classList.length) s += '.' + Array.from(el.classList).slice(0, 2).join('.');
+    if (el.id) s += "#" + el.id;
+    if (el.classList && el.classList.length) s += "." + Array.from(el.classList).slice(0, 2).join(".");
     return s;
   }
-  const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  var escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-  // ---------- framework source (dev builds) — sandbox first, unsafeWindow fallback ----------
-  function reactSource(el) {
-    const keys = Object.getOwnPropertyNames(el);
-    for (const k of keys) {
-      if (!k.startsWith('__reactFiber$') && !k.startsWith('__reactInternalInstance$')) continue;
-      let f = el[k], guard = 0;
-      while (f && guard++ < 200) {
-        const t = f.type;
-        const src = f._debugSource;
-        if (t && (t.name || t.displayName) && src && src.fileName) {
-          return { framework: 'react', component: t.displayName || t.name || '', file: src.fileName, line: src.lineNumber || 0, column: src.columnNumber || 0 };
+  // web-picker.src/page-tools.js
+  function createPageTools(env) {
+    const e = env || {};
+    const gm2 = e.gm;
+    const rings = { consoleRing: e.consoleRing || consoleRing, netRing: e.netRing || netRing };
+    function toolPageInfo() {
+      return {
+        url: location.href,
+        title: document.title,
+        readyState: document.readyState,
+        viewport: { w: window.innerWidth, h: window.innerHeight },
+        dpr: window.devicePixelRatio,
+        scroll: { x: window.scrollX, y: window.scrollY },
+        ua: navigator.userAgent,
+        language: navigator.language,
+        cookiesEnabled: navigator.cookieEnabled,
+        ts: Date.now()
+      };
+    }
+    function elToolInfo(el, styleProps) {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const style = {};
+      for (const p of styleProps) style[p] = cs.getPropertyValue(p);
+      const attributes = {};
+      for (const a of el.attributes) attributes[a.name] = a.value;
+      return {
+        selector: cssPath(el),
+        xpath: xPath(el),
+        tagName: el.tagName.toLowerCase(),
+        id: el.id || void 0,
+        classes: Array.from(el.classList || []),
+        attributes,
+        textPreview: (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 200),
+        rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
+        visible: !!(r.width || r.height) && cs.visibility !== "hidden" && cs.display !== "none",
+        style
+      };
+    }
+    function toolDomQuery(params) {
+      const selector = typeof params.selector === "string" ? params.selector : "";
+      if (!selector) throw new Error("dom.query: params.selector (CSS) is required");
+      const maxCount = Math.min(50, Math.max(1, Number(params.maxCount) || 10));
+      const styleProps = Array.isArray(params.styleProps) && params.styleProps.length ? params.styleProps.filter((s) => typeof s === "string").slice(0, 30) : DEFAULT_STYLE_PROPS;
+      const all = document.querySelectorAll(selector);
+      const nodes = Array.from(all).slice(0, maxCount);
+      return {
+        selector,
+        matched: all.length,
+        returned: nodes.length,
+        elements: nodes.map((el) => elToolInfo(el, styleProps))
+      };
+    }
+    function pruneClone(el, depth) {
+      const clone = el.cloneNode(false);
+      if (depth > 1) {
+        for (const child of Array.from(el.childNodes)) {
+          if (child.nodeType === 3) {
+            const t = (child.textContent || "").trim();
+            if (t) clone.appendChild(document.createTextNode(t.slice(0, 80) + " "));
+          } else if (child.nodeType === 1) {
+            clone.appendChild(pruneClone(child, depth - 1));
+          }
         }
-        f = f.return;
+      } else if (el.childNodes && el.childNodes.length) {
+        clone.appendChild(document.createTextNode("…"));
+      }
+      return clone;
+    }
+    function toolDomHtml(params) {
+      const selector = typeof params.selector === "string" ? params.selector : "body";
+      const maxLength = Math.min(2e5, Math.max(200, Number(params.maxLength) || 2e4));
+      const maxDepth = Math.max(1, Math.min(20, Number(params.maxDepth) || 8));
+      const target = document.querySelector(selector);
+      if (!target) throw new Error("dom.html: no element matches " + selector);
+      let html = pruneClone(target, maxDepth).outerHTML;
+      let truncated = false;
+      if (html.length > maxLength) {
+        html = html.slice(0, maxLength);
+        truncated = true;
+      }
+      return { selector, maxDepth, length: html.length, truncated, html };
+    }
+    function toolConsoleLogs(params) {
+      const lastN = Math.min(500, Math.max(1, Number(params.lastN) || 50));
+      const sinceTs = typeof params.sinceTs === "number" ? params.sinceTs : 0;
+      const level = typeof params.level === "string" ? params.level : null;
+      const all = rings.consoleRing.filter((en) => en.ts >= sinceTs && (!level || en.level === level));
+      return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
+    }
+    function toolNetworkLog(params) {
+      const lastN = Math.min(500, Math.max(1, Number(params.lastN) || 50));
+      const filter = typeof params.urlFilter === "string" ? params.urlFilter.toLowerCase() : null;
+      const all = rings.netRing.filter((en) => !filter || en.url.toLowerCase().includes(filter));
+      return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
+    }
+    function chainTargetEl(el) {
+      try {
+        const uw = typeof unsafeWindow !== "undefined" ? unsafeWindow : null;
+        if (!uw || !uw.document) return el;
+        const pageEl = uw.document.querySelector(cssPath(el));
+        return pageEl || el;
+      } catch (err) {
+        return el;
       }
     }
-    return null;
-  }
-  function vueSource(el) {
-    let vm = el.__vueParentComponent || el.__vue__ || null;
-    let guard = 0;
-    while (vm && guard++ < 200) {
-      const opts = vm.$options || {};
-      if (opts.__file) {
-        const name = (vm.type && (vm.type.name || vm.type.__name)) || opts.name || opts.__name || '';
-        return { framework: 'vue', component: name, file: opts.__file, line: 0, column: 0 };
+    function reactChain(el, maxDepth, withProps) {
+      const chain = [];
+      try {
+        for (const k of Object.getOwnPropertyNames(el)) {
+          if (!k.startsWith("__reactFiber$") && !k.startsWith("__reactInternalInstance$")) continue;
+          let f = el[k], guard = 0;
+          while (f && guard++ < 200 && chain.length < maxDepth) {
+            const t = f.type;
+            if (t && (t.name || t.displayName)) {
+              const src = f._debugSource;
+              const level = { component: t.displayName || t.name || "" };
+              if (src && src.fileName) {
+                level.file = src.fileName;
+                level.line = src.lineNumber || 0;
+              }
+              if (withProps && f.memoizedProps !== void 0) level.props = f.memoizedProps;
+              chain.push(level);
+            }
+            f = f.return;
+          }
+          if (chain.length) break;
+        }
+      } catch (err) {
       }
-      vm = vm.$parent || null;
+      return chain;
     }
-    return null;
-  }
-  // Page-realm expandos are invisible from the userscript sandbox (isolated world).
-  // Fallback: re-resolve the element through unsafeWindow's document, then walk there.
-  function sourceInfo(el) {
-    const direct = reactSource(el) || vueSource(el);
-    if (direct) return direct;
-    try {
-      const uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : null;
-      if (!uw || !uw.document) return null;
-      const sel = cssPath(el);
-      const pageEl = uw.document.querySelector(sel);
-      if (!pageEl || pageEl === el) return null; // same object → same realm, no point
-      return reactSource(pageEl) || vueSource(pageEl);
-    } catch (e) { return null; }
+    function vueChain(el, maxDepth, withProps) {
+      const chain = [];
+      try {
+        let vm = el.__vueParentComponent || el.__vue__ || null, guard = 0;
+        while (vm && guard++ < 200 && chain.length < maxDepth) {
+          const opts = vm.$options || {};
+          const name = vm.type && (vm.type.name || vm.type.__name) || opts.name || opts.__name || "";
+          if (opts.__file || name) {
+            const level = { component: name };
+            if (opts.__file) level.file = opts.__file;
+            if (withProps && vm.$props !== void 0) level.props = vm.$props;
+            chain.push(level);
+          }
+          vm = vm.$parent || null;
+        }
+      } catch (err) {
+      }
+      return chain;
+    }
+    function toolFrameworkInspect(params) {
+      const selector = typeof params.selector === "string" ? params.selector : "";
+      if (!selector) throw new Error("framework.inspect: params.selector (CSS) is required");
+      const el = document.querySelector(selector);
+      if (!el) throw new Error("framework.inspect: no element matches " + selector);
+      const maxDepth = Math.max(1, Math.min(10, Number(params.maxDepth) || 5));
+      const withProps = params.props !== void 0 ? !!params.props : gm2 ? gm2.get(GM_FPROPS, false) === true : false;
+      const target = chainTargetEl(el);
+      let chain = reactChain(target, maxDepth, withProps);
+      let framework = chain.length ? "react" : null;
+      if (!chain.length) {
+        chain = vueChain(target, maxDepth, withProps);
+        framework = chain.length ? "vue" : null;
+      }
+      return { selector, framework, withProps, depth: chain.length, chain };
+    }
+    const PAGE_TOOLS = {
+      [PAGE_OPS.INFO]: toolPageInfo,
+      [PAGE_OPS.DOM_QUERY]: toolDomQuery,
+      [PAGE_OPS.DOM_HTML]: toolDomHtml,
+      [PAGE_OPS.CONSOLE_LOGS]: toolConsoleLogs,
+      [PAGE_OPS.NETWORK_LOG]: toolNetworkLog,
+      [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect
+    };
+    function handlePageToolRequest(f, send) {
+      const tool = f.tool && typeof f.tool === "object" && !Array.isArray(f.tool) ? f.tool : null;
+      if (!tool || typeof tool.op !== "string") {
+        send(f.id, false, "invalid_tool: missing tool.op");
+        return;
+      }
+      const handler = PAGE_TOOLS[tool.op];
+      if (!handler) {
+        send(f.id, false, "unknown_op: " + tool.op + " (available: " + Object.keys(PAGE_TOOLS).join(", ") + ")");
+        return;
+      }
+      let text;
+      try {
+        const params = tool.params && typeof tool.params === "object" && !Array.isArray(tool.params) ? tool.params : {};
+        text = jsonSafe(handler(params)).text;
+      } catch (err) {
+        send(f.id, false, err && err.message ? String(err.message) : String(err));
+        return;
+      }
+      if (text.length > RESULT_MAX_CHARS) {
+        send(f.id, false, "result_too_large");
+        return;
+      }
+      send(f.id, true, text);
+    }
+    return { PAGE_TOOLS, handlePageToolRequest };
   }
 
-  // ---------- UI (Shadow DOM) ----------
-  const host = document.createElement('div');
-  host.setAttribute(HOST_FLAG, '');
-  Object.assign(host.style, { position: 'fixed', inset: '0', zIndex: '2147483647', pointerEvents: 'none' });
-  // document-start 注入时 documentElement 可能尚未挂出——先注入一次（能的话），
-  // 否则等 DOMContentLoaded；MutationObserver 也等 documentElement 存在后再挂
-  function injectHost() {
-    if (host.isConnected || !document.documentElement) return;
-    document.documentElement.appendChild(host);
-  }
-  injectHost();
-  if (!host.isConnected) {
-    document.addEventListener('DOMContentLoaded', injectHost, { once: true });
-  } else {
-    new MutationObserver(() => { if (!host.isConnected) injectHost(); })
-      .observe(document.documentElement, { childList: true });
+  // web-picker.src/broker-conn.js
+  function createBrokerConn(deps) {
+    const gm2 = deps.gm;
+    const debugLog2 = deps.debugLog || (() => {
+    });
+    const toast = deps.toast || (() => {
+    });
+    const onPageRequest = deps.onPageRequest || (() => {
+    });
+    let ws = null;
+    let wsState = "off";
+    let connectSettle = null;
+    const pending = /* @__PURE__ */ new Map();
+    function brokerUrl() {
+      return gm2.get(GM_BROKER, DEFAULT_BROKER_URL);
+    }
+    function sendFrame(obj) {
+      if (!ws || ws.readyState !== 1) return false;
+      try {
+        ws.send(JSON.stringify(obj));
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    function setState(s) {
+      wsState = s;
+      deps.onState(s);
+    }
+    function connect() {
+      if (ws) {
+        try {
+          ws.close();
+        } catch (e) {
+        }
+        ws = null;
+      }
+      const url = brokerUrl().replace(/\/+$/, "") + "/ws";
+      setState("connecting");
+      let settle;
+      const attempt = new Promise((resolve) => {
+        settle = resolve;
+      });
+      connectSettle = settle;
+      let sock;
+      try {
+        sock = new WebSocket(url);
+      } catch (e) {
+        connectSettle = null;
+        setState("off");
+        toast("WS 创建失败: " + e.message);
+        settle(false);
+        return attempt;
+      }
+      ws = sock;
+      sock.onopen = () => {
+        sendFrame(frameHello());
+      };
+      sock.onmessage = (ev) => {
+        let f;
+        try {
+          f = JSON.parse(ev.data);
+        } catch (e) {
+          return;
+        }
+        if (!f || typeof f.type !== "string") return;
+        if (f.type === PROTOCOL.KIND_WELCOME) {
+          setState("on");
+          toast("broker 已连接");
+          const settled = connectSettle;
+          connectSettle = null;
+          if (settled) settled(true);
+          if (deps.onWelcome) deps.onWelcome();
+          return;
+        }
+        if (f.type === PROTOCOL.KIND_ACK) {
+          const p = pending.get(f.id);
+          if (p && p.kind === "submit") {
+            pending.delete(f.id);
+            p.resolve({ ok: true, result: f.result });
+          } else if (p && p.kind === "compose") {
+            pending.delete(f.id);
+            p.resolve({ ok: true, text: f.result && typeof f.result.prompt === "string" ? f.result.prompt : "" });
+          }
+          return;
+        }
+        if (f.type === PROTOCOL.KIND_ERROR) {
+          const p = pending.get(f.id);
+          if (p) {
+            pending.delete(f.id);
+            p.resolve(p.kind === "submit" ? { ok: false, code: f.code, message: f.message } : p.kind === "compose" ? { ok: false, code: f.code, message: f.message } : []);
+          } else {
+            toast("broker 错误: " + (f.code || "?"));
+          }
+          return;
+        }
+        if (f.type === PROTOCOL.KIND_TARGETS_RESULT) {
+          const p = pending.get(f.id);
+          if (p && p.kind === "targets") {
+            pending.delete(f.id);
+            p.resolve(Array.isArray(f.targets) ? f.targets : []);
+          }
+          return;
+        }
+        if (f.type === PROTOCOL.KIND_PAGE_REQUEST) {
+          debugLog2("page.request", f.id, f.tool && f.tool.op);
+          onPageRequest(f);
+          return;
+        }
+      };
+      sock.onclose = () => {
+        if (ws !== sock) return;
+        ws = null;
+        for (const p of pending.values()) p.resolve(p.kind === "submit" ? { ok: false, code: "closed", message: "broker 连接已断开" } : []);
+        pending.clear();
+        const settled = connectSettle;
+        connectSettle = null;
+        if (settled) settled(false);
+        if (wsState !== "off") {
+          setState("off");
+          toast("broker 连接已断开");
+        }
+      };
+      sock.onerror = () => {
+        if (ws === sock && wsState !== "off") {
+          setState("off");
+          toast("broker 连不上: " + url + "（连接设置里可改地址）");
+        }
+      };
+      return attempt;
+    }
+    function disconnect() {
+      setState("off");
+      if (ws) {
+        try {
+          ws.close();
+        } catch (e) {
+        }
+        ws = null;
+      }
+      toast("已断开");
+    }
+    const DEFAULT_PROMPT = "请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。";
+    const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / framework.inspect 等）只能在开始修改代码之前进行；需要 DOM、样式、组件链信息时请在动第一行代码前一次性查完。一旦开始改代码，HMR 无法热更新时浏览器会整页刷新，userscript 与 broker 的连接会随刷新断开，此后的 page.request 不会再有响应，不要浪费尝试。";
+    function submitToAgent(prompt, targetName) {
+      return new Promise((resolve) => {
+        if (wsState !== "on") {
+          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          return;
+        }
+        const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        pending.set(id, { kind: "submit", resolve });
+        const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
+        if (!sendFrame(frameSubmit(id, promptText, targetName))) {
+          pending.delete(id);
+          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          return;
+        }
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve({ ok: false, code: "timeout", message: "broker 无响应" });
+          }
+        }, 1e4);
+      });
+    }
+    function requestCompose(prompt, targetName) {
+      return new Promise((resolve) => {
+        if (wsState !== "on") {
+          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          return;
+        }
+        const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        pending.set(id, { kind: "compose", resolve });
+        const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
+        if (!sendFrame(frameCompose(id, promptText, targetName))) {
+          pending.delete(id);
+          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          return;
+        }
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve({ ok: false, code: "timeout", message: "broker 无响应" });
+          }
+        }, 1e4);
+      });
+    }
+    function requestTargets() {
+      return new Promise((resolve) => {
+        if (wsState !== "on") {
+          resolve([]);
+          return;
+        }
+        const id = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        pending.set(id, { kind: "targets", resolve });
+        if (!sendFrame(frameTargetsList(id))) {
+          pending.delete(id);
+          resolve([]);
+          return;
+        }
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve([]);
+          }
+        }, 5e3);
+      });
+    }
+    return {
+      brokerUrl,
+      connect,
+      disconnect,
+      sendFrame,
+      getState: () => wsState,
+      submitToAgent,
+      requestCompose,
+      requestTargets
+    };
   }
 
-  const root = host.attachShadow({ mode: 'open' });
-  root.innerHTML = `
+  // web-picker.src/ui/shadow.js
+  function buildUI() {
+    const host = document.createElement("div");
+    host.setAttribute(HOST_FLAG, "");
+    Object.assign(host.style, { position: "fixed", inset: "0", zIndex: "2147483647", pointerEvents: "none" });
+    function injectHost() {
+      if (host.isConnected || !document.documentElement) return;
+      document.documentElement.appendChild(host);
+    }
+    injectHost();
+    if (!host.isConnected) {
+      document.addEventListener("DOMContentLoaded", injectHost, { once: true });
+    } else {
+      new MutationObserver(() => {
+        if (!host.isConnected) injectHost();
+      }).observe(document.documentElement, { childList: true });
+    }
+    const root = host.attachShadow({ mode: "open" });
+    root.innerHTML = `
     <style>
       :host {
         --wp-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -636,190 +1232,931 @@
       </div>
     </div>
   `;
-
-  const $ = (id) => root.getElementById(id);
-  const elHL = $('hl'), elGWrap = $('gwrap'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
-        elGCLEAR = $('gclear'), elEscX = $('escx'),
-        elFab = $('fab'), elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
-        elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
-        elPanel = $('panel'), elPH = $('ph'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
-        elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
-        elTRefresh = $('trefresh'),
-        elSend = $('sendbtn'), elClear = $('clearbtn'),
-        elSendGroup = $('sendgroup'), elSendMore = $('sendmore'), elSendMenu = $('sendmenu'), elCopyPrompt = $('copyprompt'),
-        elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
-        elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops');
-
-  // ---------- state ----------
-  let pickMode = false;
-  let stack = [];
-  let idx = 0;
-  let pinned = null;
-  let frozen = true;
-  // v1.5 shift-group：待处理组合（元素引用，按加入顺序）。仅存内存——DOM 引用无法
-  // 进 sessionStorage；提交后随批次落库，退出拾取模式不清空以便误退后能恢复。
-  let groupEls = [];
-  let groupCard = false;               // note card 当前是否为组备注模式
-  let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
-  try {
-    const saved = sessionStorage.getItem(KEY_POS);
-    if (saved) { const p = JSON.parse(saved); if (typeof p.x === 'number' && typeof p.y === 'number') pos = p; }
-  } catch (e) { /* fall back to default position */ }
-  // 视口缩小（如打开 devtools）后保存的位置可能落在可视区外，统一 clamp 回来
-  function clampFabPos() {
-    pos.x = Math.max(4, Math.min(window.innerWidth - 50, pos.x));
-    pos.y = Math.max(4, Math.min(window.innerHeight - 50, pos.y));
-  }
-  clampFabPos();
-  elFab.style.left = pos.x + 'px';
-  elFab.style.top = pos.y + 'px';
-  window.addEventListener('resize', () => {
+    const $ = (id) => root.getElementById(id);
+    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops");
+    let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
+    try {
+      const saved = sessionStorage.getItem(KEY_POS);
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (typeof p.x === "number" && typeof p.y === "number") pos = p;
+      }
+    } catch (e) {
+    }
+    function clampFabPos() {
+      pos.x = Math.max(4, Math.min(window.innerWidth - 50, pos.x));
+      pos.y = Math.max(4, Math.min(window.innerHeight - 50, pos.y));
+    }
     clampFabPos();
-    elFab.style.left = pos.x + 'px';
-    elFab.style.top = pos.y + 'px';
-    try { sessionStorage.setItem(KEY_POS, JSON.stringify(pos)); } catch (err) { /* position won't persist */ }
-  }, true);
+    elFab.style.left = pos.x + "px";
+    elFab.style.top = pos.y + "px";
+    window.addEventListener("resize", () => {
+      clampFabPos();
+      elFab.style.left = pos.x + "px";
+      elFab.style.top = pos.y + "px";
+      try {
+        sessionStorage.setItem(KEY_POS, JSON.stringify(pos));
+      } catch (err) {
+      }
+    }, true);
+    function toast(msg) {
+      elToast.textContent = msg;
+      elToast.classList.add("show");
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => elToast.classList.remove("show"), 2200);
+    }
+    const els = {
+      elHL,
+      elGWrap,
+      elBadge,
+      elInfo,
+      elBar,
+      elGH,
+      elGCLEAR,
+      elEscX,
+      elFab,
+      elCnt,
+      elDot,
+      elCard,
+      elSel,
+      elTxt,
+      elOk,
+      elCancel,
+      elToast,
+      elPanel,
+      elPH,
+      elPlist,
+      elPcount,
+      elPclose,
+      elPrompt,
+      elTCombo,
+      elTInput,
+      elTDrop,
+      elTRefresh,
+      elSend,
+      elClear,
+      elSendGroup,
+      elSendMore,
+      elSendMenu,
+      elCopyPrompt,
+      elConn,
+      elConnText,
+      elSettings,
+      elSUrl,
+      elSSave,
+      elSCancel,
+      elSProps
+    };
+    function reinjectTrigger() {
+      if (host.isConnected) return true;
+      document.documentElement.appendChild(host);
+      clampFabPos();
+      elFab.style.left = pos.x + "px";
+      elFab.style.top = pos.y + "px";
+      return host.isConnected;
+    }
+    function observeHostRemoval() {
+      if (!document.documentElement) return;
+      new MutationObserver(() => {
+        if (!host.isConnected) reinjectTrigger();
+      }).observe(document.documentElement, { childList: true });
+    }
+    if (document.documentElement) observeHostRemoval();
+    else document.addEventListener("DOMContentLoaded", observeHostRemoval, { once: true });
+    return { host, root, $, els, toast, clampFabPos, reinjectTrigger, get pos() {
+      return pos;
+    } };
+  }
 
-  // ---------- trigger 重注入 ----------
-  // SPA 路由跳转 / HMR 热更新可能把 documentElement 下的外来节点清掉，host 一旦
-  // 被移除 fab 就消失；脚本闭包里的状态都还在，把 host 重新挂回去即可整体恢复。
-  function reinjectTrigger() {
-    if (host.isConnected) return true;
-    document.documentElement.appendChild(host);
-    clampFabPos();
-    elFab.style.left = pos.x + 'px';
-    elFab.style.top = pos.y + 'px';
-    return host.isConnected;
-  }
-  function observeHostRemoval() {
-    if (!document.documentElement) return;
-    new MutationObserver(() => { if (!host.isConnected) reinjectTrigger(); })
-      .observe(document.documentElement, { childList: true });
-  }
-  if (document.documentElement) observeHostRemoval();
-  else document.addEventListener('DOMContentLoaded', observeHostRemoval, { once: true });
-
-  function toast(msg) {
-    elToast.textContent = msg;
-    elToast.classList.add('show');
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => elToast.classList.remove('show'), 2200);
-  }
-  function refreshCount() {
-    const n = loadBatch().length;
-    elCnt.textContent = n;
-    elCnt.style.display = n > 0 ? 'block' : 'none';
-    if (panelOpen) renderPanel();
-  }
-
-  function stackAt(clientX, clientY) {
-    const prev = host.style.pointerEvents;
-    host.style.pointerEvents = 'none';
-    const all = document.elementsFromPoint(clientX, clientY) || [];
-    host.style.pointerEvents = prev;
-    return all.filter((el) => {
-      if (!el || el.nodeType !== 1) return false;
-      if (el.getAttribute && el.getAttribute(HOST_FLAG) !== null) return false;
-      const r = el.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) return false;
-      const cs = getComputedStyle(el);
-      if (cs.visibility === 'hidden' || cs.display === 'none') return false;
-      return true;
+  // web-picker.src/ui/panel.js
+  function initPanel(ctx) {
+    const { els, toast } = ctx;
+    const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
+    let panelOpen = false;
+    function refreshCount() {
+      const n = loadBatch().length;
+      elCnt.textContent = n;
+      elCnt.style.display = n > 0 ? "block" : "none";
+      if (panelOpen) renderPanel();
+    }
+    ctx.refreshCount = refreshCount;
+    ctx.getPanelOpen = () => panelOpen;
+    function addPick(rec) {
+      const b = loadBatch();
+      b.push(rec);
+      saveBatch(b);
+      toast("已选中 " + rec.selector);
+      refreshCount();
+    }
+    ctx.addPick = addPick;
+    function clearBatch() {
+      saveBatch([]);
+      refreshCount();
+    }
+    ctx.clearBatch = clearBatch;
+    function renderPanel() {
+      const b = loadBatch();
+      elPcount.textContent = b.length ? b.length + " 条" : "";
+      if (!b.length) {
+        elPlist.innerHTML = '<div class="empty">还没有选中任何元素</div>';
+        return;
+      }
+      elPlist.innerHTML = b.map(
+        (r, i) => '<div class="item" data-i="' + i + '"><div class="psel">' + escapeHtml(r.selector) + "</div>" + (r.group ? '<div class="pgroup">⧉ 组 ' + escapeHtml(r.group) + "</div>" : "") + (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + " · " + r.source.file + ":" + r.source.line) + "</div>" : "") + (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + "</div>" : "") + '<textarea placeholder="备注…（失焦自动保存）">' + escapeHtml(r.note || "") + '</textarea><div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + '</span><button class="del">删除</button></div></div>'
+      ).join("");
+    }
+    ctx.renderPanel = renderPanel;
+    function openPanel() {
+      panelOpen = true;
+      renderPanel();
+      elPanel.style.display = "flex";
+      ctx.panelDrag.clamp();
+      if (ctx.conn.getState() === "on") ctx.refreshTargets();
+      else ctx.renderTargetCombo();
+    }
+    function closePanel() {
+      panelOpen = false;
+      ctx.closeDrop();
+      ctx.closeSendMenu();
+      elPanel.style.display = "none";
+    }
+    ctx.closePanel = closePanel;
+    function togglePanel() {
+      if (panelOpen) closePanel();
+      else openPanel();
+    }
+    ctx.togglePanel = togglePanel;
+    elPclose.addEventListener("click", closePanel);
+    elPlist.addEventListener("change", (e) => {
+      const t = e.target;
+      if (!t || t.tagName !== "TEXTAREA") return;
+      const item = t.closest(".item");
+      if (!item) return;
+      const b = loadBatch();
+      const i = +item.getAttribute("data-i");
+      if (!b[i]) return;
+      b[i].note = t.value.trim();
+      let synced = 0;
+      if (b[i].group) {
+        for (let j = 0; j < b.length; j++) {
+          if (j === i || b[j].group !== b[i].group) continue;
+          b[j].note = b[i].note;
+          synced++;
+          const ta = elPlist.querySelector('.item[data-i="' + j + '"] textarea');
+          if (ta) ta.value = b[i].note;
+        }
+      }
+      saveBatch(b);
+      toast("备注已保存" + (synced ? "（已同步组内 " + synced + " 项）" : ""));
+    });
+    elPlist.addEventListener("click", (e) => {
+      const del = e.target && e.target.closest ? e.target.closest(".del") : null;
+      if (!del) return;
+      const item = del.closest(".item");
+      if (!item) return;
+      const b = loadBatch();
+      const i = +item.getAttribute("data-i");
+      if (!b[i]) return;
+      const sel = b[i].selector;
+      b.splice(i, 1);
+      saveBatch(b);
+      refreshCount();
+      renderPanel();
+      toast("已删除 " + sel);
     });
   }
-  function currentEl() { return stack[idx] || null; }
 
-  function applyHighlight(el, pin) {
-    if (!el) { elHL.style.display = 'none'; elBadge.style.display = 'none'; elInfo.style.display = 'none'; return; }
-    const r = el.getBoundingClientRect();
-    Object.assign(elHL.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', display: 'block' });
-    elHL.classList.toggle('pin', !!pin);
-    elBadge.style.display = 'block';
-    elBadge.style.left = (r.left + r.width / 2) + 'px';
-    elBadge.style.top = r.top + 'px';
-    elBadge.innerHTML = (idx + 1) + '<small>/' + stack.length + '层 · ' + Math.round(r.width) + '×' + Math.round(r.height) + '</small>';
-    elInfo.style.display = 'block';
-    elInfo.style.left = r.left + 'px';
-    elInfo.style.top = r.top + 'px';
-    elInfo.innerHTML = '<span class="pv">' + escapeHtml(selectorPreview(el)) + '</span> <span class="dim">' +
-      Math.round(r.width) + '×' + Math.round(r.height) + ' · ' + escapeHtml(cssPath(el)) + '</span>';
-  }
-  function refresh() { applyHighlight(currentEl(), !!pinned); }
-
-  // ---------- pick mode ----------
-  function setActive(on) {
-    pickMode = on;
-    host.style.pointerEvents = 'none';
-    elBar.style.display = on ? 'flex' : 'none';
-    if (on) barDrag.clamp();               // 隐藏期间视口可能缩小过，先拉回可视区
-    elFab.style.display = on ? 'none' : 'block';
-    document.body.style.cursor = on ? 'crosshair' : '';
-    if (on) { frozen = true; closePanel(); renderGroupMarks(); }
-    else {
-      pinned = null; frozen = false;
-      closeGroupCard();
-      elCard.style.display = 'none'; elHL.style.display = 'none'; elBadge.style.display = 'none'; elInfo.style.display = 'none';
-      renderGroupMarks();           // pickMode 已为 false → 隐藏 marks（组合本身保留在内存）
+  // web-picker.src/framework.js
+  function reactSource(el) {
+    const keys = Object.getOwnPropertyNames(el);
+    for (const k of keys) {
+      if (!k.startsWith("__reactFiber$") && !k.startsWith("__reactInternalInstance$")) continue;
+      let f = el[k], guard = 0;
+      while (f && guard++ < 200) {
+        const t = f.type;
+        const src = f._debugSource;
+        if (t && (t.name || t.displayName) && src && src.fileName) {
+          return { framework: "react", component: t.displayName || t.name || "", file: src.fileName, line: src.lineNumber || 0, column: src.columnNumber || 0 };
+        }
+        f = f.return;
+      }
     }
-    updateFreezeUI();
-    refreshCount();
+    return null;
+  }
+  function vueSource(el) {
+    let vm = el.__vueParentComponent || el.__vue__ || null;
+    let guard = 0;
+    while (vm && guard++ < 200) {
+      const opts = vm.$options || {};
+      if (opts.__file) {
+        const name = vm.type && (vm.type.name || vm.type.__name) || opts.name || opts.__name || "";
+        return { framework: "vue", component: name, file: opts.__file, line: 0, column: 0 };
+      }
+      vm = vm.$parent || null;
+    }
+    return null;
+  }
+  function sourceInfo(el) {
+    const direct = reactSource(el) || vueSource(el);
+    if (direct) return direct;
+    try {
+      const uw = typeof unsafeWindow !== "undefined" ? unsafeWindow : null;
+      if (!uw || !uw.document) return null;
+      const sel = cssPath(el);
+      const pageEl = uw.document.querySelector(sel);
+      if (!pageEl || pageEl === el) return null;
+      return reactSource(pageEl) || vueSource(pageEl);
+    } catch (e) {
+      return null;
+    }
   }
 
-  function isOurUI(e) {
-    const path = e.composedPath ? e.composedPath() : [];
-    return path.indexOf(root) >= 0;
+  // web-picker.src/ui/pick.js
+  function initPick(ctx) {
+    const { host, root, els, toast } = ctx;
+    const { elHL, elGWrap, elBadge, elInfo, elBar, elGH, elGCLEAR, elCard, elSel, elTxt, elOk } = els;
+    let pickMode = false;
+    let stack = [];
+    let idx = 0;
+    let pinned = null;
+    let frozen = true;
+    let groupEls = [];
+    let groupCard = false;
+    ctx.pickState = {
+      get pickMode() {
+        return pickMode;
+      },
+      get pinned() {
+        return pinned;
+      },
+      get groupCard() {
+        return groupCard;
+      },
+      get groupCount() {
+        return groupEls.length;
+      },
+      get frozen() {
+        return frozen;
+      },
+      set frozen(v) {
+        frozen = !!v;
+      },
+      get stack() {
+        return stack;
+      },
+      set idx(v) {
+        idx = v;
+      },
+      get idx() {
+        return idx;
+      },
+      currentEl
+    };
+    function stackAt(clientX, clientY) {
+      const prev = host.style.pointerEvents;
+      host.style.pointerEvents = "none";
+      const all = document.elementsFromPoint(clientX, clientY) || [];
+      host.style.pointerEvents = prev;
+      return all.filter((el) => {
+        if (!el || el.nodeType !== 1) return false;
+        if (el.getAttribute && el.getAttribute(HOST_FLAG) !== null) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) return false;
+        const cs = getComputedStyle(el);
+        if (cs.visibility === "hidden" || cs.display === "none") return false;
+        return true;
+      });
+    }
+    function currentEl() {
+      return stack[idx] || null;
+    }
+    ctx.currentEl = currentEl;
+    function applyHighlight(el, pin2) {
+      if (!el) {
+        elHL.style.display = "none";
+        elBadge.style.display = "none";
+        elInfo.style.display = "none";
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      Object.assign(elHL.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", display: "block" });
+      elHL.classList.toggle("pin", !!pin2);
+      elBadge.style.display = "block";
+      elBadge.style.left = r.left + r.width / 2 + "px";
+      elBadge.style.top = r.top + "px";
+      elBadge.innerHTML = idx + 1 + "<small>/" + stack.length + "层 · " + Math.round(r.width) + "×" + Math.round(r.height) + "</small>";
+      elInfo.style.display = "block";
+      elInfo.style.left = r.left + "px";
+      elInfo.style.top = r.top + "px";
+      elInfo.innerHTML = '<span class="pv">' + escapeHtml(selectorPreview(el)) + '</span> <span class="dim">' + Math.round(r.width) + "×" + Math.round(r.height) + " · " + escapeHtml(cssPath(el)) + "</span>";
+    }
+    function refresh() {
+      applyHighlight(currentEl(), !!pinned);
+    }
+    ctx.refresh = refresh;
+    function setActive(on) {
+      pickMode = on;
+      host.style.pointerEvents = "none";
+      elBar.style.display = on ? "flex" : "none";
+      if (on) ctx.barDrag.clamp();
+      els.elFab.style.display = on ? "none" : "block";
+      document.body.style.cursor = on ? "crosshair" : "";
+      if (on) {
+        frozen = true;
+        ctx.closePanel();
+        renderGroupMarks();
+      } else {
+        pinned = null;
+        frozen = false;
+        closeGroupCard();
+        elCard.style.display = "none";
+        elHL.style.display = "none";
+        elBadge.style.display = "none";
+        elInfo.style.display = "none";
+        renderGroupMarks();
+      }
+      ctx.updateFreezeUI();
+      ctx.refreshCount();
+    }
+    ctx.setActive = setActive;
+    function isOurUI(e) {
+      const path = e.composedPath ? e.composedPath() : [];
+      return path.indexOf(root) >= 0;
+    }
+    ctx.isOurUI = isOurUI;
+    function isFabTarget(e) {
+      const path = e.composedPath ? e.composedPath() : [];
+      return path.indexOf(els.elFab) >= 0;
+    }
+    ctx.isFabTarget = isFabTarget;
+    function moveCapture(e) {
+      if (!pickMode) return;
+      if (frozen) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+      if (pinned || groupCard || isOurUI(e)) return;
+      stack = stackAt(e.clientX, e.clientY);
+      idx = 0;
+      refresh();
+    }
+    function hoverCapture(e) {
+      if (!pickMode || !frozen) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    function clickCapture(e) {
+      if (isOurUI(e)) return;
+      if (!pickMode) return;
+      const btn0 = e.button === void 0 || e.button === 0;
+      if (e.type === "pointerdown" || e.type === "mousedown") {
+        e.stopPropagation();
+        e.preventDefault();
+        if (!btn0 || groupCard) return;
+        if (!pinned) {
+          if (e.shiftKey) groupAt(e.clientX, e.clientY);
+          else pinAt(e.clientX, e.clientY);
+        }
+        return;
+      }
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    function wheelCapture(e) {
+      if (!pickMode || pinned || isOurUI(e)) return;
+      const sc = nearestScrollable(e.target);
+      if (sc && sc.scrollHeight > sc.clientHeight) return;
+      e.preventDefault();
+      window.scrollBy(0, e.deltaY);
+    }
+    window.addEventListener("mousemove", moveCapture, true);
+    window.addEventListener("mouseover", hoverCapture, true);
+    window.addEventListener("mouseout", hoverCapture, true);
+    window.addEventListener("mouseenter", hoverCapture, true);
+    window.addEventListener("mouseleave", hoverCapture, true);
+    window.addEventListener("pointermove", hoverCapture, true);
+    window.addEventListener("pointerover", hoverCapture, true);
+    window.addEventListener("pointerout", hoverCapture, true);
+    window.addEventListener("pointerenter", hoverCapture, true);
+    window.addEventListener("pointerleave", hoverCapture, true);
+    window.addEventListener("pointerdown", clickCapture, true);
+    window.addEventListener("mousedown", clickCapture, true);
+    window.addEventListener("mouseup", clickCapture, true);
+    window.addEventListener("click", clickCapture, true);
+    window.addEventListener("contextmenu", clickCapture, true);
+    window.addEventListener("wheel", wheelCapture, { capture: true, passive: false });
+    for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "contextmenu"]) {
+      host.addEventListener(t, (e) => e.stopPropagation(), false);
+    }
+    function shiftLayer(delta) {
+      if (!stack.length) return;
+      idx = Math.max(0, Math.min(stack.length - 1, idx + delta));
+      refresh();
+    }
+    ctx.shiftLayer = shiftLayer;
+    function pin() {
+      const el = currentEl();
+      if (!el) return;
+      pinned = el;
+      applyHighlight(el, true);
+      const sel = cssPath(el);
+      const r = el.getBoundingClientRect();
+      let left = r.right + 10;
+      if (left + 300 > window.innerWidth) left = Math.max(8, r.left - 310);
+      let top = r.top;
+      if (top + 240 > window.innerHeight) top = Math.max(8, window.innerHeight - 250);
+      Object.assign(elCard.style, { display: "block", left: left + "px", top: top + "px" });
+      elSel.textContent = sel;
+      elTxt.value = "";
+      setTimeout(() => elTxt.focus(), 0);
+    }
+    ctx.pin = pin;
+    function unpin() {
+      pinned = null;
+      elCard.style.display = "none";
+      refresh();
+    }
+    ctx.unpin = unpin;
+    function pinAt(x, y) {
+      const st = stackAt(x, y);
+      if (!st.length) return;
+      stack = st;
+      idx = 0;
+      pin();
+    }
+    function toggleGroup(el) {
+      if (!el) return;
+      const i = groupEls.indexOf(el);
+      if (i >= 0) {
+        groupEls.splice(i, 1);
+        toast("已移出组合（剩 " + groupEls.length + " 项）");
+      } else {
+        groupEls.push(el);
+        toast("已加入组合（共 " + groupEls.length + " 项）");
+      }
+      renderGroupMarks();
+      updateGroupUI();
+    }
+    function clearPendingGroup() {
+      if (!groupEls.length) return;
+      const n = groupEls.length;
+      groupEls = [];
+      if (groupCard) closeGroupCard();
+      renderGroupMarks();
+      updateGroupUI();
+      toast("已清空待处理组合（" + n + " 项）");
+    }
+    ctx.clearPendingGroup = clearPendingGroup;
+    function groupAt(x, y) {
+      const st = stackAt(x, y);
+      if (!st.length) return;
+      stack = st;
+      idx = 0;
+      toggleGroup(st[0]);
+    }
+    function renderGroupMarks() {
+      elGWrap.innerHTML = "";
+      if (!pickMode || !groupEls.length) {
+        elGWrap.style.display = "none";
+        return;
+      }
+      elGWrap.style.display = "block";
+      groupEls.forEach((el, i) => {
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        const m = document.createElement("div");
+        m.className = "gmark";
+        Object.assign(m.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
+        const tag = document.createElement("span");
+        tag.className = "gi";
+        tag.textContent = String(i + 1);
+        tag.setAttribute("data-gi", String(i));
+        tag.title = "点击移出组合";
+        m.appendChild(tag);
+        elGWrap.appendChild(m);
+      });
+    }
+    ctx.renderGroupMarks = renderGroupMarks;
+    elGWrap.addEventListener("click", (e) => {
+      const tag = e.target && e.target.closest ? e.target.closest(".gi") : null;
+      if (!tag) return;
+      const i = +tag.getAttribute("data-gi");
+      if (!(i >= 0) || !groupEls[i]) return;
+      groupEls.splice(i, 1);
+      renderGroupMarks();
+      updateGroupUI();
+      toast("已移出组合（剩 " + groupEls.length + " 项）");
+    });
+    ctx.toggleGroup = toggleGroup;
+    function updateGroupUI() {
+      const n = groupEls.length;
+      elGH.classList.toggle("on", n > 0);
+      elGH.innerHTML = "<kbd>⇧Enter</kbd>加组/移出" + (n ? " · <kbd>Enter</kbd>组备注(" + n + ")" : "");
+      elGCLEAR.style.display = n ? "inline-flex" : "none";
+    }
+    ctx.updateGroupUI = updateGroupUI;
+    function openGroupCard() {
+      if (!groupEls.length || pinned) return;
+      groupCard = true;
+      const r = groupEls[0].getBoundingClientRect();
+      let left = r.right + 10;
+      if (left + 300 > window.innerWidth) left = Math.max(8, r.left - 310);
+      let top = r.top;
+      if (top + 240 > window.innerHeight) top = Math.max(8, window.innerHeight - 250);
+      elSel.textContent = groupEls.map((el) => cssPath(el)).join("\n");
+      elTxt.value = "";
+      elTxt.placeholder = "组备注（可选，整组共用这一条）";
+      elOk.textContent = "✓ 提交 " + groupEls.length + " 项 Enter";
+      Object.assign(elCard.style, { display: "block", left: left + "px", top: top + "px" });
+      setTimeout(() => elTxt.focus(), 0);
+    }
+    ctx.openGroupCard = openGroupCard;
+    function closeGroupCard() {
+      if (!groupCard) return;
+      groupCard = false;
+      elCard.style.display = "none";
+      elTxt.placeholder = "备注（可选，留空直接回车提交）";
+      elOk.textContent = "✓ 确认 Enter";
+    }
+    ctx.closeGroupCard = closeGroupCard;
+    function submitGroup() {
+      if (!groupCard || !groupEls.length) return;
+      const note = elTxt.value.trim();
+      const gid = "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const b = loadBatch();
+      groupEls.forEach((el) => b.push(Object.assign(payloadFor(el, note), { group: gid })));
+      saveBatch(b);
+      ctx.refreshCount();
+      const n = groupEls.length;
+      groupEls = [];
+      renderGroupMarks();
+      updateGroupUI();
+      closeGroupCard();
+      toast("已选中 " + n + " 项 · 组 " + gid);
+    }
+    ctx.submitGroup = submitGroup;
+    function payloadFor(el, note) {
+      const r = el.getBoundingClientRect();
+      const attributes = {};
+      try {
+        for (const a of Array.from(el.attributes).slice(0, 20)) {
+          attributes[a.name] = (a.value || "").slice(0, 120);
+        }
+      } catch (e) {
+      }
+      return {
+        selector: cssPath(el),
+        xpath: xPath(el),
+        tagName: el.tagName.toLowerCase(),
+        id: el.id || void 0,
+        classes: Array.from(el.classList || []),
+        attributes,
+        textPreview: (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80),
+        rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
+        note: note || "",
+        ts: Date.now(),
+        url: location.href,
+        source: sourceInfo(el)
+      };
+    }
+    ctx.payloadFor = payloadFor;
+    function submit() {
+      if (!pinned) return;
+      ctx.addPick(payloadFor(pinned, elTxt.value.trim()));
+      unpin();
+    }
+    ctx.submit = submit;
+    elOk.addEventListener("click", () => {
+      if (groupCard) submitGroup();
+      else submit();
+    });
+    els.elCancel.addEventListener("click", () => {
+      if (groupCard) closeGroupCard();
+      else unpin();
+    });
+    window.addEventListener("scroll", () => {
+      if (pickMode) {
+        refresh();
+        renderGroupMarks();
+      }
+    }, true);
+    window.addEventListener("resize", () => {
+      if (pickMode) {
+        refresh();
+        renderGroupMarks();
+      }
+    }, true);
   }
-  function isFabTarget(e) {
-    const path = e.composedPath ? e.composedPath() : [];
-    return path.indexOf(elFab) >= 0;
-  }
-  let drag = null;
-  function fabPointerDown(e) {
-    if (!isFabTarget(e)) return;
-    e.stopPropagation(); e.preventDefault();
-    if (e.button !== 0) return;
-    drag = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, moved: false };
-    try { elFab.setPointerCapture(e.pointerId); } catch (err) { /* capture unsupported — drag still works via move handler */ }
-  }
-  function fabPointerMove(e) {
-    if (!isFabTarget(e) && !drag) return;
-    e.stopPropagation(); e.preventDefault();
-    if (!drag) return;
-    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
-    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
-    pos.x = Math.max(4, Math.min(window.innerWidth - 50, drag.ox + dx));
-    pos.y = Math.max(4, Math.min(window.innerHeight - 50, drag.oy + dy));
-    elFab.style.left = pos.x + 'px';
-    elFab.style.top = pos.y + 'px';
-  }
-  // 角标点击开面板：不能依赖 composedPath 判定——fabPointerDown 里的 setPointerCapture
-  // 会把 pointerup 重定向到 fab，事件路径里永远不会出现 #cnt。
-  // 改用坐标命中测试，兼容指针捕获；命中区外扩 3px 好点中。
-  function overBadge(x, y) {
-    if (elCnt.style.display !== 'block') return false;
-    const r = elCnt.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return false;
-    return x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3;
-  }
-  function fabPointerUp(e) {
-    if (!drag) return;
-    e.stopPropagation(); e.preventDefault();
-    const wasMoved = drag.moved;
-    const hitBadge = overBadge(e.clientX, e.clientY);
-    drag = null;
-    try { sessionStorage.setItem(KEY_POS, JSON.stringify(pos)); } catch (err) { /* position won't persist */ }
-    if (!wasMoved) { if (hitBadge) togglePanel(); else setActive(true); }
-  }
-  window.addEventListener('pointerdown', fabPointerDown, true);
-  window.addEventListener('pointermove', fabPointerMove, true);
-  window.addEventListener('pointerup', fabPointerUp, true);
 
-  // ---------- 浮层拖动（pick 工具栏 / 备注卡片 / 标注面板） ----------
-  // 统一拖动实现：按住 handle 移动 el（fixed + left/top，拖动时清掉 right/
-  // transform 这类锚定样式），位移超过 4px 才算拖动，否则 pointerup 时触发
-  // onTap（工具栏上的可点提示块靠它工作）。刻意不用 setPointerCapture：capture
-  // 会把 pointerup/click 重定向到 handle，handle 内部的可点块就收不到 click 了；
-  // 改挂 window 级 move/up，事件对页面侧已有 isOurUI / host 吞事件兜底。
+  // web-picker.src/ui/combo.js
+  function initCombo(ctx) {
+    const { els, toast } = ctx;
+    const { elTCombo, elTInput, elTDrop, elTRefresh } = els;
+    const conn = ctx.conn;
+    let targets = [];
+    let comboSel = "";
+    let comboFilter = "";
+    let comboHl = 0;
+    let comboOpen = false;
+    ctx.getComboSel = () => comboSel;
+    ctx.getTargets = () => targets.slice();
+    function comboList() {
+      const q = comboFilter.trim().toLowerCase();
+      if (!q) return targets.slice();
+      return targets.filter((t) => ((t.name || "") + " " + (t.cwd || "") + " " + (t.status || "")).toLowerCase().includes(q));
+    }
+    function markMatch(text, q) {
+      const s = String(text == null ? "" : text);
+      const i = q ? s.toLowerCase().indexOf(q.toLowerCase()) : -1;
+      if (i < 0) return escapeHtml(s);
+      return escapeHtml(s.slice(0, i)) + "<b>" + escapeHtml(s.slice(i, i + q.length)) + "</b>" + escapeHtml(s.slice(i + q.length));
+    }
+    function renderDrop() {
+      if (!targets.length) {
+        elTDrop.innerHTML = '<div class="tempty">（无活跃 local session）</div>';
+        return;
+      }
+      const list = comboList();
+      if (!list.length) {
+        elTDrop.innerHTML = '<div class="tempty">无匹配目标</div>';
+        return;
+      }
+      if (comboHl >= list.length) comboHl = list.length - 1;
+      if (comboHl < 0) comboHl = 0;
+      const q = comboFilter.trim();
+      elTDrop.innerHTML = list.map((t, i) => {
+        const sub = (t.cwd || "?") + (t.status ? " · " + t.status : "");
+        return '<div class="titem' + (i === comboHl ? " hl" : "") + '" data-name="' + escapeHtml(t.name) + '"><div class="tname">' + (q ? markMatch(t.name, q) : escapeHtml(t.name)) + (t.name === comboSel ? ' <span class="tick">✓</span>' : "") + '</div><div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + "</div></div>";
+      }).join("") + '<div class="thint">输入过滤 · ↑↓ 选择 · Enter 确认 · Esc 关闭</div>';
+      const hl = elTDrop.querySelector(".titem.hl");
+      if (hl) {
+        if (hl.offsetTop < elTDrop.scrollTop) elTDrop.scrollTop = hl.offsetTop;
+        else if (hl.offsetTop + hl.offsetHeight > elTDrop.scrollTop + elTDrop.clientHeight)
+          elTDrop.scrollTop = hl.offsetTop + hl.offsetHeight - elTDrop.clientHeight;
+      }
+    }
+    function openDrop(selectAll) {
+      if (elTInput.disabled || comboOpen) return;
+      comboOpen = true;
+      comboFilter = "";
+      comboHl = Math.max(0, targets.findIndex((t) => t.name === comboSel));
+      elTDrop.classList.add("open");
+      renderDrop();
+      if (selectAll) setTimeout(() => elTInput.select(), 0);
+    }
+    function closeDrop() {
+      if (!comboOpen) return;
+      comboOpen = false;
+      elTDrop.classList.remove("open");
+      elTInput.value = comboSel;
+    }
+    ctx.closeDrop = closeDrop;
+    ctx.comboOpen = () => comboOpen;
+    function pickTarget(name) {
+      if (!name) return;
+      comboSel = name;
+      gm.set(GM_TARGET, name);
+      closeDrop();
+      elTInput.blur();
+      toast("目标已切换：" + name);
+    }
+    function renderTargetCombo() {
+      const last = gm.get(GM_TARGET, "");
+      comboSel = "";
+      elTInput.disabled = true;
+      elTInput.value = "";
+      elTInput.placeholder = conn.getState() !== "on" ? "未连接 broker" : "无活跃 local session";
+      closeDrop();
+      if (conn.getState() !== "on" || !targets.length) return;
+      elTInput.disabled = false;
+      comboSel = targets.some((t) => t.name === last) ? last : targets[0].name;
+      if (comboOpen) renderDrop();
+      else elTInput.value = comboSel;
+    }
+    ctx.renderTargetCombo = renderTargetCombo;
+    async function refreshTargets() {
+      targets = await conn.requestTargets();
+      renderTargetCombo();
+    }
+    ctx.refreshTargets = refreshTargets;
+    elTInput.addEventListener("focus", () => openDrop(true));
+    elTInput.addEventListener("input", () => {
+      if (!comboOpen) openDrop(false);
+      comboFilter = elTInput.value;
+      comboHl = 0;
+      renderDrop();
+    });
+    elTInput.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (!comboOpen) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter") {
+          e.preventDefault();
+          openDrop(true);
+        }
+        return;
+      }
+      const list = comboList();
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        comboHl = Math.min(list.length - 1, comboHl + 1);
+        renderDrop();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        comboHl = Math.max(0, comboHl - 1);
+        renderDrop();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (list[comboHl]) pickTarget(list[comboHl].name);
+      }
+    });
+    elTDrop.addEventListener("mousemove", (e) => {
+      const it = e.target && e.target.closest ? e.target.closest(".titem") : null;
+      if (!it) return;
+      const items = elTDrop.querySelectorAll(".titem");
+      const i = Array.prototype.indexOf.call(items, it);
+      if (i < 0 || i === comboHl) return;
+      if (items[comboHl]) items[comboHl].classList.remove("hl");
+      it.classList.add("hl");
+      comboHl = i;
+    });
+    elTDrop.addEventListener("click", (e) => {
+      const it = e.target && e.target.closest ? e.target.closest(".titem") : null;
+      if (it) pickTarget(it.getAttribute("data-name") || "");
+    });
+    window.addEventListener("pointerdown", (e) => {
+      if (!comboOpen) return;
+      const path = e.composedPath ? e.composedPath() : [];
+      if (path.indexOf(elTCombo) >= 0) return;
+      closeDrop();
+    }, true);
+    elTRefresh.addEventListener("click", () => {
+      if (conn.getState() !== "on") {
+        ctx.openSettings();
+        return;
+      }
+      refreshTargets().then(() => toast(targets.length ? "目标列表已刷新（" + targets.length + "）" : "没有发现活跃 local session"));
+    });
+  }
+
+  // web-picker.src/ui/send.js
+  function copyText(text) {
+    try {
+      GM_setClipboard(text, "text");
+      return true;
+    } catch (e) {
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {
+        });
+        return true;
+      }
+    } catch (e) {
+    }
+    return false;
+  }
+  function initSend(ctx) {
+    const { els, toast } = ctx;
+    const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elConn, elConnText } = els;
+    const conn = ctx.conn;
+    async function copyHandoffPrompt() {
+      ctx.closeSendMenu();
+      if (conn.getState() !== "on") {
+        toast("先连接 broker（点击左下状态）");
+        return;
+      }
+      const prompt = elPrompt.value.trim();
+      const target = ctx.getComboSel();
+      const hasPicks = loadBatch().length > 0;
+      if (!prompt && !hasPicks) {
+        toast("先标注元素或写 prompt");
+        return;
+      }
+      toast("正在向 broker 请求完整 handoff prompt…");
+      const res = await conn.requestCompose(prompt, target);
+      if (!res.ok) {
+        toast("拼 prompt 失败: " + res.code + (res.message ? " — " + res.message : ""));
+        return;
+      }
+      if (!copyText(res.text)) {
+        toast("剪贴板不可用（需 GM_setClipboard 或 https/localhost）");
+        return;
+      }
+      toast("handoff prompt 已复制（" + res.text.length + " 字符 · 可粘贴给任意 agent）");
+    }
+    async function doSend() {
+      const prompt = elPrompt.value.trim();
+      const target = ctx.getComboSel();
+      if (!target) {
+        toast(conn.getState() !== "on" ? "先连接 broker（点击左下状态）" : "没有可用目标：先启动 pi session 的 xfer listen");
+        return;
+      }
+      const hasPicks = loadBatch().length > 0;
+      if (!prompt && !hasPicks) {
+        toast("先标注元素或写 prompt");
+        return;
+      }
+      if (!hasPicks && !confirm("没有标注任何元素，只发 prompt？")) return;
+      elSend.disabled = true;
+      elSend.textContent = "发送中…";
+      const res = await conn.submitToAgent(prompt, target);
+      elSend.disabled = false;
+      elSend.textContent = "发送 →";
+      if (res.ok) {
+        gm.set(GM_TARGET, target);
+        toast("已送达 agent（handoff " + (res.result && res.result.handoff_id ? res.result.handoff_id : "?") + "）");
+        elPrompt.value = "";
+        ctx.clearBatch();
+        ctx.closePanel();
+      } else {
+        toast("发送失败: " + res.code + (res.message ? " — " + res.message : ""));
+      }
+    }
+    elSend.addEventListener("click", doSend);
+    elPrompt.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        doSend();
+      }
+    });
+    let sendMenuOpen = false;
+    function closeSendMenu() {
+      if (!sendMenuOpen) return;
+      sendMenuOpen = false;
+      elSendMenu.classList.remove("open");
+    }
+    ctx.closeSendMenu = closeSendMenu;
+    ctx.sendMenuOpen = () => sendMenuOpen;
+    elSendMore.addEventListener("click", () => {
+      sendMenuOpen = !sendMenuOpen;
+      elSendMenu.classList.toggle("open", sendMenuOpen);
+    });
+    elCopyPrompt.addEventListener("click", copyHandoffPrompt);
+    ctx.copyHandoffPrompt = copyHandoffPrompt;
+    window.addEventListener("pointerdown", (e) => {
+      if (!sendMenuOpen) return;
+      const path = e.composedPath ? e.composedPath() : [];
+      if (path.indexOf(elSendGroup) >= 0) return;
+      closeSendMenu();
+    }, true);
+    elClear.addEventListener("click", () => {
+      const n = loadBatch().length;
+      if (!n) return;
+      ctx.clearBatch();
+      ctx.renderPanel();
+      toast("已清空 " + n + " 条标注");
+    });
+    elConn.addEventListener("click", () => {
+      if (conn.getState() === "on") {
+        conn.disconnect();
+        return;
+      }
+      if (conn.getState() !== "off") return;
+      toast("正在连接 " + conn.brokerUrl() + " …");
+      conn.connect().then((ok) => {
+        if (!ok) ctx.openSettings();
+      });
+    });
+    ctx.renderConnPill = (s) => {
+      elConn.className = s === "on" ? "on" : s === "connecting" ? "connecting" : "";
+      elConn.title = s === "on" ? "点击断开 broker" : s === "connecting" ? "连接中…" : "点击连接 broker（失败会打开连接设置）";
+      elConnText.textContent = s === "on" ? "broker 已连接" : s === "connecting" ? "连接中…" : "未连接 · 点击连接";
+    };
+  }
+
+  // web-picker.src/ui/settings.js
+  function initSettings(ctx) {
+    const { els, toast } = ctx;
+    const { elSettings, elSUrl, elSSave, elSCancel, elSProps } = els;
+    const conn = ctx.conn;
+    function openSettings() {
+      elSUrl.value = conn.brokerUrl();
+      elSProps.checked = gm.get(GM_FPROPS, false) === true;
+      elSettings.style.display = "block";
+      setTimeout(() => elSUrl.focus(), 0);
+    }
+    function closeSettings() {
+      elSettings.style.display = "none";
+    }
+    ctx.openSettings = openSettings;
+    ctx.closeSettings = closeSettings;
+    ctx.settingsOpen = () => elSettings.style.display === "block";
+    elSProps.addEventListener("change", () => {
+      gm.set(GM_FPROPS, elSProps.checked);
+      toast("framework.inspect props/state " + (elSProps.checked ? "已开启" : "已关闭"));
+    });
+    elSSave.addEventListener("click", () => {
+      const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;
+      gm.set("wp.brokerUrl", url);
+      closeSettings();
+      toast("已保存，连接中…");
+      conn.connect();
+    });
+    elSCancel.addEventListener("click", closeSettings);
+  }
+
+  // web-picker.src/ui/draggable.js
   function makeDraggable(el, handle, opts) {
     const o = opts || {};
     let drag = null;
@@ -827,46 +2164,56 @@
       const r = el.getBoundingClientRect();
       return {
         x: Math.max(4, Math.min(window.innerWidth - Math.max(48, r.width) - 4, x)),
-        y: Math.max(4, Math.min(window.innerHeight - Math.max(28, r.height) - 4, y)),
+        y: Math.max(4, Math.min(window.innerHeight - Math.max(28, r.height) - 4, y))
       };
     }
     function apply(x, y) {
       const p = clampPos(x, y);
-      el.style.left = p.x + 'px';
-      el.style.top = p.y + 'px';
-      el.style.right = 'auto';
-      el.style.transform = 'none';
+      el.style.left = p.x + "px";
+      el.style.top = p.y + "px";
+      el.style.right = "auto";
+      el.style.transform = "none";
     }
-    handle.addEventListener('pointerdown', (e) => {
+    handle.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
-      if (e.target.closest && e.target.closest('button, textarea, input, select')) return;
+      if (e.target.closest && e.target.closest("button, textarea, input, select")) return;
       const r = el.getBoundingClientRect();
       drag = { sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, target: e.target, moved: false };
       e.preventDefault();
     });
-    window.addEventListener('pointermove', (e) => {
+    window.addEventListener("pointermove", (e) => {
       if (!drag) return;
       if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) <= 4) return;
       drag.moved = true;
       apply(drag.ox + e.clientX - drag.sx, drag.oy + e.clientY - drag.sy);
     }, true);
-    window.addEventListener('pointerup', (e) => {
+    window.addEventListener("pointerup", (e) => {
       if (!drag) return;
       const d = drag;
       drag = null;
-      if (!d.moved) { if (o.onTap) o.onTap(d.target, e); return; }
+      if (!d.moved) {
+        if (o.onTap) o.onTap(d.target, e);
+        return;
+      }
       if (!o.key) return;
       try {
         const r = el.getBoundingClientRect();
         sessionStorage.setItem(o.key, JSON.stringify({ x: r.left, y: r.top }));
-      } catch (err) { /* position won't persist */ }
+      } catch (err) {
+      }
     }, true);
-    window.addEventListener('pointercancel', () => { drag = null; }, true);
+    window.addEventListener("pointercancel", () => {
+      drag = null;
+    }, true);
     if (o.key) {
       try {
         const s = sessionStorage.getItem(o.key);
-        if (s) { const p = JSON.parse(s); if (typeof p.x === 'number' && typeof p.y === 'number') apply(p.x, p.y); }
-      } catch (err) { /* fall back to the CSS default position */ }
+        if (s) {
+          const p = JSON.parse(s);
+          if (typeof p.x === "number" && typeof p.y === "number") apply(p.x, p.y);
+        }
+      } catch (err) {
+      }
     }
     return {
       // 视口变小（打开 devtools 等）后把浮层拉回可视区；隐藏中的浮层跳过，
@@ -876,1270 +2223,348 @@
         if (!r.width && !r.height) return;
         const p = clampPos(r.left, r.top);
         if (p.x !== r.left || p.y !== r.top) apply(p.x, p.y);
-      },
+      }
     };
   }
-  const barDrag = makeDraggable(elBar, elBar, {
-    key: KEY_BAR_POS,
-    onTap(target) {
-      const t = target && target.closest ? target : null;
-      if (!t) return;
-      if (t.closest('#gclear')) clearPendingGroup();
-      else if (t.closest('#fz')) toggleFreeze();
-      else if (t.closest('#escx')) setActive(false);
-    },
-  });
-  const cardDrag = makeDraggable(elCard, elCard, {});
-  const panelDrag = makeDraggable(elPanel, elPH, { key: KEY_PANEL_POS });
-  window.addEventListener('resize', () => {
-    barDrag.clamp(); panelDrag.clamp(); cardDrag.clamp();
-  }, true);
 
-  function moveCapture(e) {
-    if (!pickMode) return;
-    if (frozen) { e.stopPropagation(); e.preventDefault(); }
-    if (pinned || groupCard || isOurUI(e)) return;   // 卡片打开期间高亮冻结
-    stack = stackAt(e.clientX, e.clientY);
-    idx = 0;
-    refresh();
-  }
-  function hoverCapture(e) {
-    if (!pickMode || !frozen) return;
-    e.stopPropagation(); e.preventDefault();
-  }
-  function clickCapture(e) {
-    if (isOurUI(e)) return;
-    if (!pickMode) return;
-    const btn0 = e.button === undefined || e.button === 0;
-    if (e.type === 'pointerdown' || e.type === 'mousedown') {
-      e.stopPropagation(); e.preventDefault();
-      if (!btn0 || groupCard) return;             // 组备注卡片打开期间吞掉页面点击
-      if (!pinned) { if (e.shiftKey) groupAt(e.clientX, e.clientY); else pinAt(e.clientX, e.clientY); }
-      return;
+  // web-picker.src/ui/fab.js
+  function initFab(ctx) {
+    const { ui, toast } = ctx;
+    const { host, els } = ui;
+    const { elFab, elCnt, elBar, elCard, elPanel, elPH } = els;
+    let drag = null;
+    function fabPointerDown(e) {
+      if (!ctx.isFabTarget(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (e.button !== 0) return;
+      drag = { sx: e.clientX, sy: e.clientY, ox: ui.pos.x, oy: ui.pos.y, moved: false };
+      try {
+        elFab.setPointerCapture(e.pointerId);
+      } catch (err) {
+      }
     }
-    e.stopPropagation(); e.preventDefault();
-  }
-  function wheelCapture(e) {
-    if (!pickMode || pinned || isOurUI(e)) return;
-    const sc = nearestScrollable(e.target);
-    if (sc && sc.scrollHeight > sc.clientHeight) return;
-    e.preventDefault();
-    window.scrollBy(0, e.deltaY);
-  }
-  window.addEventListener('mousemove', moveCapture, true);
-  window.addEventListener('mouseover', hoverCapture, true);
-  window.addEventListener('mouseout', hoverCapture, true);
-  window.addEventListener('mouseenter', hoverCapture, true);
-  window.addEventListener('mouseleave', hoverCapture, true);
-  window.addEventListener('pointermove', hoverCapture, true);
-  window.addEventListener('pointerover', hoverCapture, true);
-  window.addEventListener('pointerout', hoverCapture, true);
-  window.addEventListener('pointerenter', hoverCapture, true);
-  window.addEventListener('pointerleave', hoverCapture, true);
-  window.addEventListener('pointerdown', clickCapture, true);
-  window.addEventListener('mousedown', clickCapture, true);
-  window.addEventListener('mouseup', clickCapture, true);
-  window.addEventListener('click', clickCapture, true);
-  window.addEventListener('contextmenu', clickCapture, true);
-  window.addEventListener('wheel', wheelCapture, { capture: true, passive: false });
-  for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'contextmenu']) {
-    host.addEventListener(t, (e) => e.stopPropagation(), false);
-  }
-
-  function shiftLayer(delta) {
-    if (!stack.length) return;
-    idx = Math.max(0, Math.min(stack.length - 1, idx + delta));
-    refresh();
-  }
-
-  // ---------- pin → note ----------
-  function pin() {
-    const el = currentEl();
-    if (!el) return;
-    pinned = el;
-    applyHighlight(el, true);
-    const sel = cssPath(el);
-    const r = el.getBoundingClientRect();
-    let left = r.right + 10;
-    if (left + 300 > window.innerWidth) left = Math.max(8, r.left - 310);
-    let top = r.top;
-    if (top + 240 > window.innerHeight) top = Math.max(8, window.innerHeight - 250);
-    Object.assign(elCard.style, { display: 'block', left: left + 'px', top: top + 'px' });
-    elSel.textContent = sel;
-    elTxt.value = '';
-    setTimeout(() => elTxt.focus(), 0);
-  }
-  function unpin() { pinned = null; elCard.style.display = 'none'; refresh(); }
-  function pinAt(x, y) {
-    const st = stackAt(x, y);
-    if (!st.length) return;
-    stack = st;
-    idx = 0;
-    pin();
-  }
-
-  // ---------- shift group (v1.5)：⇧Enter/⇧click 聚合 → 组 mark → 整组一条 note ----------
-  function toggleGroup(el) {
-    if (!el) return;
-    const i = groupEls.indexOf(el);
-    if (i >= 0) { groupEls.splice(i, 1); toast('已移出组合（剩 ' + groupEls.length + ' 项）'); }
-    else { groupEls.push(el); toast('已加入组合（共 ' + groupEls.length + ' 项）'); }
-    renderGroupMarks();
-    updateGroupUI();
-  }
-  // 一次性清空待处理组合（⌫ / 工具栏 chip）。组合只存内存，之前唯一的移出方式是
-  // 重新 hover 回原元素再按 ⇧Enter，实际用起来等于"无法取消"。
-  function clearPendingGroup() {
-    if (!groupEls.length) return;
-    const n = groupEls.length;
-    groupEls = [];
-    if (groupCard) closeGroupCard();       // 组都没了，组备注卡片一并收起
-    renderGroupMarks();
-    updateGroupUI();
-    toast('已清空待处理组合（' + n + ' 项）');
-  }
-  function groupAt(x, y) {
-    const st = stackAt(x, y);
-    if (!st.length) return;
-    stack = st;
-    idx = 0;
-    toggleGroup(st[0]);
-  }
-  function renderGroupMarks() {
-    elGWrap.innerHTML = '';
-    if (!pickMode || !groupEls.length) { elGWrap.style.display = 'none'; return; }
-    elGWrap.style.display = 'block';
-    groupEls.forEach((el, i) => {
-      const r = el.getBoundingClientRect();
-      if (!r.width && !r.height) return;          // 元素已随页面变化消失
-      const m = document.createElement('div');
-      m.className = 'gmark';
-      Object.assign(m.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
-      const tag = document.createElement('span');
-      tag.className = 'gi';
-      tag.textContent = String(i + 1);
-      tag.setAttribute('data-gi', String(i));     // 点徽标按它移出对应元素
-      tag.title = '点击移出组合';
-      m.appendChild(tag);
-      elGWrap.appendChild(m);
+    function fabPointerMove(e) {
+      if (!ctx.isFabTarget(e) && !drag) return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (!drag) return;
+      const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+      ui.pos.x = Math.max(4, Math.min(window.innerWidth - 50, drag.ox + dx));
+      ui.pos.y = Math.max(4, Math.min(window.innerHeight - 50, drag.oy + dy));
+      elFab.style.left = ui.pos.x + "px";
+      elFab.style.top = ui.pos.y + "px";
+    }
+    function overBadge(x, y) {
+      if (elCnt.style.display !== "block") return false;
+      const r = elCnt.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return false;
+      return x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3;
+    }
+    function fabPointerUp(e) {
+      if (!drag) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const wasMoved = drag.moved;
+      const hitBadge = overBadge(e.clientX, e.clientY);
+      drag = null;
+      try {
+        sessionStorage.setItem(KEY_POS, JSON.stringify(ui.pos));
+      } catch (err) {
+      }
+      if (!wasMoved) {
+        if (hitBadge) ctx.togglePanel();
+        else ctx.setActive(true);
+      }
+    }
+    window.addEventListener("pointerdown", fabPointerDown, true);
+    window.addEventListener("pointermove", fabPointerMove, true);
+    window.addEventListener("pointerup", fabPointerUp, true);
+    const barDrag = makeDraggable(elBar, elBar, {
+      key: KEY_BAR_POS,
+      onTap(target) {
+        const t = target && target.closest ? target : null;
+        if (!t) return;
+        if (t.closest("#gclear")) ctx.clearPendingGroup();
+        else if (t.closest("#fz")) ctx.toggleFreeze();
+        else if (t.closest("#escx")) ctx.setActive(false);
+      }
     });
-  }
-  // 点琥珀色 mark 的序号徽标 = 把该元素移出组合（不必再 hover 回原元素按 ⇧Enter）
-  elGWrap.addEventListener('click', (e) => {
-    const tag = e.target && e.target.closest ? e.target.closest('.gi') : null;
-    if (!tag) return;
-    const i = +tag.getAttribute('data-gi');
-    if (!(i >= 0) || !groupEls[i]) return;
-    groupEls.splice(i, 1);
-    renderGroupMarks();
-    updateGroupUI();
-    toast('已移出组合（剩 ' + groupEls.length + ' 项）');
-  });
-  function updateGroupUI() {
-    const n = groupEls.length;
-    elGH.classList.toggle('on', n > 0);
-    elGH.innerHTML = '<kbd>⇧Enter</kbd>加组/移出' +
-      (n ? ' · <kbd>Enter</kbd>组备注(' + n + ')' : '');
-    elGCLEAR.style.display = n ? 'inline-flex' : 'none';
-  }
-  function openGroupCard() {
-    if (!groupEls.length || pinned) return;
-    groupCard = true;
-    const r = groupEls[0].getBoundingClientRect();
-    let left = r.right + 10;
-    if (left + 300 > window.innerWidth) left = Math.max(8, r.left - 310);
-    let top = r.top;
-    if (top + 240 > window.innerHeight) top = Math.max(8, window.innerHeight - 250);
-    elSel.textContent = groupEls.map((el) => cssPath(el)).join('\n');
-    elTxt.value = '';
-    elTxt.placeholder = '组备注（可选，整组共用这一条）';
-    elOk.textContent = '✓ 提交 ' + groupEls.length + ' 项 Enter';
-    Object.assign(elCard.style, { display: 'block', left: left + 'px', top: top + 'px' });
-    setTimeout(() => elTxt.focus(), 0);
-  }
-  function closeGroupCard() {
-    if (!groupCard) return;
-    groupCard = false;
-    elCard.style.display = 'none';
-    elTxt.placeholder = '备注（可选，留空直接回车提交）';
-    elOk.textContent = '✓ 确认 Enter';
-  }
-  function submitGroup() {
-    if (!groupCard || !groupEls.length) return;
-    const note = elTxt.value.trim();
-    const gid = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-    const b = loadBatch();
-    groupEls.forEach((el) => b.push(Object.assign(payloadFor(el, note), { group: gid })));
-    saveBatch(b);
-    refreshCount();
-    const n = groupEls.length;
-    groupEls = [];
-    renderGroupMarks();
-    updateGroupUI();
-    closeGroupCard();
-    toast('已选中 ' + n + ' 项 · 组 ' + gid);
+    const cardDrag = makeDraggable(elCard, elCard, {});
+    const panelDrag = makeDraggable(elPanel, elPH, { key: KEY_PANEL_POS });
+    ctx.barDrag = barDrag;
+    ctx.cardDrag = cardDrag;
+    ctx.panelDrag = panelDrag;
+    window.addEventListener("resize", () => {
+      barDrag.clamp();
+      panelDrag.clamp();
+      cardDrag.clamp();
+    }, true);
+    void host;
+    void toast;
   }
 
-  // payload schema is the v0 wire format — the broker revision consumes these
-  // records verbatim, so field names/shapes here must stay stable. Optional
-  // additions so far: `group` (v1.5, shift-group link id) and `id`/`classes`/
-  // `attributes` (v1.6, richer element context so the agent rarely needs a
-  // follow-up dom.query). Old consumers ignore unknown fields.
-  function payloadFor(el, note) {
-    const r = el.getBoundingClientRect();
-    const attributes = {};
-    try {
-      for (const a of Array.from(el.attributes).slice(0, 20)) {
-        attributes[a.name] = (a.value || '').slice(0, 120);   // values truncated; boolean attrs stay ""
-      }
-    } catch (e) { /* attribute access is best-effort */ }
-    return {
-      selector: cssPath(el),
-      xpath: xPath(el),
-      tagName: el.tagName.toLowerCase(),
-      id: el.id || undefined,
-      classes: Array.from(el.classList || []),
-      attributes,
-      textPreview: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80),
-      rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
-      note: note || '',
-      ts: Date.now(),
-      url: location.href,
-      source: sourceInfo(el),
-    };
-  }
-  function submit() {
-    if (!pinned) return;
-    addPick(payloadFor(pinned, elTxt.value.trim()));
-    unpin();
-  }
-
-  // ---------- note panel ----------
-  let panelOpen = false;
-  function renderPanel() {
-    const b = loadBatch();
-    elPcount.textContent = b.length ? b.length + ' 条' : '';
-    if (!b.length) { elPlist.innerHTML = '<div class="empty">还没有选中任何元素</div>'; return; }
-    elPlist.innerHTML = b.map((r, i) =>
-      '<div class="item" data-i="' + i + '">' +
-        '<div class="psel">' + escapeHtml(r.selector) + '</div>' +
-        (r.group ? '<div class="pgroup">⧉ 组 ' + escapeHtml(r.group) + '</div>' : '') +
-        (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + ' · ' + r.source.file + ':' + r.source.line) + '</div>' : '') +
-        (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + '</div>' : '') +
-        '<textarea placeholder="备注…（失焦自动保存）">' + escapeHtml(r.note || '') + '</textarea>' +
-        '<div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + '</span>' +
-        '<button class="del">删除</button></div>' +
-      '</div>'
-    ).join('');
-  }
-  function openPanel() {
-    panelOpen = true;
-    renderPanel();
-    elPanel.style.display = 'flex';
-    panelDrag.clamp();
-    if (wsState === 'on') refreshTargets(); else renderTargetCombo();
-  }
-  function closePanel() { panelOpen = false; closeDrop(); closeSendMenu(); elPanel.style.display = 'none'; }
-  function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
-  elPclose.addEventListener('click', closePanel);
-  elPlist.addEventListener('change', (e) => {
-    const t = e.target;
-    if (!t || t.tagName !== 'TEXTAREA') return;
-    const item = t.closest('.item');
-    if (!item) return;
-    const b = loadBatch();
-    const i = +item.getAttribute('data-i');
-    if (!b[i]) return;
-    b[i].note = t.value.trim();
-    let synced = 0;
-    if (b[i].group) {                    // 组共享一条 note：改任一成员即同步整组
-      for (let j = 0; j < b.length; j++) {
-        if (j === i || b[j].group !== b[i].group) continue;
-        b[j].note = b[i].note;
-        synced++;
-        const ta = elPlist.querySelector('.item[data-i="' + j + '"] textarea');
-        if (ta) ta.value = b[i].note;    // DOM 直改，避免整表重渲染抢焦点
-      }
+  // web-picker.src/ui/hotkeys.js
+  function initHotkeys(ctx) {
+    const { root, els, toast } = ctx;
+    const { elTxt, elSettings } = els;
+    function updateFreezeUI() {
+      const fz = root.getElementById("fz");
+      if (!fz) return;
+      fz.classList.toggle("on", ctx.pickState.frozen);
+      fz.title = ctx.pickState.frozen ? "冻结：页面交互已屏蔽，浮层不会因点击/hover 关闭（点击此提示可切换）" : "实时：hover 可触发页面（展开子菜单等）（点击此提示可切换）";
     }
-    saveBatch(b);
-    toast('备注已保存' + (synced ? '（已同步组内 ' + synced + ' 项）' : ''));
-  });
-  elPlist.addEventListener('click', (e) => {
-    const del = e.target && e.target.closest ? e.target.closest('.del') : null;
-    if (!del) return;
-    const item = del.closest('.item');
-    if (!item) return;
-    const b = loadBatch();
-    const i = +item.getAttribute('data-i');
-    if (!b[i]) return;
-    const sel = b[i].selector;
-    b.splice(i, 1);
-    saveBatch(b);
-    refreshCount();
-    renderPanel();
-    toast('已删除 ' + sel);
-  });
-
-  // ---------- broker connection (protocol v0.1, no token — manual connect only) ----------
-  let ws = null;
-  let wsState = 'off';                 // off | connecting | on
-  let connectSettle = null;            // 在途 connect 的结算回调（welcome→true / close→false）
-  const pending = new Map();           // request id → { kind:'submit'|'targets', resolve }
-  let targets = [];                    // [{name, sessionName, cwd, status}] from targets.list
-
-  function brokerUrl() { return gm.get(GM_BROKER, DEFAULT_BROKER_URL); }
-
-  function sendFrame(obj) {
-    if (!ws || ws.readyState !== 1) return false;
-    try { ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
-  }
-
-  function setWsState(s) {
-    wsState = s;
-    elDot.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : '';
-    elConn.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : '';
-    elConn.title = s === 'on' ? '点击断开 broker' : s === 'connecting' ? '连接中…' : '点击连接 broker（失败会打开连接设置）';
-    elConnText.textContent = s === 'on' ? 'broker 已连接'
-      : s === 'connecting' ? '连接中…'
-      : '未连接 · 点击连接';
-    if (s !== 'on') { targets = []; renderTargetCombo(); }
-  }
-
-  // 返回 Promise：welcome 兑现 true；构造失败/close（含 onerror 后的必然 close）兑现 false。
-  // fire-and-forget 调用方（菜单、settings 保存、API）照旧忽略返回值。
-  function connectBroker() {
-    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
-    const url = brokerUrl().replace(/\/+$/, '') + '/ws';
-    setWsState('connecting');
-    let settle;
-    const attempt = new Promise((resolve) => { settle = resolve; });
-    connectSettle = settle;
-    let sock;
-    try { sock = new WebSocket(url); }
-    catch (e) {
-      connectSettle = null;
-      setWsState('off');
-      toast('WS 创建失败: ' + e.message);
-      settle(false);
-      return attempt;
+    ctx.updateFreezeUI = updateFreezeUI;
+    function toggleFreeze() {
+      ctx.pickState.frozen = !ctx.pickState.frozen;
+      updateFreezeUI();
+      toast(ctx.pickState.frozen ? "冻结：页面交互已屏蔽" : "实时：hover 可触发页面");
     }
-    ws = sock;
-    sock.onopen = () => { sendFrame(frameHello()); };
-    sock.onmessage = (ev) => {
-      let f;
-      try { f = JSON.parse(ev.data); } catch (e) { return; }
-      if (!f || typeof f.type !== 'string') return;
-      if (f.type === PROTOCOL.KIND_WELCOME) {
-        setWsState('on');
-        toast('broker 已连接');
-        const settled = connectSettle; connectSettle = null;
-        if (settled) settled(true);
-        refreshTargets();
-        return;
-      }
-      if (f.type === PROTOCOL.KIND_ACK) {
-        const p = pending.get(f.id);
-        if (p && p.kind === 'submit') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
-        else if (p && p.kind === 'compose') {
-          pending.delete(f.id);
-          p.resolve({ ok: true, text: f.result && typeof f.result.prompt === 'string' ? f.result.prompt : '' });
-        }
-        return;
-      }
-      if (f.type === PROTOCOL.KIND_ERROR) {
-        const p = pending.get(f.id);
-        if (p) {
-          pending.delete(f.id);
-          p.resolve(p.kind === 'submit' ? { ok: false, code: f.code, message: f.message }
-            : p.kind === 'compose' ? { ok: false, code: f.code, message: f.message } : []);
-        } else {
-          toast('broker 错误: ' + (f.code || '?'));
-        }
-        return;
-      }
-      if (f.type === PROTOCOL.KIND_TARGETS_RESULT) {
-        const p = pending.get(f.id);
-        if (p && p.kind === 'targets') { pending.delete(f.id); p.resolve(Array.isArray(f.targets) ? f.targets : []); }
-        return;
-      }
-      if (f.type === PROTOCOL.KIND_PAGE_REQUEST) {
-        debugLog('page.request', f.id, f.tool && f.tool.op);
-        handlePageToolRequest(f);
-        return;
-      }
-    };
-    sock.onclose = () => {
-      if (ws !== sock) return;               // superseded by a newer connect
-      ws = null;
-      for (const p of pending.values()) p.resolve(p.kind === 'submit'
-        ? { ok: false, code: 'closed', message: 'broker 连接已断开' }
-        : []);
-      pending.clear();
-      const settled = connectSettle; connectSettle = null;
-      if (settled) settled(false);           // 握手未完成即断开 = 配对失败
-      if (wsState !== 'off') { setWsState('off'); toast('broker 连接已断开'); }
-    };
-    sock.onerror = () => {
-      if (ws === sock && wsState !== 'off') {
-        setWsState('off');
-        toast('broker 连不上: ' + url + '（连接设置里可改地址）');
-      }
-    };
-    return attempt;
-  }
-
-  function disconnectBroker() {
-    setWsState('off');
-    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
-    toast('已断开');
-  }
-
-  // ---------- send flow (annotation.submit → ack/error) ----------
-  // prompt 可留空：留空时落 DEFAULT_PROMPT——逐条回应标注 note / 解释元素渲染逻辑。
-  // broker 端 v0 校验要求 prompt 非空，所以默认值在这一侧补齐，线上帧始终带具体指令。
-  const DEFAULT_PROMPT = '请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。';
-  // 反向查询规则随每次 send 下发（prompt 尾部追加）：HMR 改代码失败会整页刷新，
-  // 刷新即断开 userscript ↔ broker 连接，此后的 page.request 全部无人应答。
-  const PAGE_QUERY_RULE = '\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / framework.inspect 等）只能在开始修改代码之前进行；需要 DOM、样式、组件链信息时请在动第一行代码前一次性查完。一旦开始改代码，HMR 无法热更新时浏览器会整页刷新，userscript 与 broker 的连接会随刷新断开，此后的 page.request 不会再有响应，不要浪费尝试。';
-  function submitToAgent(prompt, targetName) {
-    return new Promise((resolve) => {
-      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
-      const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-      pending.set(id, { kind: 'submit', resolve });
-      const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-      if (!sendFrame(frameSubmit(id, promptText, targetName))) {
-        pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
-        return;
-      }
-      setTimeout(() => {
-        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: 'broker 无响应' }); }
-      }, 10000);
-    });
-  }
-
-  // ---------- compose flow（v1.10）：broker 拼完整 handoff 文档 → 剪贴板 ----------
-  // prompt 组装与 submit 完全一致（留空落 DEFAULT_PROMPT + PAGE_QUERY_RULE），
-  // broker 侧用同一个 renderHandoffDoc 渲染，但不落盘不投递——只是把最终发给
-  // agent 的完整 prompt 交还给页面。这样非 pi 的 code agent（有 bash 无 xfer）
-  // 拿到的信息与真正 handoff 等价：文档里已含 page-tool CLI 路径与用法。
-  function requestCompose(prompt, targetName) {
-    return new Promise((resolve) => {
-      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
-      const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-      pending.set(id, { kind: 'compose', resolve });
-      const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-      if (!sendFrame(frameCompose(id, promptText, targetName))) {
-        pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
-        return;
-      }
-      setTimeout(() => {
-        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: 'broker 无响应' }); }
-      }, 10000);
-    });
-  }
-  function copyText(text) {
-    try { GM_setClipboard(text, 'text'); return true; } catch (e) { /* fall through to web clipboard */ }
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).catch(() => {});
-        return true;
-      }
-    } catch (e) { /* clipboard API unavailable */ }
-    return false;
-  }
-  async function copyHandoffPrompt() {
-    closeSendMenu();
-    if (wsState !== 'on') { toast('先连接 broker（点击左下状态）'); return; }
-    const prompt = elPrompt.value.trim();
-    const target = comboSel;
-    const hasPicks = loadBatch().length > 0;
-    if (!prompt && !hasPicks) { toast('先标注元素或写 prompt'); return; }
-    toast('正在向 broker 请求完整 handoff prompt…');
-    const res = await requestCompose(prompt, target);
-    if (!res.ok) { toast('拼 prompt 失败: ' + res.code + (res.message ? ' — ' + res.message : '')); return; }
-    if (!copyText(res.text)) { toast('剪贴板不可用（需 GM_setClipboard 或 https/localhost）'); return; }
-    toast('handoff prompt 已复制（' + res.text.length + ' 字符 · 可粘贴给任意 agent）');
-  }
-
-  // ---------- targets (targets.list → targets.result) + searchable combobox ----------
-  function requestTargets() {
-    return new Promise((resolve) => {
-      if (wsState !== 'on') { resolve([]); return; }
-      const id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-      pending.set(id, { kind: 'targets', resolve });
-      if (!sendFrame(frameTargetsList(id))) { pending.delete(id); resolve([]); return; }
-      setTimeout(() => {
-        if (pending.has(id)) { pending.delete(id); resolve([]); }
-      }, 5000);
-    });
-  }
-  async function refreshTargets() {
-    targets = await requestTargets();
-    renderTargetCombo();
-  }
-
-  // ---------- target combobox — 可搜索下拉（目标一多，原生 <select> 翻起来太麻烦） ----------
-  // focus/点击展开、输入即按 name/cwd/status 过滤、↑↓ 高亮、Enter 或点击选中、
-  // Esc / 点击外部收起；选中即写回 GM wp.lastTarget，与旧 <select> 的 change 语义一致。
-  let comboSel = '';       // 当前选中的 target name（'' = 无）
-  let comboFilter = '';    // 下拉展开期间的过滤词
-  let comboHl = 0;         // 过滤结果中的高亮下标
-  let comboOpen = false;
-
-  function comboList() {
-    const q = comboFilter.trim().toLowerCase();
-    if (!q) return targets.slice();
-    return targets.filter((t) =>
-      ((t.name || '') + ' ' + (t.cwd || '') + ' ' + (t.status || '')).toLowerCase().includes(q));
-  }
-  function markMatch(text, q) {
-    const s = String(text == null ? '' : text);
-    const i = q ? s.toLowerCase().indexOf(q.toLowerCase()) : -1;
-    if (i < 0) return escapeHtml(s);
-    return escapeHtml(s.slice(0, i)) + '<b>' + escapeHtml(s.slice(i, i + q.length)) + '</b>' +
-      escapeHtml(s.slice(i + q.length));
-  }
-  function renderDrop() {
-    if (!targets.length) { elTDrop.innerHTML = '<div class="tempty">（无活跃 local session）</div>'; return; }
-    const list = comboList();
-    if (!list.length) { elTDrop.innerHTML = '<div class="tempty">无匹配目标</div>'; return; }
-    if (comboHl >= list.length) comboHl = list.length - 1;
-    if (comboHl < 0) comboHl = 0;
-    const q = comboFilter.trim();
-    elTDrop.innerHTML = list.map((t, i) => {
-      const sub = (t.cwd || '?') + (t.status ? ' · ' + t.status : '');
-      return '<div class="titem' + (i === comboHl ? ' hl' : '') + '" data-name="' + escapeHtml(t.name) + '">' +
-        '<div class="tname">' + (q ? markMatch(t.name, q) : escapeHtml(t.name)) +
-          (t.name === comboSel ? ' <span class="tick">✓</span>' : '') + '</div>' +
-        '<div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + '</div>' +
-      '</div>';
-    }).join('') + '<div class="thint">输入过滤 · ↑↓ 选择 · Enter 确认 · Esc 关闭</div>';
-    const hl = elTDrop.querySelector('.titem.hl');     // 键盘移动时保持高亮行可见
-    if (hl) {
-      if (hl.offsetTop < elTDrop.scrollTop) elTDrop.scrollTop = hl.offsetTop;
-      else if (hl.offsetTop + hl.offsetHeight > elTDrop.scrollTop + elTDrop.clientHeight)
-        elTDrop.scrollTop = hl.offsetTop + hl.offsetHeight - elTDrop.clientHeight;
-    }
-  }
-  function openDrop(selectAll) {
-    if (elTInput.disabled || comboOpen) return;
-    comboOpen = true;
-    comboFilter = '';
-    comboHl = Math.max(0, targets.findIndex((t) => t.name === comboSel));
-    elTDrop.classList.add('open');
-    renderDrop();
-    if (selectAll) setTimeout(() => elTInput.select(), 0);  // 全选现有文本：直接输入即开始过滤
-  }
-  function closeDrop() {
-    if (!comboOpen) return;
-    comboOpen = false;
-    elTDrop.classList.remove('open');
-    elTInput.value = comboSel;          // 还原为已选目标的展示
-  }
-  function pickTarget(name) {
-    if (!name) return;
-    comboSel = name;
-    gm.set(GM_TARGET, name);
-    closeDrop();
-    elTInput.blur();
-    toast('目标已切换：' + name);
-  }
-  function renderTargetCombo() {
-    const last = gm.get(GM_TARGET, '');
-    comboSel = '';
-    elTInput.disabled = true;
-    elTInput.value = '';
-    elTInput.placeholder = wsState !== 'on' ? '未连接 broker' : '无活跃 local session';
-    closeDrop();
-    if (wsState !== 'on' || !targets.length) return;
-    elTInput.disabled = false;
-    comboSel = targets.some((t) => t.name === last) ? last : targets[0].name;
-    if (comboOpen) renderDrop(); else elTInput.value = comboSel;
-  }
-
-  elTInput.addEventListener('focus', () => openDrop(true));
-  elTInput.addEventListener('input', () => {
-    if (!comboOpen) openDrop(false);
-    comboFilter = elTInput.value;
-    comboHl = 0;
-    renderDrop();
-  });
-  elTInput.addEventListener('keydown', (e) => {
-    if (e.isComposing || e.keyCode === 229) return;   // IME 组字中：交给输入法
-    if (!comboOpen) {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') { e.preventDefault(); openDrop(true); }
-      return;
-    }
-    const list = comboList();
-    if (e.key === 'ArrowDown') { e.preventDefault(); comboHl = Math.min(list.length - 1, comboHl + 1); renderDrop(); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); comboHl = Math.max(0, comboHl - 1); renderDrop(); }
-    else if (e.key === 'Enter') { e.preventDefault(); if (list[comboHl]) pickTarget(list[comboHl].name); }
-  });
-  elTDrop.addEventListener('mousemove', (e) => {
-    const it = e.target && e.target.closest ? e.target.closest('.titem') : null;
-    if (!it) return;
-    const items = elTDrop.querySelectorAll('.titem');
-    const i = Array.prototype.indexOf.call(items, it);
-    if (i < 0 || i === comboHl) return;
-    if (items[comboHl]) items[comboHl].classList.remove('hl');
-    it.classList.add('hl');
-    comboHl = i;
-  });
-  elTDrop.addEventListener('click', (e) => {
-    const it = e.target && e.target.closest ? e.target.closest('.titem') : null;
-    if (it) pickTarget(it.getAttribute('data-name') || '');
-  });
-  // 点击 combo 之外收起下拉——不走 blur：blur 会在点击选项命中前抢先收起下拉
-  window.addEventListener('pointerdown', (e) => {
-    if (!comboOpen) return;
-    const path = e.composedPath ? e.composedPath() : [];
-    if (path.indexOf(elTCombo) >= 0) return;
-    closeDrop();
-  }, true);
-  elTRefresh.addEventListener('click', () => {
-    if (wsState !== 'on') { openSettings(); return; }
-    refreshTargets().then(() =>
-      toast(targets.length ? '目标列表已刷新（' + targets.length + '）' : '没有发现活跃 local session'));
-  });
-
-  async function doSend() {
-    const prompt = elPrompt.value.trim();            // 可留空 → submitToAgent 落到 DEFAULT_PROMPT
-    const target = comboSel;
-    if (!target) {
-      toast(wsState !== 'on' ? '先连接 broker（点击左下状态）' : '没有可用目标：先启动 pi session 的 xfer listen');
-      return;
-    }
-    const hasPicks = loadBatch().length > 0;
-    if (!prompt && !hasPicks) { toast('先标注元素或写 prompt'); return; }
-    if (!hasPicks && !confirm('没有标注任何元素，只发 prompt？')) return;
-    elSend.disabled = true;
-    elSend.textContent = '发送中…';
-    const res = await submitToAgent(prompt, target);
-    elSend.disabled = false;
-    elSend.textContent = '发送 →';
-    if (res.ok) {
-      gm.set(GM_TARGET, target);
-      toast('已送达 agent（handoff ' + (res.result && res.result.handoff_id ? res.result.handoff_id : '?') + '）');
-      elPrompt.value = '';
-      clearBatch();
-      closePanel();                              // 发送成功即收起面板；重开显示空态
-    } else {
-      toast('发送失败: ' + res.code + (res.message ? ' — ' + res.message : ''));
-    }
-  }
-  elSend.addEventListener('click', doSend);
-  // ⌘/Ctrl+Enter 发送——写完 prompt 不必再伸手点鼠标
-  elPrompt.addEventListener('keydown', (e) => {
-    if (e.isComposing || e.keyCode === 229) return;
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); doSend(); }
-  });
-
-  // ---------- 更多下拉（split button 的 ▾）----------
-  let sendMenuOpen = false;
-  function closeSendMenu() {
-    if (!sendMenuOpen) return;
-    sendMenuOpen = false;
-    elSendMenu.classList.remove('open');
-  }
-  elSendMore.addEventListener('click', () => {
-    sendMenuOpen = !sendMenuOpen;
-    elSendMenu.classList.toggle('open', sendMenuOpen);
-  });
-  elCopyPrompt.addEventListener('click', copyHandoffPrompt);
-  window.addEventListener('pointerdown', (e) => {
-    if (!sendMenuOpen) return;
-    const path = e.composedPath ? e.composedPath() : [];
-    if (path.indexOf(elSendGroup) >= 0) return;
-    closeSendMenu();
-  }, true);
-  elClear.addEventListener('click', () => {
-    const n = loadBatch().length;
-    if (!n) return;
-    clearBatch();                          // 标注是轻量草稿，清空不做二次确认
-    renderPanel();
-    toast('已清空 ' + n + ' 条标注');
-  });
-  // 未连接时点击 = 直接按已存/默认地址发起连接（不再先弹设置）；仅配对失败才打开设置
-  elConn.addEventListener('click', () => {
-    if (wsState === 'on') { disconnectBroker(); return; }
-    if (wsState !== 'off') return;                 // connecting 中：等本次尝试出结果
-    toast('正在连接 ' + brokerUrl() + ' …');
-    connectBroker().then((ok) => { if (!ok) openSettings(); });
-  });
-
-  // ---------- settings modal (broker URL + framework props opt-in) ----------
-  function openSettings() {
-    elSUrl.value = brokerUrl();
-    elSProps.checked = gm.get(GM_FPROPS, false) === true;
-    elSettings.style.display = 'block';
-    setTimeout(() => elSUrl.focus(), 0);
-  }
-  function closeSettings() { elSettings.style.display = 'none'; }
-  elSProps.addEventListener('change', () => {
-    gm.set(GM_FPROPS, elSProps.checked);   // immediate persist — no reconnect needed to toggle
-    toast('framework.inspect props/state ' + (elSProps.checked ? '已开启' : '已关闭'));
-  });
-  elSSave.addEventListener('click', () => {
-    const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;
-    gm.set(GM_BROKER, url);
-    closeSettings();
-    toast('已保存，连接中…');
-    connectBroker();
-  });
-  elSCancel.addEventListener('click', closeSettings);
-
-  // ---------- page tools — page.request{tool:{op,params}} → fixed read-only op → page.response ----------
-  // No human modal, no free-form eval: the op table below is the entire attack
-  // surface, all handlers are read-only, and every result passes through
-  // jsonSafe (depth/string/array caps) so JSON.stringify can never throw or
-  // blow the 1MB broker frame budget on its own.
-
-  // JSON-safe serialization: drops/flat-marks everything a JSON round trip
-  // cannot carry (functions, symbols, cycles via depth cap, huge strings).
-  const JSON_SAFE_CAPS = { maxDepth: 5, maxStr: 100000, maxArray: 500, maxKeys: 200 };
-  function jsonSafe(value) {
-    let truncated = false;
-    function walk(v, depth) {
-      if (v === null || typeof v === 'number' || typeof v === 'boolean') return v;
-      if (v === undefined) return null;
-      if (typeof v === 'bigint' || typeof v === 'symbol') { truncated = true; return String(v); }
-      if (typeof v === 'function') { truncated = true; return 'ƒ ' + (v.name || 'anonymous'); }
-      if (typeof v === 'string') {
-        if (v.length > JSON_SAFE_CAPS.maxStr) { truncated = true; return v.slice(0, JSON_SAFE_CAPS.maxStr) + '…[truncated]'; }
-        return v;
-      }
-      if (v instanceof Error) {
-        return { name: v.name, message: v.message, stack: walk(v.stack == null ? '' : String(v.stack), depth + 1) };
-      }
-      if (depth >= JSON_SAFE_CAPS.maxDepth) { truncated = true; return '[maxDepth]'; }
-      if (Array.isArray(v)) {
-        if (v.length > JSON_SAFE_CAPS.maxArray) truncated = true;
-        return v.slice(0, JSON_SAFE_CAPS.maxArray).map((x) => walk(x, depth + 1));
-      }
-      if (typeof v !== 'object') { truncated = true; return String(v); }
-      const out = {};
-      let keys;
-      try { keys = Object.keys(v); } catch (e) { truncated = true; return '[uninspectable]'; }
-      if (keys.length > JSON_SAFE_CAPS.maxKeys) truncated = true;
-      for (const k of keys.slice(0, JSON_SAFE_CAPS.maxKeys)) {
-        try { out[k] = walk(v[k], depth + 1); } catch (e) { truncated = true; out[k] = '[error]'; }
-      }
-      return out;
-    }
-    let text;
-    try { text = JSON.stringify(walk(value, 0)); }
-    catch (e) { truncated = true; text = '"[unserializable]"'; }
-    return { text: text === undefined ? 'null' : text, truncated };
-  }
-
-  // ---------- always-on capture — console.* + fetch/XHR ring buffers ----------
-  // Best-effort patch of the PAGE realm (unsafeWindow when available): sandbox-
-  // realm wrappers never see page-realm calls. Firefox Xray may reject function
-  // patching — everything is try/catch-wrapped; worst case capture is silent.
-  const consoleRing = [];   // {level, text, ts, stack?}
-  const netRing = [];       // {method, url, status, durationMs, ts, error?}
-  function ringPush(ring, rec) {
-    ring.push(rec);
-    if (ring.length > CAPTURE_MAX) ring.splice(0, ring.length - CAPTURE_MAX);
-  }
-  function captureRealm() {
-    try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; }
-    catch (e) { return window; }
-  }
-  function fmtCaptureArg(v) {
-    try {
-      if (typeof v === 'string') return v;
-      if (v instanceof Error) return v.stack || String(v);
-      const t = jsonSafe(v).text;
-      return t.length > 400 ? t.slice(0, 400) + '…' : t;
-    } catch (e) { return String(v); }
-  }
-  (function installCapture() {
-    const realm = captureRealm();
-    // console.*（跳过我们自己的 [pi.wp] 调试行，避免 debug 模式污染环形缓冲）
-    try {
-      for (const level of ['debug', 'log', 'info', 'warn', 'error']) {
-        const original = realm.console && typeof realm.console[level] === 'function' ? realm.console[level] : null;
-        if (!original) continue;
-        realm.console[level] = function (...args) {
-          try {
-            const first = typeof args[0] === 'string' ? args[0] : '';
-            if (!first.startsWith('[pi.wp]')) {
-              const rec = { level, text: args.map(fmtCaptureArg).join(' '), ts: Date.now() };
-              if (level === 'error' && args[0] instanceof Error && args[0].stack) rec.stack = String(args[0].stack).slice(0, 2000);
-              ringPush(consoleRing, rec);
-            }
-          } catch (e) { /* capture must never break the page */ }
-          return original.apply(this === undefined ? realm.console : this, args);
-        };
-      }
-    } catch (e) { /* console not patchable */ }
-    try {
-      realm.addEventListener('error', (ev) => {
-        try {
-          const err = ev && ev.error;
-          ringPush(consoleRing, {
-            level: 'error',
-            text: (ev && ev.message) || 'window.onerror',
-            stack: err && err.stack ? String(err.stack).slice(0, 2000) : undefined,
-            ts: Date.now(),
-          });
-        } catch (e) { /* ignore */ }
-      });
-      realm.addEventListener('unhandledrejection', (ev) => {
-        try {
-          const reason = ev && ev.reason;
-          ringPush(consoleRing, {
-            level: 'error',
-            text: 'unhandledrejection: ' + fmtCaptureArg(reason),
-            stack: reason && reason.stack ? String(reason.stack).slice(0, 2000) : undefined,
-            ts: Date.now(),
-          });
-        } catch (e) { /* ignore */ }
-      });
-    } catch (e) { /* realm listeners unavailable */ }
-    try {
-      const origFetch = realm.fetch;
-      if (typeof origFetch === 'function') {
-        realm.fetch = function (...args) {
-          const started = Date.now();
-          const req = args[0];
-          const url = typeof req === 'string' ? req : (req && req.url) || '';
-          const method = (args[1] && args[1].method) || (req && req.method) || 'GET';
-          const done = (res, error) => {
-            try {
-              const rec = { method: String(method), url: String(url).slice(0, 500), ts: Date.now() };
-              if (error) { rec.status = 0; rec.error = String((error && error.message) || error).slice(0, 200); }
-              else rec.status = res && res.status;
-              rec.durationMs = Date.now() - started;
-              ringPush(netRing, rec);
-            } catch (e) { /* ignore */ }
-          };
-          return origFetch.apply(this, args).then(
-            (res) => { done(res); return res; },
-            (err) => { done(null, err); throw err; },
-          );
-        };
-      }
-    } catch (e) { /* fetch not patchable */ }
-    try {
-      const XHR = realm.XMLHttpRequest;
-      if (XHR && XHR.prototype) {
-        const origOpen = XHR.prototype.open;
-        const origSend = XHR.prototype.send;
-        if (typeof origOpen === 'function' && typeof origSend === 'function') {
-          XHR.prototype.open = function (method, url) {
-            try { this.__wpNet = { method: String(method || 'GET'), url: String(url || '').slice(0, 500), started: 0 }; }
-            catch (e) { /* Xray may refuse expando writes */ }
-            return origOpen.apply(this, arguments);
-          };
-          XHR.prototype.send = function () {
-            let meta = null;
-            try { meta = this.__wpNet || null; } catch (e) { /* Xray */ }
-            if (!meta) meta = { method: 'GET', url: '', started: Date.now() };
-            meta.started = Date.now();
-            try {
-              this.addEventListener('loadend', () => {
-                try {
-                  ringPush(netRing, {
-                    method: meta.method, url: meta.url, status: this.status,
-                    durationMs: Date.now() - (meta.started || Date.now()), ts: Date.now(),
-                  });
-                } catch (e) { /* ignore */ }
-              });
-            } catch (e) { /* ignore */ }
-            return origSend.apply(this, arguments);
-          };
-        }
-      }
-    } catch (e) { /* XHR not patchable */ }
-  })();
-
-  // ---------- tool handlers ----------
-  function toolPageInfo() {
-    return {
-      url: location.href,
-      title: document.title,
-      readyState: document.readyState,
-      viewport: { w: window.innerWidth, h: window.innerHeight },
-      dpr: window.devicePixelRatio,
-      scroll: { x: window.scrollX, y: window.scrollY },
-      ua: navigator.userAgent,
-      language: navigator.language,
-      cookiesEnabled: navigator.cookieEnabled,
-      ts: Date.now(),
-    };
-  }
-
-  function elToolInfo(el, styleProps) {
-    const r = el.getBoundingClientRect();
-    const cs = getComputedStyle(el);
-    const style = {};
-    for (const p of styleProps) style[p] = cs.getPropertyValue(p);
-    const attributes = {};
-    for (const a of el.attributes) attributes[a.name] = a.value;
-    return {
-      selector: cssPath(el),
-      xpath: xPath(el),
-      tagName: el.tagName.toLowerCase(),
-      id: el.id || undefined,
-      classes: Array.from(el.classList || []),
-      attributes,
-      textPreview: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 200),
-      rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
-      visible: !!(r.width || r.height) && cs.visibility !== 'hidden' && cs.display !== 'none',
-      style,
-    };
-  }
-
-  function toolDomQuery(params) {
-    const selector = typeof params.selector === 'string' ? params.selector : '';
-    if (!selector) throw new Error('dom.query: params.selector (CSS) is required');
-    const maxCount = Math.min(50, Math.max(1, Number(params.maxCount) || 10));
-    const styleProps = Array.isArray(params.styleProps) && params.styleProps.length
-      ? params.styleProps.filter((s) => typeof s === 'string').slice(0, 30)
-      : DEFAULT_STYLE_PROPS;
-    const all = document.querySelectorAll(selector);   // invalid selector throws → surfaced as the response error
-    const nodes = Array.from(all).slice(0, maxCount);
-    return {
-      selector,
-      matched: all.length,
-      returned: nodes.length,
-      elements: nodes.map((el) => elToolInfo(el, styleProps)),
-    };
-  }
-
-  // Pruned outerHTML: depth-capped clone so full-page dumps stay bounded.
-  function pruneClone(el, depth) {
-    const clone = el.cloneNode(false);
-    if (depth > 1) {
-      for (const child of Array.from(el.childNodes)) {
-        if (child.nodeType === 3) {
-          const t = (child.textContent || '').trim();
-          if (t) clone.appendChild(document.createTextNode(t.slice(0, 80) + ' '));
-        } else if (child.nodeType === 1) {
-          clone.appendChild(pruneClone(child, depth - 1));
-        }
-      }
-    } else if (el.childNodes && el.childNodes.length) {
-      clone.appendChild(document.createTextNode('…'));
-    }
-    return clone;
-  }
-
-  function toolDomHtml(params) {
-    const selector = typeof params.selector === 'string' ? params.selector : 'body';
-    const maxLength = Math.min(200000, Math.max(200, Number(params.maxLength) || 20000));
-    const maxDepth = Math.max(1, Math.min(20, Number(params.maxDepth) || 8));
-    const target = document.querySelector(selector);
-    if (!target) throw new Error('dom.html: no element matches ' + selector);
-    let html = pruneClone(target, maxDepth).outerHTML;
-    let truncated = false;
-    if (html.length > maxLength) { html = html.slice(0, maxLength); truncated = true; }
-    return { selector, maxDepth, length: html.length, truncated, html };
-  }
-
-  function toolConsoleLogs(params) {
-    const lastN = Math.min(500, Math.max(1, Number(params.lastN) || 50));
-    const sinceTs = typeof params.sinceTs === 'number' ? params.sinceTs : 0;
-    const level = typeof params.level === 'string' ? params.level : null;
-    const all = consoleRing.filter((e) => e.ts >= sinceTs && (!level || e.level === level));
-    return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
-  }
-
-  function toolNetworkLog(params) {
-    const lastN = Math.min(500, Math.max(1, Number(params.lastN) || 50));
-    const filter = typeof params.urlFilter === 'string' ? params.urlFilter.toLowerCase() : null;
-    const all = netRing.filter((e) => !filter || e.url.toLowerCase().includes(filter));
-    return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
-  }
-
-  // Component chains live in the page realm — re-resolve through unsafeWindow
-  // when the sandbox element hides the expandos (same fallback as sourceInfo).
-  function chainTargetEl(el) {
-    try {
-      const uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : null;
-      if (!uw || !uw.document) return el;
-      const pageEl = uw.document.querySelector(cssPath(el));
-      return pageEl || el;
-    } catch (e) { return el; }
-  }
-  function reactChain(el, maxDepth, withProps) {
-    const chain = [];
-    try {
-      for (const k of Object.getOwnPropertyNames(el)) {
-        if (!k.startsWith('__reactFiber$') && !k.startsWith('__reactInternalInstance$')) continue;
-        let f = el[k], guard = 0;
-        while (f && guard++ < 200 && chain.length < maxDepth) {
-          const t = f.type;
-          if (t && (t.name || t.displayName)) {
-            const src = f._debugSource;
-            const level = { component: t.displayName || t.name || '' };
-            if (src && src.fileName) { level.file = src.fileName; level.line = src.lineNumber || 0; }
-            if (withProps && f.memoizedProps !== undefined) level.props = f.memoizedProps;
-            chain.push(level);
-          }
-          f = f.return;
-        }
-        if (chain.length) break;
-      }
-    } catch (e) { /* fiber unwrapping is best-effort */ }
-    return chain;
-  }
-  function vueChain(el, maxDepth, withProps) {
-    const chain = [];
-    try {
-      let vm = el.__vueParentComponent || el.__vue__ || null, guard = 0;
-      while (vm && guard++ < 200 && chain.length < maxDepth) {
-        const opts = vm.$options || {};
-        const name = (vm.type && (vm.type.name || vm.type.__name)) || opts.name || opts.__name || '';
-        if (opts.__file || name) {
-          const level = { component: name };
-          if (opts.__file) level.file = opts.__file;
-          if (withProps && vm.$props !== undefined) level.props = vm.$props;
-          chain.push(level);
-        }
-        vm = vm.$parent || null;
-      }
-    } catch (e) { /* vm walking is best-effort */ }
-    return chain;
-  }
-  function toolFrameworkInspect(params) {
-    const selector = typeof params.selector === 'string' ? params.selector : '';
-    if (!selector) throw new Error('framework.inspect: params.selector (CSS) is required');
-    const el = document.querySelector(selector);
-    if (!el) throw new Error('framework.inspect: no element matches ' + selector);
-    const maxDepth = Math.max(1, Math.min(10, Number(params.maxDepth) || 5));
-    const withProps = params.props !== undefined ? !!params.props : gm.get(GM_FPROPS, false) === true;
-    const target = chainTargetEl(el);
-    let chain = reactChain(target, maxDepth, withProps);
-    let framework = chain.length ? 'react' : null;
-    if (!chain.length) {
-      chain = vueChain(target, maxDepth, withProps);
-      framework = chain.length ? 'vue' : null;
-    }
-    return { selector, framework, withProps, depth: chain.length, chain };
-  }
-
-  const PAGE_TOOLS = {
-    [PAGE_OPS.INFO]: toolPageInfo,
-    [PAGE_OPS.DOM_QUERY]: toolDomQuery,
-    [PAGE_OPS.DOM_HTML]: toolDomHtml,
-    [PAGE_OPS.CONSOLE_LOGS]: toolConsoleLogs,
-    [PAGE_OPS.NETWORK_LOG]: toolNetworkLog,
-    [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect,
-  };
-
-  // page.request{tool:{op,params}} → run the fixed op → exactly one page.response.
-  function handlePageToolRequest(f) {
-    const tool = f.tool && typeof f.tool === 'object' && !Array.isArray(f.tool) ? f.tool : null;
-    if (!tool || typeof tool.op !== 'string') {
-      sendFrame(framePageResponse(f.id, false, 'invalid_tool: missing tool.op'));
-      return;
-    }
-    const handler = PAGE_TOOLS[tool.op];
-    if (!handler) {
-      sendFrame(framePageResponse(f.id, false, 'unknown_op: ' + tool.op + ' (available: ' + Object.keys(PAGE_TOOLS).join(', ') + ')'));
-      return;
-    }
-    let text;
-    try {
-      const params = tool.params && typeof tool.params === 'object' && !Array.isArray(tool.params) ? tool.params : {};
-      text = jsonSafe(handler(params)).text;
-    } catch (e) {
-      sendFrame(framePageResponse(f.id, false, e && e.message ? String(e.message) : String(e)));
-      return;
-    }
-    if (text.length > RESULT_MAX_CHARS) { sendFrame(framePageResponse(f.id, false, 'result_too_large')); return; }
-    sendFrame(framePageResponse(f.id, true, text));
-  }
-
-  elOk.addEventListener('click', () => { if (groupCard) submitGroup(); else submit(); });
-  elCancel.addEventListener('click', () => { if (groupCard) closeGroupCard(); else unpin(); });
-
-  // ---------- freeze UI / hotkeys ----------
-  function updateFreezeUI() {
-    const fz = $('fz');
-    if (!fz) return;
-    fz.classList.toggle('on', frozen);
-    fz.title = frozen ? '冻结：页面交互已屏蔽，浮层不会因点击/hover 关闭（点击此提示可切换）' : '实时：hover 可触发页面（展开子菜单等）（点击此提示可切换）';
-  }
-  function toggleFreeze() {
-    frozen = !frozen;
-    updateFreezeUI();
-    toast(frozen ? '冻结：页面交互已屏蔽' : '实时：hover 可触发页面');
-  }
-  window.addEventListener('keydown', (e) => {
-    const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
-    const isList = e.code === 'KeyL' && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
-    if (isList) { e.preventDefault(); e.stopPropagation(); togglePanel(); return; }
-    if (isHot) {
-      e.preventDefault(); e.stopPropagation();
-      if (pickMode) { if (pinned) unpin(); else setActive(false); }
-      else setActive(true);
-      return;
-    }
-    if (pickMode && !pinned && e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-      e.preventDefault(); e.stopPropagation();
-      toggleFreeze();
-    }
-  }, true);
-
-  // 挂 document capture（保持 v1.10 原样：卡片未出现时键盘行为与旧版一致）
-  document.addEventListener('keydown', (e) => {
-    // Esc 收起「更多」下拉（在 target 下拉/面板之前处理）
-    if (sendMenuOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault(); e.stopPropagation(); closeSendMenu(); return;
-    }
-    // Esc 优先收起 target 下拉（capture 阶段拦截，避免顺带把整个面板也关了）
-    if (comboOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault(); e.stopPropagation(); closeDrop(); return;
-    }
-    if (panelOpen && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault(); closePanel(); return;
-    }
-    if (!pickMode) return;
-    if (groupCard) {
-      if (e.isComposing || e.keyCode === 229) return;
-      const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
-      if (e.key === 'Enter' && firstTarget === elTxt && !e.shiftKey) {
-        e.preventDefault(); submitGroup();
-      } else if (e.key === 'Escape') {
-        closeGroupCard();
-      }
-      return;
-    }
-    if (pinned) {
-      if (e.isComposing || e.keyCode === 229) return;
-      const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
-      if (e.key === 'Enter' && firstTarget === elTxt && !e.shiftKey) {
-        e.preventDefault(); submit();
-      } else if (e.key === 'Escape') {
-        unpin();
-      }
-      return;
-    }
-    if (e.key === 'Backspace' && groupEls.length && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault(); e.stopPropagation();
-      clearPendingGroup();                 // ⌫：清空待处理组合（工具栏 chip 同款）
-      return;
-    }
-    if (e.key === 'Enter' && e.shiftKey && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault(); e.stopPropagation();
-      toggleGroup(currentEl());          // ⇧Enter：当前高亮元素加入/移出组合
-      return;
-    }
-    switch (e.key) {
-      case ']': case 'ArrowDown': e.preventDefault(); shiftLayer(1); break;
-      case '[': case 'ArrowUp': e.preventDefault(); shiftLayer(-1); break;
-      case 'Enter': case ' ':
+    ctx.toggleFreeze = toggleFreeze;
+    window.addEventListener("keydown", (e) => {
+      const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
+      const isList = e.code === "KeyL" && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
+      if (isList) {
         e.preventDefault();
-        if (groupEls.length) openGroupCard(); else pin();   // 有待处理组合时 Enter = 组备注
-        break;
-      case 'Escape': e.preventDefault(); setActive(false); break;
-      default:
-        if (/^[1-9]$/.test(e.key)) { e.preventDefault(); idx = Math.min(stack.length - 1, +e.key - 1); refresh(); }
+        e.stopPropagation();
+        ctx.togglePanel();
+        return;
+      }
+      if (isHot) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (ctx.pickState.pickMode) {
+          if (ctx.pickState.pinned) ctx.unpin();
+          else ctx.setActive(false);
+        } else ctx.setActive(true);
+        return;
+      }
+      if (ctx.pickState.pickMode && !ctx.pickState.pinned && e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFreeze();
+      }
+    }, true);
+    document.addEventListener("keydown", (e) => {
+      const ps = ctx.pickState;
+      if (ctx.sendMenuOpen() && e.key === "Escape" && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.closeSendMenu();
+        return;
+      }
+      if (ctx.comboOpen() && e.key === "Escape" && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.closeDrop();
+        return;
+      }
+      if (ctx.getPanelOpen() && e.key === "Escape" && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        ctx.closePanel();
+        return;
+      }
+      if (!ps.pickMode) return;
+      if (ps.groupCard) {
+        if (e.isComposing || e.keyCode === 229) return;
+        const firstTarget = e.composedPath && e.composedPath()[0] || e.target;
+        if (e.key === "Enter" && firstTarget === elTxt && !e.shiftKey) {
+          e.preventDefault();
+          ctx.submitGroup();
+        } else if (e.key === "Escape") {
+          ctx.closeGroupCard();
+        }
+        return;
+      }
+      if (ps.pinned) {
+        if (e.isComposing || e.keyCode === 229) return;
+        const firstTarget = e.composedPath && e.composedPath()[0] || e.target;
+        if (e.key === "Enter" && firstTarget === elTxt && !e.shiftKey) {
+          e.preventDefault();
+          ctx.submit();
+        } else if (e.key === "Escape") {
+          ctx.unpin();
+        }
+        return;
+      }
+      if (e.key === "Backspace" && ps.groupCount && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.clearPendingGroup();
+        return;
+      }
+      if (e.key === "Enter" && e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.toggleGroup(ps.currentEl());
+        return;
+      }
+      switch (e.key) {
+        case "]":
+        case "ArrowDown":
+          e.preventDefault();
+          ctx.shiftLayer(1);
+          break;
+        case "[":
+        case "ArrowUp":
+          e.preventDefault();
+          ctx.shiftLayer(-1);
+          break;
+        case "Enter":
+        case " ":
+          e.preventDefault();
+          if (ps.groupCount) ctx.openGroupCard();
+          else ctx.pin();
+          break;
+        case "Escape":
+          e.preventDefault();
+          ctx.setActive(false);
+          break;
+        default:
+          if (/^[1-9]$/.test(e.key)) {
+            e.preventDefault();
+            ps.idx = Math.min(ps.stack.length - 1, +e.key - 1);
+            ctx.refresh();
+          }
+      }
+    }, true);
+    function overlayActive() {
+      return ctx.pickState.pinned != null || ctx.pickState.groupCard || ctx.getPanelOpen() || elSettings.style.display === "block";
     }
-  }, true);
-  // Radix 等模态弹窗的 FocusScope 会在 document 上监听 focusin（capture），发现焦点
-  // 落到弹窗容器之外就把焦点拉回去——host 挂在 documentElement 下，天然在 trap 外，
-  // 备注卡片/面板的输入框一聚焦就被抢走。window capture 先于 document 上的页面监听
-  // 执行，这里把指向自家 shadow root 的 focusin 拦下，弹窗就看不见这次聚焦。
-  // 仅在自家浮层（卡片/面板/设置）出现时启用新式拦截——按约定，浮层不在时
-  // 键盘/鼠标行为与 v1.10 完全一致。
-  function overlayActive() {
-    return pinned != null || groupCard || panelOpen || elSettings.style.display === 'block';
+    window.addEventListener("focusin", (e) => {
+      if (!overlayActive()) return;
+      const path = e.composedPath ? e.composedPath() : [];
+      if (path.indexOf(root) < 0) return;
+      e.stopPropagation();
+      const t = path[0];
+      if (!t || !t.dispatchEvent) return;
+      try {
+        t.dispatchEvent(new FocusEvent("focusin", {
+          bubbles: true,
+          composed: false,
+          cancelable: false
+        }));
+      } catch (err) {
+      }
+    }, true);
+    function isolatePress(e) {
+      if (!overlayActive()) return;
+      const path = e.composedPath ? e.composedPath() : [];
+      if (path.indexOf(root) < 0) return;
+      e.stopPropagation();
+      const t = path[0];
+      if (!t || !t.dispatchEvent) return;
+      const base = {
+        bubbles: true,
+        composed: false,
+        cancelable: true,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        screenX: e.screenX,
+        screenY: e.screenY,
+        button: e.button,
+        buttons: e.buttons,
+        detail: e.detail
+      };
+      try {
+        t.dispatchEvent(new PointerEvent(e.type, Object.assign(base, {
+          pointerId: e.pointerId,
+          pointerType: e.pointerType,
+          isPrimary: e.isPrimary,
+          pressure: e.pressure
+        })));
+      } catch (err) {
+        try {
+          t.dispatchEvent(new MouseEvent(e.type, base));
+        } catch (err2) {
+        }
+      }
+    }
+    ["pointerdown", "mousedown"].forEach((t) => window.addEventListener(t, isolatePress, true));
   }
-  window.addEventListener('focusin', (e) => {
-    if (!overlayActive()) return;
-    const path = e.composedPath ? e.composedPath() : [];
-    if (path.indexOf(root) < 0) return;
-    e.stopPropagation();
-    // stopPropagation 在 window capture 会连「向 shadow 内部 descent」一起掐掉，
-    // 自家监听（如 target 输入框的 focus → 展开下拉）就收不到了——往真实目标
-    // 补发一个 composed:false 克隆，事件只在 shadow 内传播，页面侧仍然不可见。
-    const t = path[0];
-    if (!t || !t.dispatchEvent) return;
-    try {
-      t.dispatchEvent(new FocusEvent('focusin', {
-        bubbles: true, composed: false, cancelable: false,
-      }));
-    } catch (err) { /* shadow 内监听收不到这次的克隆，主流程不受影响 */ }
-  }, true);
 
-  // Radix DismissableLayer 一类「点外面即关闭」的层在 document 上监听
-  // pointerdown/mousedown（capture）。shadow 里发出的事件离开 shadow 边界时
-  // target 被重定向成 host，永远不在它的层内 → 点备注卡片就被当成「点击弹窗
-  // 外部」，页面弹窗当场关闭并把焦点还给自己的 dismiss 按钮，看起来像点击
-  // 穿透了浮层。这里在 window capture 末端把指向自家 UI 的按下事件拦下并
-  // 阻止传播，再在真实目标上补发一个 composed:false 的克隆：事件只在 shadow
-  // 内部传播（自家处理器照常工作），页面侧完全不可见。stopPropagation 不
-  // 取消默认行为，textarea 的点击聚焦照旧；同节点的其它 window 监听（fab
-  // 拖动、combo 外点收起）不受影响。
-  function isolatePress(e) {
-    if (!overlayActive()) return;
-    const path = e.composedPath ? e.composedPath() : [];
-    if (path.indexOf(root) < 0) return;
-    e.stopPropagation();
-    const t = path[0];
-    if (!t || !t.dispatchEvent) return;
-    const base = {
-      bubbles: true, composed: false, cancelable: true,
-      clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
-      button: e.button, buttons: e.buttons, detail: e.detail,
+  // web-picker.src/main.js
+  if (!window.__PI_WEBPICKER__) {
+    window.__PI_WEBPICKER__ = true;
+    installCapture();
+    const ui = buildUI();
+    const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
+    const pageTools = createPageTools({ gm, consoleRing, netRing });
+    ctx.pageTools = pageTools;
+    const conn = createBrokerConn({
+      gm,
+      debugLog,
+      toast: ui.toast,
+      onState: (s) => {
+        ui.els.elDot.className = s === "on" ? "on" : s === "connecting" ? "connecting" : "";
+        if (ctx.renderConnPill) ctx.renderConnPill(s);
+        if (s !== "on" && ctx.renderTargetCombo) ctx.renderTargetCombo();
+      },
+      onWelcome: () => {
+        if (ctx.refreshTargets) void ctx.refreshTargets();
+      },
+      onPageRequest: (f) => {
+        pageTools.handlePageToolRequest(f, (id, ok, payload) => {
+          conn.sendFrame(framePageResponse(id, ok, payload));
+        });
+      }
+    });
+    ctx.conn = conn;
+    initPanel(ctx);
+    initPick(ctx);
+    initCombo(ctx);
+    initSend(ctx);
+    initSettings(ctx);
+    initFab(ctx);
+    initHotkeys(ctx);
+    ctx.refreshCount();
+    ctx.updateGroupUI();
+    ctx.renderTargetCombo();
+    debugLog("ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ⌫ 清组 · " + location.host);
+    window.__PI_WP_API__ = {
+      start: () => {
+        ctx.setActive(true);
+        return true;
+      },
+      stop: () => {
+        ctx.setActive(false);
+        return true;
+      },
+      panel: ctx.togglePanel,
+      connect: () => conn.connect(),
+      disconnect: () => conn.disconnect(),
+      settings: ctx.openSettings,
+      send: (prompt, target) => conn.submitToAgent(prompt, target),
+      copyPrompt: ctx.copyHandoffPrompt,
+      targets: ctx.getTargets,
+      refreshTargets: () => ctx.refreshTargets(),
+      snapshot: () => loadBatch(),
+      tools: () => Object.keys(pageTools.PAGE_TOOLS),
+      consoleLog: () => consoleRing.slice(),
+      netLog: () => netRing.slice(),
+      frameworkProps: () => gm.get("wp.frameworkProps", false) === true,
+      setFrameworkProps: (on) => {
+        gm.set("wp.frameworkProps", !!on);
+        ui.els.elSProps.checked = !!on;
+        return !!on;
+      },
+      setDebug: (on) => {
+        gm.set(GM_DEBUG, !!on);
+        return !!on;
+      },
+      reinject: ui.reinjectTrigger
     };
     try {
-      t.dispatchEvent(new PointerEvent(e.type, Object.assign(base, {
-        pointerId: e.pointerId, pointerType: e.pointerType,
-        isPrimary: e.isPrimary, pressure: e.pressure,
-      })));
-    } catch (err) {
-      try { t.dispatchEvent(new MouseEvent(e.type, base)); } catch (err2) { /* keep the press local-only */ }
+      GM_registerMenuCommand("连接 broker", () => conn.connect());
+      GM_registerMenuCommand("断开 broker", () => conn.disconnect());
+      GM_registerMenuCommand("连接设置…", ctx.openSettings);
+      GM_registerMenuCommand("打开标注面板 (⇧⌥L)", ctx.togglePanel);
+      GM_registerMenuCommand("开始拾取 (⇧⌥P)", () => ctx.setActive(true));
+      GM_registerMenuCommand("重新注入 trigger", () => {
+        ui.toast(ui.reinjectTrigger() ? "trigger 已重新注入" : "trigger 仍在页面上");
+      });
+    } catch (e) {
     }
   }
-  ['pointerdown', 'mousedown'].forEach((t) => window.addEventListener(t, isolatePress, true));
-
-  window.addEventListener('scroll', () => { if (pickMode) { refresh(); renderGroupMarks(); } }, true);
-  window.addEventListener('resize', () => { if (pickMode) { refresh(); renderGroupMarks(); } }, true);
-
-  refreshCount();
-  updateGroupUI();
-  renderTargetCombo();
-  debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ⌫ 清组 · ' + location.host);
-
-  // ---------- programmatic API (DevTools console) ----------
-  window.__PI_WP_API__ = {
-    start: () => { setActive(true); return true; },
-    stop: () => { setActive(false); return true; },
-    panel: togglePanel,
-    connect: connectBroker,
-    disconnect: disconnectBroker,
-    settings: openSettings,
-    send: (prompt, target) => submitToAgent(prompt, target),
-    copyPrompt: copyHandoffPrompt,
-    targets: () => targets.slice(),
-    refreshTargets: refreshTargets,
-    snapshot: loadBatch,
-    tools: () => Object.keys(PAGE_TOOLS),
-    consoleLog: () => consoleRing.slice(),
-    netLog: () => netRing.slice(),
-    frameworkProps: () => gm.get(GM_FPROPS, false) === true,
-    setFrameworkProps: (on) => { gm.set(GM_FPROPS, !!on); elSProps.checked = !!on; return !!on; },
-    setDebug: (on) => { gm.set(GM_DEBUG, !!on); return !!on; },
-    reinject: reinjectTrigger,
-  };
-
-  // ---------- Tampermonkey menu ----------
-  try {
-    GM_registerMenuCommand('连接 broker', () => connectBroker());
-    GM_registerMenuCommand('断开 broker', () => disconnectBroker());
-    GM_registerMenuCommand('连接设置…', openSettings);
-    GM_registerMenuCommand('打开标注面板 (⇧⌥L)', togglePanel);
-    GM_registerMenuCommand('开始拾取 (⇧⌥P)', () => setActive(true));
-    GM_registerMenuCommand('重新注入 trigger', () => {
-      toast(reinjectTrigger() ? 'trigger 已重新注入' : 'trigger 仍在页面上');
-    });
-  } catch (e) { /* menu registration unavailable in this manager */ }
 })();
