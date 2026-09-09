@@ -20,13 +20,33 @@ page side:
   bash but no xfer can then receive the same handoff: paste the prompt and
   they can call `node broker-main.ts page-tool <target> <op>` for follow-up
   page queries themselves.
-- **Page tools (v1.6)** — agent tool calls arrive as `page.request{tool:{op, params}}`
-  frames and run against this page: `page.info` · `dom.query` · `dom.html` ·
-  `console.logs` · `network.log` · `framework.inspect` (fixed read-only op
-  table — no free-form eval, no human modal). The result goes back as
+- **Page tools (v1.6 + v1.12 write ops)** — agent tool calls arrive as
+  `page.request{tool:{op, params}}` frames and run against this page:
+  `page.info` · `dom.query` · `dom.html` · `console.logs` · `network.log` ·
+  `framework.inspect` · `page.wait` (fixed read ops — no free-form eval, no
+  human modal), plus gated write ops `dom.click` · `dom.setValue` (see
+  auto-link/authorization below). The result goes back as
   `page.response{ok:true, text:<JSON>}`. Console and network captures are
   always-on ring buffers (200 entries), so the agent sees pre-request
   history too. The v1.2 ask modal was removed.
+- **Auto-link (v1.12)** — the first MANUAL successful connect authorizes the
+  origin (`wp.autoLink.<origin>` in GM storage): from then on reloads (HMR
+  full refresh, broker restart) reconnect silently with exponential backoff
+  (1s/4s/16s→60s). Revoke per origin via the settings checkbox 「本域名自动连接
+  broker」 or the GM menu 「撤销本页自动连接」; a manual disconnect only pauses
+  auto-link for the current page load. A companion per-origin checkbox
+  「允许 agent 操作本页」 (`wp.writeOps.<origin>`) enables the write ops —
+  `dom.click` (pointer/mouse sequence + native click), `dom.setValue`
+  (native setter + input/change so React controlled inputs update) and the
+  read `page.wait`. Write ops without authorization answer
+  `page.response{ok:false, error:"denied_op: ..."}`.
+- **Source & build** — since v1.12 the userscript is built from
+  `web-picker.src/` (esbuild, `npm run build` in this directory); the built
+  `web-picker.user.js` is committed so the raw-URL install flow is unchanged.
+  Protocol constants come from the shared `wire.ts` (also imported by
+  `broker-main.ts`), so the two ends cannot drift. The hello tab id is
+  persisted per page (`pi.wp.tabId` in sessionStorage) so the broker routes
+  follow-up `page.request`s back to the SAME tab across reloads.
 
 Wire protocol: **v0, localhost-trust (no token)**. Every frame carries
 `{v, type}`; every request gets exactly one reply. The userscript builds all
@@ -120,10 +140,13 @@ oracle is needed.
 | Port 4719 occupied by another program | The daemon falls back to an ephemeral port and warns: the start toast / `/xfer broker status` / `broker.json` show the real port — set that URL in 连接设置 (the failure toast links there). For a stable address either free the port or pin a custom one once and for all: `/xfer broker start --port N`（0 = 临时端口）. `pid` alive in broker.pid means it's our own broker → "already running", no fallback — and the pid (not the port) decides, so a live broker is never duplicated no matter what port you pass. |
 | Dropdown shows （无活跃 local session） | No listening session: targets come from `~/.pi/xfer/*.sock`. Start a pi session with xfer loaded (its `.sock` appears), then ⟳. Not connected at all → the dropdown shows （未连接 broker） instead. |
 | https page won't connect | ws to `127.0.0.1` is loopback-exempt from mixed-content blocking in Chromium, and Tampermonkey's `@connect 127.0.0.1` covers the request — https pages normally work. If a page still refuses, trial on a non-https page or double-check the URL is exactly `ws://127.0.0.1:4719` (not `wss://`, not `http://`). |
-| After a broker restart the dot stays grey | **Reconnect is manual only** — the userscript never auto-reconnects. Click the status row / Tampermonkey menu → 连接, or re-save 连接设置. |
+| After a broker restart the dot stays grey | Origins linked once reconnect automatically (v1.12 auto-link, exponential backoff). A fresh origin stays manual: click the status row / Tampermonkey menu → 连接, or re-save 连接设置 — one success authorizes the origin. If it never reconnects, auto-link may be revoked: check 连接设置 → 「本域名自动连接 broker」. |
 | Fab disappears after SPA navigation / HMR | The page wiped the script's shadow host. v1.8 auto re-attaches it (mutation observer); Tampermonkey menu → **重新注入 trigger** or `__PI_WP_API__.reinject()` forces it back manually. |
 
-> Page-tool handlers are strictly read-only and JSON-safe-capped (depth, string
-> and array limits) so a single call can never throw against the 1MB broker
-> frame budget. `framework.inspect` only attaches component props/state when
-> opted in via 连接设置 checkbox or `__PI_WP_API__.setFrameworkProps(true)`.
+> Page-tool handlers are JSON-safe-capped (depth, string and array limits) so
+> a single call can never throw against the 1MB broker frame budget.
+> `framework.inspect` only attaches component props/state when opted in via
+> 连接设置 checkbox or `__PI_WP_API__.setFrameworkProps(true)`. The write ops
+> (`dom.click` / `dom.setValue`) additionally refuse targets inside the
+> picker's own overlay host, and only run when the origin has page-write
+> authorization (连接设置 → 「允许 agent 操作本页」).

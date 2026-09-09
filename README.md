@@ -18,7 +18,13 @@ just install-pi    # auto symlink ~/.pi/agent/extensions/xfer → repo folder
 
 `web-picker.user.js` is the Tampermonkey page side of the broker: pick
 elements, annotate (solo or shift-group), send handoffs, and answer the
-agent's read-only page-tool queries (fixed op table — no eval, no modal).
+agent's page-tool queries (fixed op table — no eval, no modal). Since
+v1.12: per-origin auto-reconnect after the first manual link (exponential
+backoff), gated write ops (`dom.click` / `dom.setValue`, per-origin
+authorization), and reload-stable tab addressing so the broker routes
+follow-up queries back to the same tab. Source lives in `web-picker.src/`
+(`npm run build` rebuilds the committed `web-picker.user.js`; protocol
+constants come from the shared `wire.ts`).
 Install — open the raw URL in a browser with Tampermonkey enabled;
 the `.user.js` suffix triggers the install prompt automatically:
 
