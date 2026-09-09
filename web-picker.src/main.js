@@ -61,6 +61,9 @@ if (!window.__PI_WEBPICKER__) {
   ctx.refreshCount();
   ctx.updateGroupUI();
   ctx.renderTargetCombo();
+  // auto-link：本 origin 授权过（手动连上过一次）就静默重连——覆盖 HMR 整页
+  // 刷新、broker 重启两类断链；从未连接过的页面保持完全静默。
+  conn.maybeAutoConnect();
   debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ⌫ 清组 · ' + location.host);
 
   // ---------- programmatic API (DevTools console) ----------
@@ -90,6 +93,10 @@ if (!window.__PI_WEBPICKER__) {
     GM_registerMenuCommand('连接 broker', () => conn.connect());
     GM_registerMenuCommand('断开 broker', () => conn.disconnect());
     GM_registerMenuCommand('连接设置…', ctx.openSettings);
+    GM_registerMenuCommand('撤销本页自动连接', () => {
+      conn.revokeAutoLink();
+      ui.toast('已撤销 ' + location.origin + ' 的自动连接授权');
+    });
     GM_registerMenuCommand('打开标注面板 (⇧⌥L)', ctx.togglePanel);
     GM_registerMenuCommand('开始拾取 (⇧⌥P)', () => ctx.setActive(true));
     GM_registerMenuCommand('重新注入 trigger', () => {

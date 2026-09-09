@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.11.5
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.11.5：仅当卡片/面板/设置浮层出现时才启用 focusin 与按下事件拦截（弹窗下可聚焦写 note、不误关 Radix 弹窗）；浮层不在时键盘/鼠标行为完全回到 v1.10）
+// @version      1.12.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.12.0：broker 自动重连——手动连上过一次的域名在页面刷新/HMR 整页刷新后静默重连（指数退避），设置弹窗/GM 菜单可按域名撤销；PAGE_QUERY_RULE 改为允许 agent 修改后反向验证）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
