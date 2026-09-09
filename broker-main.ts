@@ -51,39 +51,47 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
+import { ERR, WIRE } from "./wire.ts";
 import { renderHandoffDoc, type HandoffPick } from "./handoff-doc.ts";
 import { listTargets } from "./targets.ts";
 import { encodeAgentName } from "./utils.ts";
 import { attachWsServer, type WsConnection } from "./ws-server.ts";
+import { WIRE_VERSION } from "./wire.ts";
 
 /** Broker software version (welcome + /status + broker.json). */
 export const VERSION = "0.1.0";
 /** Protocol revision spoken on the wire (v0, per the mock protocol oracle). */
-const PROTOCOL_VERSION = 0;
+const PROTOCOL_VERSION = WIRE_VERSION;
 
-// Wire frame types (v0) — one place; handlers reference these, never raw literals.
-const WIRE_HELLO = "hello";
-const WIRE_WELCOME = "welcome";
-const WIRE_ERROR = "error";
-const WIRE_ACK = "ack";
-const WIRE_ANNOTATION_SUBMIT = "annotation.submit";
-const WIRE_ANNOTATION_COMPOSE = "annotation.compose";
-const WIRE_TARGETS_LIST = "targets.list";
-const WIRE_TARGETS_RESULT = "targets.result";
-const WIRE_PAGE_REQUEST = "page.request";
-const WIRE_PAGE_RESPONSE = "page.response";
+// Wire frame types + error codes — defined once in wire.ts (the same module
+// web-picker.src/wire.js bundles into the userscript), aliased here so the
+// handler code keeps its historical names. xfer-notify is the unix-socket
+// notification to peer agents, not a WS frame; msg-id prefix + from-tag stay local.
+const {
+  KIND_HELLO: WIRE_HELLO,
+  KIND_WELCOME: WIRE_WELCOME,
+  KIND_ERROR: WIRE_ERROR,
+  KIND_ACK: WIRE_ACK,
+  KIND_SUBMIT: WIRE_ANNOTATION_SUBMIT,
+  KIND_COMPOSE: WIRE_ANNOTATION_COMPOSE,
+  KIND_TARGETS_LIST: WIRE_TARGETS_LIST,
+  KIND_TARGETS_RESULT: WIRE_TARGETS_RESULT,
+  KIND_PAGE_REQUEST: WIRE_PAGE_REQUEST,
+  KIND_PAGE_RESPONSE: WIRE_PAGE_RESPONSE,
+  NS_LOCAL: WIRE_NAMESPACE_LOCAL,
+} = WIRE;
 const WIRE_XFER_NOTIFY = "xfer-notify";
 const WIRE_MSG_ID_PREFIX = "m";
-const WIRE_NAMESPACE_LOCAL = "local";
 const WIRE_FROM_WEB_PICKER = "web-picker";
 
-// Error codes (mock protocol oracle).
-const ERR_AUTH_FAILED = "auth_failed";
-const ERR_INVALID_PAYLOAD = "invalid_payload";
-const ERR_BAD_TARGET = "bad_target";
-const ERR_TARGET_NOT_FOUND = "target_not_found";
-const ERR_DELIVERY_FAILED = "delivery_failed";
-const ERR_UNSUPPORTED_VERSION = "unsupported_version";
+const {
+  AUTH_FAILED: ERR_AUTH_FAILED,
+  INVALID_PAYLOAD: ERR_INVALID_PAYLOAD,
+  BAD_TARGET: ERR_BAD_TARGET,
+  TARGET_NOT_FOUND: ERR_TARGET_NOT_FOUND,
+  DELIVERY_FAILED: ERR_DELIVERY_FAILED,
+  UNSUPPORTED_VERSION: ERR_UNSUPPORTED_VERSION,
+} = ERR;
 
 const DEFAULT_PORT = 4719;
 const HOST = "127.0.0.1";

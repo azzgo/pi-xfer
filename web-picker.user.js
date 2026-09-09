@@ -180,16 +180,16 @@
     }
   }
 
-  // web-picker.src/wire.js
-  var PROTOCOL = {
-    V: 0,
-    // envelope version on every frame
+  // wire.ts
+  var WIRE_VERSION = 0;
+  var WIRE = {
+    V: WIRE_VERSION,
     KIND_HELLO: "hello",
     KIND_WELCOME: "welcome",
-    KIND_SUBMIT: "annotation.submit",
-    KIND_COMPOSE: "annotation.compose",
     KIND_ACK: "ack",
     KIND_ERROR: "error",
+    KIND_SUBMIT: "annotation.submit",
+    KIND_COMPOSE: "annotation.compose",
     KIND_TARGETS_LIST: "targets.list",
     KIND_TARGETS_RESULT: "targets.result",
     KIND_PAGE_REQUEST: "page.request",
@@ -203,7 +203,6 @@
     CONSOLE_LOGS: "console.logs",
     NETWORK_LOG: "network.log",
     FRAMEWORK_INSPECT: "framework.inspect",
-    // v1.12 — write ops, gated by per-origin page-write authorization
     DOM_CLICK: "dom.click",
     DOM_SET_VALUE: "dom.setValue",
     PAGE_WAIT: "page.wait"
@@ -222,10 +221,10 @@
 
   // web-picker.src/protocol.js
   function frame(type, extra) {
-    return Object.assign({ v: PROTOCOL.V, type }, extra);
+    return Object.assign({ v: WIRE.V, type }, extra);
   }
   function frameHello() {
-    return frame(PROTOCOL.KIND_HELLO, {
+    return frame(WIRE.KIND_HELLO, {
       client: { ua: "tampermonkey", tab: { id: pageTabId(), url: location.href, title: document.title } }
     });
   }
@@ -243,28 +242,28 @@
     }
   }
   function frameSubmit(id, prompt, targetName) {
-    return frame(PROTOCOL.KIND_SUBMIT, {
+    return frame(WIRE.KIND_SUBMIT, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      target: { namespace: PROTOCOL.NS_LOCAL, name: targetName }
+      target: { namespace: WIRE.NS_LOCAL, name: targetName }
     });
   }
   function frameCompose(id, prompt, targetName) {
-    return frame(PROTOCOL.KIND_COMPOSE, {
+    return frame(WIRE.KIND_COMPOSE, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      ...targetName ? { target: { namespace: PROTOCOL.NS_LOCAL, name: targetName } } : {}
+      ...targetName ? { target: { namespace: WIRE.NS_LOCAL, name: targetName } } : {}
     });
   }
   function frameTargetsList(id) {
-    return frame(PROTOCOL.KIND_TARGETS_LIST, { id });
+    return frame(WIRE.KIND_TARGETS_LIST, { id });
   }
   function framePageResponse(id, ok, payload) {
-    return frame(PROTOCOL.KIND_PAGE_RESPONSE, {
+    return frame(WIRE.KIND_PAGE_RESPONSE, {
       id,
       ok,
       ...ok ? { text: payload } : { error: payload }
@@ -918,7 +917,7 @@
           return;
         }
         if (!f || typeof f.type !== "string") return;
-        if (f.type === PROTOCOL.KIND_WELCOME) {
+        if (f.type === WIRE.KIND_WELCOME) {
           setState("on");
           if (!silent) gm2.set(autoLinkKey(location.origin), true);
           clearBackoff();
@@ -932,7 +931,7 @@
           if (deps.onWelcome) deps.onWelcome();
           return;
         }
-        if (f.type === PROTOCOL.KIND_ACK) {
+        if (f.type === WIRE.KIND_ACK) {
           const p = pending.get(f.id);
           if (p && p.kind === "submit") {
             pending.delete(f.id);
@@ -943,7 +942,7 @@
           }
           return;
         }
-        if (f.type === PROTOCOL.KIND_ERROR) {
+        if (f.type === WIRE.KIND_ERROR) {
           const p = pending.get(f.id);
           if (p) {
             pending.delete(f.id);
@@ -953,7 +952,7 @@
           }
           return;
         }
-        if (f.type === PROTOCOL.KIND_TARGETS_RESULT) {
+        if (f.type === WIRE.KIND_TARGETS_RESULT) {
           const p = pending.get(f.id);
           if (p && p.kind === "targets") {
             pending.delete(f.id);
@@ -961,7 +960,7 @@
           }
           return;
         }
-        if (f.type === PROTOCOL.KIND_PAGE_REQUEST) {
+        if (f.type === WIRE.KIND_PAGE_REQUEST) {
           debugLog2("page.request", f.id, f.tool && f.tool.op);
           onPageRequest(f);
           return;
