@@ -72,7 +72,10 @@ same shape; delivers by running the peer's `send` command template
 (`%msgfile`/stdin branch, exit-code result, fire-and-forget).
 
 Reply by `/xfer <original sender> <message>` — each xfer is an independent
-one-way message.
+one-way message. **Exception:** a handoff whose sender is `web-picker` comes
+from the browser userscript, not an agent — it has no xfer socket and can never
+be an `xfer_to` target. The only return channel is the broker page-tool CLI
+described in the doc's "Follow-up channel" section.
 
 ## Protocol
 

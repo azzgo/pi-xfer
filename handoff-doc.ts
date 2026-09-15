@@ -11,6 +11,7 @@
  * rendered on the members that carry it and stays absent on solo picks.
  */
 
+import { FROM_WEB_PICKER } from "./wire.js";
 /** `page` block of the `annotation.submit` payload. */
 export interface HandoffPageInfo {
   url: string;
@@ -235,6 +236,13 @@ export function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarge
   for (const pick of picks) lines.push(...pickSection(pick));
   if (record) lines.push(...recordSection(record));
   lines.push(...followUpSection(fromTarget, brokerCliPath), "");
-  lines.push("---", "", "from: web-picker", `handoff_id: ${msgId}`);
+  lines.push(
+    "---",
+    "",
+    // Identity note: the sender is never a replyable xfer peer — point the
+    // agent at the page-tool channel instead of an xfer_to that cannot succeed.
+    `from: ${FROM_WEB_PICKER} (browser userscript — not an agent, no reply socket; query the page via the Follow-up channel above)`,
+    `handoff_id: ${msgId}`,
+  );
   return lines.join("\n") + "\n";
 }

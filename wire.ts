@@ -69,3 +69,10 @@ export const ERR = {
   DELIVERY_FAILED: "delivery_failed",
   UNSUPPORTED_VERSION: "unsupported_version",
 } as const;
+
+/**
+ * `xfer-notify.from` value the broker stamps when the sender is the web picker.
+ * NOT an agent: no `~/.pi/xfer/web-picker.sock` exists and `xfer_to` must never
+ * target it — the only return channel is the broker page-tool CLI.
+ */
+export const FROM_WEB_PICKER = "web-picker";

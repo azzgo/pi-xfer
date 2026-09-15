@@ -85,7 +85,7 @@ A timeout or no_tabs exits 1 with an error on stderr — after a page reload wai
 
 ---
 
-from: web-picker
+from: web-picker (browser userscript — not an agent, no reply socket; query the page via the Follow-up channel above)
 handoff_id: m1
 `;
 
@@ -151,7 +151,7 @@ describe("renderHandoffDoc", () => {
 
   it("ends with the from/handoff_id footer", () => {
     const doc = renderHandoffDoc(input({ msgId: "kx9-abc123" }));
-    assert.equal(doc.endsWith("---\n\nfrom: web-picker\nhandoff_id: kx9-abc123\n"), true);
+    assert.equal(doc.endsWith("---\n\nfrom: web-picker (browser userscript — not an agent, no reply socket; query the page via the Follow-up channel above)\nhandoff_id: kx9-abc123\n"), true);
   });
 
   it("keeps the follow-up section at or under 10 lines (009 bloat criterion)", () => {

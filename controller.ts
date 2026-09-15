@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import * as fs from "node:fs";
 import type * as net from "node:net";
+import * as path from "node:path";
 import { BridgeManager, type BridgeContext } from "./bridge.js";
 import { XFER_DIR } from "./constants.js";
 import { createServer, listenServer } from "./server.js";
@@ -8,6 +9,7 @@ import type { InterpolationVars } from "./settings.js";
 import { XferState } from "./state.js";
 import type { XferNotifyMessage } from "./types.js";
 import { deriveName, endpointForName, metadataForName } from "./utils.js";
+import { FROM_WEB_PICKER } from "./wire.js";
 
 /** Host/port + server handle of a running bridge listener. */
 export interface BridgeListener {
@@ -50,14 +52,30 @@ export class XferController {
   private deliverInbound(msg: XferNotifyMessage): void {
     const { pi, state } = this;
     const isIdle = state.isRuntimeIdle();
+    const body =
+      `**Request**: ${msg.summary}\n\n` +
+      `**Doc**: \`${msg.file}\`\n\n` +
+      "Read the doc and handle the request.";
+    const content =
+      msg.from === FROM_WEB_PICKER
+        ? (
+            // Web-picker senders are not xfer peers: steer the agent to the
+            // page-tool pull channel instead of a doomed xfer_to reply.
+            `📨 [Xfer from **${FROM_WEB_PICKER}** (browser userscript)]\n\n` +
+            body +
+            `\n\nThe sender is the Web Picker userscript, NOT an agent: it has no xfer socket and cannot answer. ` +
+            `Do NOT call xfer_to / xfer_peer_to with target "${FROM_WEB_PICKER}" — it fails with "peer not found".\n\n` +
+            `To query the page back, run the broker page-tool CLI (full op table in the doc's "Follow-up channel" section), e.g.:\n` +
+            `\`node ${path.join(import.meta.dirname, "broker-main.ts")} page-tool ${state.identity?.name ?? "<own-name>"} dom.query '{"selector":"button","maxCount":5}'\``
+          )
+        : (
+            `📨 [Xfer from **${msg.from}**]\n\n` +
+            body +
+            "\n\nXfer is one-way — only reply if you have meaningful new information to communicate back."
+          );
     pi.sendMessage({
       customType: "xfer-inbound",
-      content:
-        `📨 [Xfer from **${msg.from}**]\n\n` +
-        `**Request**: ${msg.summary}\n\n` +
-        `**Doc**: \`${msg.file}\`\n\n` +
-        `Read the doc and handle the request.` +
-        `\n\nXfer is one-way — only reply if you have meaningful new information to communicate back.`,
+      content,
       display: true,
     }, isIdle
       ? { deliverAs: "followUp", triggerTurn: true }

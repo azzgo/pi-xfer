@@ -100,7 +100,13 @@ export default function (pi: ExtensionAPI) {
         });
       } catch (err: any) {
         try { fs.unlinkSync(tmpFile); } catch { /* ok */ }
-        throw new Error(`xfer: failed to notify "${target}" — ${err.message}`);
+        const notFound = /not found/.test(String(err?.message));
+        throw new Error(
+          `xfer: failed to notify "${target}" — ${err.message}` +
+          (notFound
+            ? ` — if this handoff arrived from the web picker, that sender is a browser userscript, not an xfer agent: do not xfer back; query the page via the broker page-tool CLI instead (see the doc's "Follow-up channel")`
+            : ""),
+        );
       }
 
       // 3. done, return immediately (no wait)

@@ -51,7 +51,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
-import { ERR, WIRE } from "./wire.ts";
+import { ERR, FROM_WEB_PICKER, WIRE } from "./wire.ts";
 import { renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./handoff-doc.ts";
 import { listTargets } from "./targets.ts";
 import { encodeAgentName } from "./utils.ts";
@@ -82,7 +82,6 @@ const {
 } = WIRE;
 const WIRE_XFER_NOTIFY = "xfer-notify";
 const WIRE_MSG_ID_PREFIX = "m";
-const WIRE_FROM_WEB_PICKER = "web-picker";
 
 const {
   AUTH_FAILED: ERR_AUTH_FAILED,
@@ -370,6 +369,10 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
       page,
       picks: picks as HandoffPick[],
       record: record ?? undefined,
+      // The receiving session's own xfer name: makes the doc's page-tool
+      // follow-up command directly runnable (compose passes it too — the two
+      // render paths must not drift).
+      fromTarget: targetName,
       brokerCliPath: path.join(import.meta.dirname, "broker-main.ts"),
     });
   } catch (error) {
@@ -394,7 +397,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   void pushXferNotify(xferDir, targetName, {
     type: WIRE_XFER_NOTIFY,
     msg_id: msgId,
-    from: WIRE_FROM_WEB_PICKER,
+    from: FROM_WEB_PICKER,
     file: doc,
     summary: prompt.slice(0, 120),
   })

@@ -444,6 +444,10 @@ describe("broker delivery (integration)", () => {
     assert.ok(content.includes(prompt), "doc renders the prompt");
     assert.ok(content.includes(`handoff_id: ${result.handoff_id}`), "doc carries handoff_id");
     assert.ok(content.includes("from: web-picker"), "doc carries from: web-picker");
+    // fromTarget must be substituted in submit too (not just compose) so the
+    // page-tool follow-up command is runnable instead of a placeholder.
+    assert.ok(content.includes("page-tool alpha"), "doc embeds the target session name in the page-tool example");
+    assert.ok(!content.includes("<session-socket>"), "submit doc must not carry the placeholder");
     ws.destroy();
   });
 
