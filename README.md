@@ -106,7 +106,8 @@ npm test    # node --test, zero deps (inline .js→.ts resolve hook)
 |------|----------------|
 | `index.ts` | entry wiring: flag, `xfer_to` + `xfer_peer_to` tools, status events, lifecycle |
 | `controller.ts` | inbound socket lifecycle: start / rename / shutdown; bridge listener + BridgeManager ownership; shutdown reap |
-| `commands.ts` | `/xfer` command (`list`, `peer`, `listener`, `broker`, `gc`, `status`, `name`, …) + completions |
+| `commands.ts` | `/xfer` command (`list`, `peer`, `listener`, `broker`, `board`, `gc`, `status`, `name`, …) + completions |
+| `board.ts` | async collaboration board: Markdown cards in `~/.pi/xfer/board/`, two-phase writes via `agent_end` interception |
 | `gc.ts` | zombie-socket GC: dead-pid / orphan-sock detection + reap |
 | `settings.ts` | `~/.pi/xfer/settings.json` loader/validator + template interpolation |
 | `oneshot.ts` | remote peer send: temp frame file, template spawn, stdin/msgfile branch, waitExit |

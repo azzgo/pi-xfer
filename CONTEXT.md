@@ -1,6 +1,26 @@
-# Xfer Web Picker — Language
+# Xfer — Language
 
-Glossary for the web-picker loop (userscript + broker + receiving agent). Implementation details live in `docs/web-picker.md`; this file only fixes terms.
+Glossary for the xfer extension. Implementation details live in `docs/`; this file only fixes terms.
+
+## Board (async cross-agent collaboration)
+
+**Board**:
+The cross-project, machine-local collaboration space (`~/.pi/xfer/board/`). Holds Cards; agents join and leave freely — the human orchestrates who reads and writes, so no agent needs to stay online.
+_Avoid_: task queue, message bus, ticket system (the Board is for discussion and analysis, not dispatch)
+
+**Card**:
+One async topic of collaboration. A Markdown file whose header carries id/title/created_by and whose body is the Conversation. Stateles by design — a shared document, not a ticket: no lifecycle statuses, cleanup happens only when the human explicitly runs del / clean.
+_Avoid_: topic, ticket, issue, workflow state
+
+**Entry**:
+One append-only contribution on a Card. Free-form Markdown text with author and an optional type label (note / finding / question / answer); the label is metadata only and drives no logic.
+_Avoid_: comment, post, message
+
+**Conversation**:
+The ordered sequence of Entries in a Card body. The Card states the topic; Entries are the discussion; there is no formal confirmation step — the conversation just ends when the human cleans the Card up.
+_Avoid_: thread, log
+
+## Web Picker
 
 ## Language
 

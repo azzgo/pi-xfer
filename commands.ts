@@ -3,6 +3,7 @@ import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { registerBoard, renderCard } from "./board.js";
 import type { XferController } from "./controller.js";
 import { getRemotePeer, listRemotePeers, type PeerSendEntry } from "./peers.js";
 import { BrokerManager } from "./broker-manager.js";
@@ -21,6 +22,8 @@ export interface XferCommandOptions {
   brokerXferDir?: string;
   /** Directory scanned by `/xfer gc` for zombie peer sockets; defaults to XFER_DIR. */
   xferDir?: string;
+  /** Board directory; defaults to ~/.pi/xfer/board. */
+  boardDir?: string;
 }
 
 /** One-line description of a remote peer: its note, or the head of its send template. */
@@ -79,6 +82,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
   const brokerManager = options.brokerManager ?? new BrokerManager();
   const brokerXferDir = options.brokerXferDir ?? XFER_DIR;
   const xferDir = options.xferDir ?? XFER_DIR;
+  const board = registerBoard(pi, { boardDir: options.boardDir, getAuthor: () => controller.state.identity?.name ?? "unknown" });
 
   pi.registerCommand("xfer", {
     description:
@@ -87,6 +91,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer list               — list peers\n" +
       "  /xfer peer <name> <req>  — send via remote peer (settings.json)\n" +
       "  /xfer name [<name>]      — show or set name\n" +
+      "  /xfer board <list|new|read|write|del|clean|open> — async collaboration board\n" +
       "  /xfer gc                 — reap zombie peer sockets (dead pid / no listener)\n" +
       "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle",
 
@@ -102,31 +107,34 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         const items: AutocompleteItem[] = remote
           .filter(peer => peer.name.startsWith(namePrefix))
-          .map(peer => ({ value: peer.name, label: peer.name, description: remotePeerDescription(peer) }));
+          .map(peer => ({ value: `peer ${peer.name}`, label: peer.name, description: remotePeerDescription(peer) }));
         return items.length > 0 ? items : null;
       }
       // `/xfer listener <TAB>` completes the listener subcommand group only.
       if (prefix.startsWith("listener ")) {
         const subPrefix = prefix.slice("listener ".length).replace(/^\s+/, "");
         const items: AutocompleteItem[] = [
-          { value: "setup", label: "setup", description: "Start the bridge command from settings.json" },
-          { value: "stop", label: "stop", description: "Stop the bridge and close the TCP listener" },
-          { value: "logs", label: "logs", description: "Show recent bridge output" },
-        ].filter(i => i.value.startsWith(subPrefix));
+          { value: "listener setup", label: "setup", description: "Start the bridge command from settings.json" },
+          { value: "listener stop", label: "stop", description: "Stop the bridge and close the TCP listener" },
+          { value: "listener logs", label: "logs", description: "Show recent bridge output" },
+        ].filter(i => i.label.startsWith(subPrefix));
         return items.length > 0 ? items : null;
+      }
+      // `/xfer board <TAB>` completes board subcommands, then card ids.
+      if (prefix.startsWith("board") && (prefix.length === 5 || prefix.startsWith("board "))) {
+        return board.completions(prefix.slice(5));
       }
       // `/xfer broker <TAB>` completes the broker subcommand group only.
       if (prefix.startsWith("broker ")) {
         const subPrefix = prefix.slice("broker ".length).replace(/^\s+/, "");
         const items: AutocompleteItem[] = [
-          { value: "start", label: "start", description: "Start the broker daemon (--port N to pin, 0 = ephemeral; already-running is a no-op)" },
-          { value: "status", label: "status", description: "Show broker status (port/pid)" },
-          { value: "stop", label: "stop", description: "Stop the broker daemon" },
-          { value: "logs", label: "logs", description: "Show the last broker.log lines" },
-        ].filter(i => i.value.startsWith(subPrefix));
+          { value: "broker start", label: "start", description: "Start the broker daemon (--port N to pin, 0 = ephemeral; already-running is a no-op)" },
+          { value: "broker status", label: "status", description: "Show broker status (port/pid)" },
+          { value: "broker stop", label: "stop", description: "Stop the broker daemon" },
+          { value: "broker logs", label: "logs", description: "Show the last broker.log lines" },
+        ].filter(i => i.label.startsWith(subPrefix));
         return items.length > 0 ? items : null;
       }
-
 
       const peers = listPeers(controller.state.identity?.name ?? "");
       const all: AutocompleteItem[] = [
@@ -135,6 +143,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "peer", label: "peer", description: "Send to a remote peer from settings.json" },
         { value: "listener", label: "listener", description: "Bridge listener: setup / stop / logs" },
         { value: "broker", label: "broker", description: "Broker daemon: start / status / stop / logs" },
+        { value: "board", label: "board", description: "Async collaboration board: list / new / read / write / del / clean / open" },
         { value: "gc", label: "gc", description: "Reap zombie peer sockets (dead pid / no listener)" },
         { value: "status", label: "status", description: "Show listener status" },
         ...peers.map(peer => ({
@@ -162,6 +171,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer listener stop|logs — stop bridge / show its output\n" +
           "   /xfer status             — listener status\n" +
           "   /xfer name [<name>]      — show or set name\n" +
+          "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
 
@@ -366,6 +376,147 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         // logs — tail <xferDir>/broker.log without touching the daemon.
         ctx.ui.notify(brokerLogTail(brokerXferDir), "info");
+        return;
+      }
+
+      // ── /xfer board — async collaboration board ──
+      if (cmd === "board") {
+        const sub = parts[1];
+        const author = state.identity?.name ?? "unknown";
+        const rest = parts.slice(2);
+
+        if (!sub || sub === "help") {
+          ctx.ui.notify(
+            "📋 /xfer board list              — list cards\n" +
+            "   /xfer board new [title...]   — create a card (title optional — the agent names it)\n" +
+            "   /xfer board read <id>        — inject a card into the conversation\n" +
+            "   /xfer board write <id> <intent> — the agent composes an entry from your intent\n" +
+            "   /xfer board del <id>         — delete a single card\n" +
+            "   /xfer board clean            — delete all cards\n" +
+            "   /xfer board open             — open the board directory in the file manager",
+            "info",
+          );
+          return;
+        }
+
+        if (sub === "list") {
+          const cards = board.board.list();
+          ctx.ui.notify(
+            cards.length
+              ? `📋 Board (${cards.length} card(s)):\n\n` + cards.map(c => `  ${c.id} — ${c.title}\n    by ${c.createdBy} · ${c.createdAt}`).join("\n")
+              : "📋 Board is empty",
+            "info",
+          );
+          return;
+        }
+
+        if (sub === "new") {
+          const title = rest.join(" ").trim();
+          if (title) {
+            const card = board.board.create(title, author);
+            ctx.ui.notify(`🆕 ${card.id} — ${card.title}`, "info");
+            return;
+          }
+          // Two-phase: the agent names the card and writes the first entry.
+          board.board.setPending({ cardId: null, isNew: true });
+          pi.sendUserMessage(
+            `## Board Card Request\n\n` +
+            `Based on the current conversation, open a new card on the collaboration board: ` +
+            `give it a concise title and write the first entry capturing the topic.\n\n` +
+            `Reply with ONLY a fenced code block tagged \`board-entry\`, nothing else:\n\n` +
+            "```board-entry\n" +
+            "title: <concise card title>\n" +
+            "type: note | finding | question | answer\n" +
+            "---\n" +
+            "<markdown body of the first entry>\n" +
+            "```",
+            { deliverAs: "followUp", triggerTurn: true },
+          );
+          return;
+        }
+
+        if (sub === "read") {
+          const id = rest[0];
+          const card = id ? board.board.read(id) : null;
+          if (!card) {
+            ctx.ui.notify(`❌ Card not found: ${id ?? "(no id given)"} — see /xfer board list`, "error");
+            return;
+          }
+          pi.sendUserMessage(
+            `## Board Card (read-only injection)\n\n\`${card.id}\` — ${card.title}\n\n` +
+            renderCard(card) +
+            "\nThe human injected this card for your awareness. Do not take action yet — wait for their instruction.",
+            { deliverAs: "followUp", triggerTurn: true },
+          );
+          return;
+        }
+
+        if (sub === "write") {
+          const id = rest[0];
+          const intent = rest.slice(1).join(" ").trim();
+          const card = id ? board.board.read(id) : null;
+          if (!card) {
+            ctx.ui.notify(`❌ Card not found: ${id ?? "(no id given)"} — see /xfer board list`, "error");
+            return;
+          }
+          if (!intent) {
+            ctx.ui.notify("Usage: /xfer board write <id> <intent> — describe what to record", "error");
+            return;
+          }
+          board.board.setPending({ cardId: card.id, isNew: false });
+          pi.sendUserMessage(
+            `## Board Entry Request\n\n` +
+            `Card \`${card.id}\` — ${card.title}\n\n` +
+            `Human intent: ${intent}\n\n` +
+            `Based on the conversation and this intent, compose one entry for the card.\n\n` +
+            `Reply with ONLY a fenced code block tagged \`board-entry\`, nothing else:\n\n` +
+            "```board-entry\n" +
+            "type: note | finding | question | answer\n" +
+            "---\n" +
+            "<markdown body of the entry>\n" +
+            "```",
+            { deliverAs: "followUp", triggerTurn: true },
+          );
+          return;
+        }
+
+        if (sub === "del") {
+          const id = rest[0];
+          const card = id ? board.board.read(id) : null;
+          if (!card) {
+            ctx.ui.notify(`❌ Card not found: ${id ?? "(no id given)"} — see /xfer board list`, "error");
+            return;
+          }
+          const ok = await ctx.ui.confirm("Delete card", `Delete ${card.id} — ${card.title}?`);
+          if (!ok) return;
+          board.board.del(card.id);
+          ctx.ui.notify(`🗑️ Deleted ${card.id}`, "info");
+          return;
+        }
+
+        if (sub === "clean") {
+          const cards = board.board.list();
+          if (cards.length === 0) {
+            ctx.ui.notify("📋 Board is already empty", "info");
+            return;
+          }
+          const ok = await ctx.ui.confirm("Clean board", `Delete all ${cards.length} card(s)? This cannot be undone.`);
+          if (!ok) return;
+          const removed = board.board.clean();
+          ctx.ui.notify(`🧹 Removed ${removed.length} card(s)`, "info");
+          return;
+        }
+
+        if (sub === "open") {
+          const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+          import("node:child_process").then(({ spawn }) => {
+            spawn(opener, [board.board.dir], { detached: true, stdio: "ignore" }).unref();
+          });
+          ctx.ui.notify(`📂 ${board.board.dir}`, "info");
+          return;
+        }
+
+        ctx.ui.notify(`Usage: /xfer board <list|new|read|write|del|clean|open>`, "error");
         return;
       }
 

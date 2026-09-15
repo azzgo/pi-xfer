@@ -83,7 +83,7 @@ function makeIdentity(): Identity {
 }
 
 /** Register against stubs; return the captured definition plus invoke helpers. */
-function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string; xferDir?: string } = {}): {
+function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string; xferDir?: string; boardDir?: string } = {}): {
   description: string | undefined;
   handler: (args: string) => Promise<void>;
   completions: (prefix: string) => AutocompleteItem[] | null;
@@ -96,6 +96,7 @@ function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: strin
   const pi = {
     registerCommand: (_name: string, command: CapturedCommand) => { def = command; },
     sendUserMessage: (content: string, options?: SentMessage["options"]) => { sent.push({ content, options }); },
+    on: () => {},
   } as unknown as ExtensionAPI;
   const controller = {
     state: { identity: makeIdentity(), sessionName: () => undefined },
@@ -107,7 +108,7 @@ function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: strin
     },
   } as unknown as XferController;
 
-  registerXferCommand(pi, controller, { settingsPath, brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir });
+  registerXferCommand(pi, controller, { settingsPath, brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir, boardDir: options.boardDir });
   assert.ok(def, "registerCommand was not captured");
   const ctx = {
     ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
@@ -155,6 +156,7 @@ function realHarness(): {
     registerCommand: (_name: string, command: CapturedCommand) => { def = command; },
     sendUserMessage: () => {},
     sendMessage: () => {},
+    on: () => {},
   } as unknown as ExtensionAPI;
   const controller = new XferController(pi, new XferState());
   controller.state.identity = makeIdentity();
@@ -296,8 +298,9 @@ describe("xfer command: completions", () => {
 
   it("completes remote names only after `peer `", () => {
     const h = harness();
-    assert.deepEqual((h.completions("peer ") ?? []).map((i) => i.value), ["codex", "zeta"]);
-    assert.deepEqual((h.completions("peer co") ?? []).map((i) => i.value), ["codex"]);
+    assert.deepEqual((h.completions("peer ") ?? []).map((i) => i.value), ["peer codex", "peer zeta"]);
+    assert.deepEqual((h.completions("peer ") ?? []).map((i) => i.label), ["codex", "zeta"]);
+    assert.deepEqual((h.completions("peer co") ?? []).map((i) => i.value), ["peer codex"]);
     assert.equal(h.completions("peer nope"), null);
   });
 
@@ -394,7 +397,7 @@ describe("xfer command: listener completions", () => {
   it("offers setup/stop/logs for the 'listener ' prefix", () => {
     const h = harness();
     const items = h.completions("listener ") ?? [];
-    assert.deepEqual(items.map((i) => i.value), ["setup", "stop", "logs"]);
+    assert.deepEqual(items.map((i) => i.value), ["listener setup", "listener stop", "listener logs"]);
   });
 
   it("offers listener and status among top-level subcommands", () => {
@@ -537,7 +540,7 @@ describe("xfer command: broker completions", () => {
   it("offers start/status/stop/logs for the 'broker ' prefix", () => {
     const h = harness();
     const items = h.completions("broker ") ?? [];
-    assert.deepEqual(items.map((i) => i.value), ["start", "status", "stop", "logs"]);
+    assert.deepEqual(items.map((i) => i.value), ["broker start", "broker status", "broker stop", "broker logs"]);
   });
 
   it("offers broker among top-level subcommands", () => {
@@ -605,5 +608,56 @@ describe("xfer command: gc subcommand", () => {
     assert.match(h.notifications[0].message, /\/xfer gc/);
     const values = (h.completions("") ?? []).map((i) => i.value);
     assert.ok(values.includes("gc"));
+  });
+});
+
+describe("xfer command: board subcommand", () => {
+  it("creates a card with an explicit title immediately", async () => {
+    const h = harness({ boardDir: fs.mkdtempSync(path.join(tmpDir, "board-")) });
+    await h.handler("board new my topic");
+    assert.match(h.notifications[0].message, /c-0001 — my topic/);
+  });
+
+  it("new without a title enters the two-phase write via followUp message", async () => {
+    const h = harness({ boardDir: fs.mkdtempSync(path.join(tmpDir, "board-")) });
+    await h.handler("board new");
+    assert.match(h.sent[0].content, /Board Card Request/);
+    assert.match(h.sent[0].content, /board-entry/);
+  });
+
+  it("read injects the card body as a followUp message", async () => {
+    const h = harness({ boardDir: fs.mkdtempSync(path.join(tmpDir, "board-")) });
+    await h.handler("board new my topic");
+    await h.handler("board read c-0001");
+    assert.match(h.sent[0].content, /my topic/);
+  });
+
+  it("read/write/del with an unknown id error out", async () => {
+    const h = harness({ boardDir: fs.mkdtempSync(path.join(tmpDir, "board-")) });
+    await h.handler("board read c-9999");
+    assert.equal(h.notifications[0].type, "error");
+    await h.handler("board write c-9999 hi");
+    assert.equal(h.notifications[1].type, "error");
+    await h.handler("board del c-9999");
+    assert.equal(h.notifications[2].type, "error");
+  });
+
+  it("list reports an empty board, then the created card", async () => {
+    const h = harness({ boardDir: fs.mkdtempSync(path.join(tmpDir, "board-")) });
+    await h.handler("board list");
+    assert.match(h.notifications[0].message, /empty/);
+    await h.handler("board new another");
+    await h.handler("board list");
+    assert.match(h.notifications[2].message, /c-0001 — another/);
+  });
+
+  it("completions offer board subs, then card ids after read/write/del", async () => {
+    const h = harness({ boardDir: fs.mkdtempSync(path.join(tmpDir, "board-")) });
+    const subs = (h.completions("board ") ?? []).map((i) => i.value);
+    assert.ok(subs.includes("board list"));
+    assert.ok(subs.includes("board open"));
+    await h.handler("board new my topic");
+    const ids = (h.completions("board read ") ?? []).map((i) => i.value);
+    assert.deepEqual(ids, ["board read c-0001"]);
   });
 });
