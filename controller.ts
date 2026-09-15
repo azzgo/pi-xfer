@@ -2,33 +2,12 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import * as fs from "node:fs";
 import type * as net from "node:net";
 import * as path from "node:path";
-import { BridgeManager, type BridgeContext } from "./bridge.js";
 import { XFER_DIR } from "./constants.js";
 import { createServer, listenServer } from "./server.js";
-import type { InterpolationVars } from "./settings.js";
 import { XferState } from "./state.js";
 import type { XferNotifyMessage } from "./types.js";
 import { deriveName, endpointForName, metadataForName } from "./utils.js";
 import { FROM_WEB_PICKER } from "./wire.js";
-
-/** Host/port + server handle of a running bridge listener. */
-export interface BridgeListener {
-  host: string;
-  port: number;
-  server: net.Server;
-}
-
-/** `server.address()` narrowed to a TCP endpoint; throws on unbound or pipe-bound servers. */
-function tcpListenerInfo(server: net.Server): BridgeListener {
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("bridge listener is not bound to a TCP address");
-  }
-  return { host: address.address, port: address.port, server };
-}
-
-/** Hard ceiling for the fire-and-forget bridge reap at session shutdown. */
-const BRIDGE_REAP_CEILING_MS = 2_000;
 
 /**
  * Orchestrates the xfer listener lifecycle: session start, rename,
@@ -38,17 +17,12 @@ export class XferController {
   private readonly pi: ExtensionAPI;
   readonly state: XferState;
 
-  /** Bridge-side TCP listener, when running; independent of `state.identity`. */
-  private bridgeServer: net.Server | null = null;
-  /** Bridge command lifecycle (`/xfer listener setup|stop|logs`); created lazily. */
-  private bridgeManager: BridgeManager | null = null;
-
   constructor(pi: ExtensionAPI, state: XferState) {
     this.pi = pi;
     this.state = state;
   }
 
-  /** Route one inbound frame into the session — shared by the unix + bridge listeners. */
+  /** Route one inbound frame into the session. */
   private deliverInbound(msg: XferNotifyMessage): void {
     const { pi, state } = this;
     const isIdle = state.isRuntimeIdle();
@@ -64,7 +38,7 @@ export class XferController {
             `📨 [Xfer from **${FROM_WEB_PICKER}** (browser userscript)]\n\n` +
             body +
             `\n\nThe sender is the Web Picker userscript, NOT an agent: it has no xfer socket and cannot answer. ` +
-            `Do NOT call xfer_to / xfer_peer_to with target "${FROM_WEB_PICKER}" — it fails with "peer not found".\n\n` +
+            `Do NOT call xfer_to with target "${FROM_WEB_PICKER}" — it fails with "peer not found".\n\n` +
             `To query the page back, run the broker page-tool CLI (full op table in the doc's "Follow-up channel" section), e.g.:\n` +
             `\`node ${path.join(import.meta.dirname, "broker-main.ts")} page-tool ${state.identity?.name ?? "<own-name>"} dom.query '{"selector":"button","maxCount":5}'\``
           )
@@ -92,42 +66,12 @@ export class XferController {
     if (!identity?.server) throw new Error("xfer server not initialised");
     await listenServer({
       server: identity.server,
-      endpoint: { kind: "unix", path: identity.endpoint },
+      path: identity.endpoint,
       name: identity.name,
       notifyError: (message) => ctx.ui.notify(message, "error"),
       setStatus: (text) => ctx.ui.setStatus("xfer", text),
       onListening: () => this.state.writeMetadata(true),
     });
-  }
-
-  /** Bridge transport: the same frame protocol over 127.0.0.1 TCP for the bridge's lifetime.
-   *  Never called from `start()`/`session_start` — the bridge owns this listener. */
-  async startBridgeListener(): Promise<BridgeListener> {
-    if (this.bridgeServer) return tcpListenerInfo(this.bridgeServer);
-    const server = this.createInboundServer();
-    try {
-      await listenServer({
-        server,
-        endpoint: { kind: "tcp", host: "127.0.0.1", port: 0 },
-        name: "xfer-bridge",
-        notifyError: (message) => this.state.runtimeContext?.ui.notify(message, "error"),
-        setStatus: () => { /* status display stays owned by the bridge task */ },
-        onListening: () => { /* metadata tracks the unix identity only */ },
-      });
-    } catch (error) {
-      if (server.listening) server.close();
-      throw error;
-    }
-    this.bridgeServer = server;
-    return tcpListenerInfo(server);
-  }
-
-  /** Close the bridge listener and release its port; a no-op when not running. */
-  async stopBridgeListener(): Promise<void> {
-    const server = this.bridgeServer;
-    this.bridgeServer = null;
-    if (!server) return;
-    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
   /** `session_start`: derive name, start the socket, begin metadata polling. */
@@ -196,39 +140,6 @@ export class XferController {
     ctx.ui.notify(`✅ Renamed to "${newName}"`, "info");
   }
 
-  /** UI-agnostic notify surface for the bridge (safe when no session is attached). */
-  private bridgeNotify(): BridgeContext {
-    return {
-      notify: (message, level) => {
-        try { this.state.runtimeContext?.ui.notify(message, level ?? "info"); } catch { /* session may be gone */ }
-      },
-    };
-  }
-
-  /** `/xfer listener setup`: interpolate `%p` and spawn the bridge command. */
-  async listenerSetup(tpl: string, vars?: InterpolationVars): Promise<void> {
-    if (!this.bridgeManager) this.bridgeManager = new BridgeManager({ controller: this });
-    await this.bridgeManager.setup(this.bridgeNotify(), tpl, vars);
-  }
-
-  /** `/xfer listener stop`: stop ladder + close the bridge TCP listener. */
-  async listenerStop(): Promise<void> {
-    if (this.bridgeManager) await this.bridgeManager.stop(this.bridgeNotify());
-  }
-
-  /** `/xfer listener logs`: dump the bridge output ring buffer (warning when down). */
-  listenerLogs(): void {
-    if (!this.bridgeManager) this.bridgeManager = new BridgeManager({ controller: this });
-    this.bridgeManager.logs(this.bridgeNotify());
-  }
-
-  /** Snapshot for `/xfer list` + `/xfer status`. */
-  bridgeInfo(): { up: boolean; pid?: number; port?: number; since?: number; cmd?: string } {
-    const bridge = this.bridgeManager;
-    if (!bridge || !bridge.isUp()) return { up: false };
-    return { up: true, pid: bridge.pid(), port: bridge.port(), since: bridge.upSince(), cmd: bridge.cmd() };
-  }
-
   /** `session_shutdown`: close socket, remove endpoint + metadata, stop polling. */
   shutdown(): void {
     const state = this.state;
@@ -240,20 +151,5 @@ export class XferController {
     }
     state.runtimeContext = null;
     state.identity = null;
-    // Bridge reap is fire-and-forget with a hard ceiling — never blocks exit.
-    // stop() signals the process group synchronously on its first await tick, so
-    // even an abrupt exit has delivered SIGTERM to the bridge before we stop.
-    if (this.bridgeManager) {
-      const bridge = this.bridgeManager;
-      const ctx = this.bridgeNotify();
-      void Promise.race([
-        bridge.stop(ctx),
-        new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, BRIDGE_REAP_CEILING_MS);
-          timer.unref?.();
-        }),
-      ]).catch(() => { /* best effort */ });
-      this.bridgeManager = null;
-    }
   }
 }

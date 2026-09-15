@@ -42,22 +42,17 @@ export function createServer(delivery: InboundDelivery): net.Server {
   });
 }
 
-/** Where a listener binds: a unix socket path or a TCP host/port pair. */
-export type ListenEndpoint =
-  | { kind: "unix"; path: string }
-  | { kind: "tcp"; host: string; port: number };
-
-/** Bind a server to its endpoint and report readiness (unix sockets are chmod'd 0600; TCP is not). */
+/** Bind a server to its unix socket path, chmod 0600, and report readiness. */
 export async function listenServer(opts: {
   server: net.Server;
-  endpoint: ListenEndpoint;
+  path: string;
   name: string;
   notifyError: (message: string) => void;
   setStatus: (text: string) => void;
   onListening: () => void;
 }): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const { server, endpoint } = opts;
+    const { server } = opts;
     const onRuntimeError = (error: Error) => {
       if (!server.listening) return;
       try { opts.notifyError(`❌ Xfer listener error: ${error.message}`); } catch { /* session may be shutting down */ }
@@ -68,9 +63,7 @@ export async function listenServer(opts: {
     };
     const onListening = () => {
       server.off("error", onError);
-      if (endpoint.kind === "unix") {
-        try { fs.chmodSync(endpoint.path, 0o600); } catch { /* best effort */ }
-      }
+      try { fs.chmodSync(opts.path, 0o600); } catch { /* best effort */ }
       opts.onListening();
       try { opts.setStatus(`📡 ${opts.name}`); } catch { /* best effort */ }
       resolve();
@@ -78,7 +71,6 @@ export async function listenServer(opts: {
     server.on("error", onRuntimeError);
     server.once("error", onError);
     server.once("listening", onListening);
-    if (endpoint.kind === "unix") server.listen(endpoint.path);
-    else server.listen({ host: endpoint.host, port: endpoint.port });
+    server.listen(opts.path);
   });
 }
