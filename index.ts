@@ -15,7 +15,7 @@ import { sendNotify } from "./client.js";
 import { registerXferCommand } from "./commands.js";
 import { XferController } from "./controller.js";
 import { XferState } from "./state.js";
-import { msgId } from "./utils.js";
+import { listPeers, msgId } from "./utils.js";
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag("xfer", {
@@ -32,6 +32,27 @@ export default function (pi: ExtensionAPI) {
     await controller.start(ctx);
   });
 
+  // ── xfer_to availability: keep the ~1KB tool description out of the prompt
+  // whenever there is no peer to talk to. Re-checked each turn since peers
+  // appear/disappear dynamically (socket files in XFER_DIR).
+  /** A peer counts only if its recorded pid is alive — zombie sockets must not
+   * keep the tool resident. */
+  function hasLivePeer(): boolean {
+    if (!state.identity) return false;
+    return listPeers(state.identity.name).some((peer) => {
+      if (peer.pid === undefined) return false;
+      try { process.kill(peer.pid, 0); return true; } catch { return false; }
+    });
+  }
+
+  function syncXferToolAvailability(): void {
+    const hasPeers = state.identity !== null && hasLivePeer();
+    const active = pi.getActiveTools();
+  }
+
+  pi.on("before_agent_start", async () => {
+    syncXferToolAvailability();
+  });
   // ── /xfer command ──
   registerXferCommand(pi, controller);
 
@@ -40,32 +61,12 @@ export default function (pi: ExtensionAPI) {
     name: "xfer_to",
     label: "Transfer to Pi",
     description:
-      "Send a handoff markdown document to another Pi agent (unidirectional, no reply waiting).\n\n" +
-      "Steps:\n" +
-      "1. Compose a comprehensive markdown handoff document\n" +
-      "2. Call xfer_to with: target name, one-sentence summary, full document body\n" +
-      "3. The tool saves the doc to /tmp/ and sends a socket notification to the target\n" +
-      "4. Returns immediately with a handoff_id — no reply waiting\n\n" +
-      "IMPORTANT: One-way handoff. Do NOT reply with acknowledgements or " +
-      "unnecessary follow-ups. Only xfer back if you have meaningful new " +
-      "information to share.\n\n" +
-      "Example:\n" +
-      "  User: /xfer proj-b investigate API timeout\n" +
-      "  → LLM generates handoff doc → calls xfer_to(target='proj-b', ...)",
+      "Send a one-way handoff markdown document to another Pi agent over its xfer socket; returns immediately with a handoff_id (no reply wait). Use /xfer list for target names. One-way channel: never send acknowledgements; only xfer when you have meaningful new information to communicate.",
 
     parameters: Type.Object({
-      target: Type.String({
-        description: "Target agent name (use /xfer list to see available targets).",
-      }),
-      summary: Type.String({
-        description: "One-sentence summary of what you need from the target.",
-      }),
-      handoff_document: Type.String({
-        description:
-          "Full markdown handoff document. Include: context, problem, " +
-          "specific request for the target, relevant files/code, " +
-          "suggested skills for the target agent, and notes.",
-      }),
+      target: Type.String({ description: "Target agent name (see /xfer list)." }),
+      summary: Type.String({ description: "One-sentence summary of the request." }),
+      handoff_document: Type.String({ description: "Full markdown handoff doc: context, problem, specific request, relevant files, suggested skills, notes." }),
     }),
 
     async execute(_callId, params, _signal, onUpdate, ctx) {
