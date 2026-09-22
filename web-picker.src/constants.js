@@ -22,8 +22,15 @@ export const CAPTURE_MAX = 200;                 // ring buffer size for console/
 export const RESULT_MAX_CHARS = 500000;         // page.response text budget (broker frames cap at 1MB)
 // record-mode caps (v1.13): a reproduction is 3-5 ops; the caps only stop a
 // forgotten recording from growing unbounded.
+// record-mode caps (v1.13): a reproduction is 3-5 ops; the caps only stop a
+// forgotten recording from growing unbounded.
 export const REC_MAX_EVENTS = 50;               // hard cap on one record's event list
 export const REC_SLICE_MAX = 60;                // console/net ring slices attached on stop
+// SSE content-capture caps (v1.14): budget is SSE-ONLY — console/net rings keep
+// their own entry caps, this 1MB budget covers only stored SSE event content.
+export const SSE_BUDGET_CHARS = 1024 * 1024;     // global stored-SSE-content budget (1MB)
+export const SSE_MAX_EVENTS = 50;               // per-stream ring: last N events
+export const SSE_MSG_MAX_CHARS = 8000;          // per-event tail cap (keeps one ring ≤ 400KB)
 export const DEFAULT_STYLE_PROPS = ['display', 'position', 'color', 'background-color', 'font-size',
   'font-weight', 'font-family', 'line-height', 'text-align', 'overflow', 'z-index', 'opacity',
   'visibility', 'width', 'height', 'margin', 'padding', 'border', 'border-radius',

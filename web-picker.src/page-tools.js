@@ -8,7 +8,7 @@
 // module globals — that seam is what makes the op table testable in node and
 // what the per-origin authorization gate (v1.12) dispatches through.
 
-import { DEFAULT_STYLE_PROPS, RESULT_MAX_CHARS, GM_FPROPS, HOST_FLAG } from './constants.js';
+import { DEFAULT_STYLE_PROPS, RESULT_MAX_CHARS, GM_FPROPS, HOST_FLAG, SSE_MAX_EVENTS, SSE_MSG_MAX_CHARS } from './constants.js';
 import { PAGE_OPS, PAGE_OP_KINDS } from './wire.js';
 import { jsonSafe } from './json-safe.js';
 import { cssPath, xPath } from './dom-utils.js';
@@ -146,6 +146,42 @@ export function createPageTools(env) {
     return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
   }
 
+  // SSE event content (v1.14): network.log entries carry a `sse` summary
+  // ({stream, msgs, chars, captured}); this op returns the actual event
+  // slices. Content is bounded by the 1MB SSE-only budget in capture.js —
+  // when a stream's buffer was evicted, `captured:false` and events:[] is
+  // the truthful answer (metadata msgs/chars survive). Slicing params keep
+  // the reply well inside RESULT_MAX_CHARS for the broker frame budget.
+  function toolSseLog(params) {
+    const urlFilter = typeof params.urlFilter === 'string' ? params.urlFilter.toLowerCase() : null;
+    const lastN = Math.min(20, Math.max(1, Number(params.lastN) || 5));
+    const eventLast = Math.min(SSE_MAX_EVENTS, Math.max(1, Number(params.eventLast) || 10));
+    const maxChars = Math.min(SSE_MSG_MAX_CHARS, Math.max(64, Number(params.maxCharsPerEvent) || 2000));
+    const all = rings.netRing.filter((en) => en && en.sse && (!urlFilter || en.url.toLowerCase().includes(urlFilter)));
+    const streams = all.slice(-lastN).map((en) => {
+      const s = en.sse;
+      return {
+        stream: s.id,
+        url: en.url,
+        method: en.method,
+        status: en.status,
+        pending: en.pending,
+        msgs: s.msgs,
+        chars: s.chars,
+        captured: s.captured,
+        events: s.captured
+          ? s.events.slice(-eventLast).map((ev) => ({
+              ts: ev.ts,
+              type: ev.type,
+              ...(ev.id !== undefined ? { id: ev.id } : {}),
+              data: ev.data.length > maxChars ? ev.data.slice(-maxChars) : ev.data,
+            }))
+          : [],
+      };
+    });
+    return { total: all.length, returned: streams.length, streams };
+  }
+
   // Component chains live in the page realm — re-resolve through unsafeWindow
   // when the sandbox element hides the expandos (same fallback as sourceInfo).
   function chainTargetEl(el) {
@@ -265,6 +301,7 @@ export function createPageTools(env) {
     [PAGE_OPS.DOM_HTML]: toolDomHtml,
     [PAGE_OPS.CONSOLE_LOGS]: toolConsoleLogs,
     [PAGE_OPS.NETWORK_LOG]: toolNetworkLog,
+    [PAGE_OPS.SSE_LOG]: toolSseLog,
     [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect,
     [PAGE_OPS.DOM_CLICK]: toolDomClick,
     [PAGE_OPS.DOM_SET_VALUE]: toolDomSetValue,

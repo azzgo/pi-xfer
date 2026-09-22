@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.13.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.13.0：Record 模式——⇧⌥R 开始/停止录制，人操作页面、脚本记时序事件与 console/net 现场切片，随 annotation.submit 的 record 字段整体发给 agent；netRing 改为 pending-first，SSE/长轮询可见）
+// @version      1.14.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -78,6 +78,15 @@
  *     user in their own session, not on the page.
  *   - frames are built only through PROTOCOL constants + frame() builders — the
  *     wire protocol lives in exactly one place, never written inline.
+ *   - page tools v1.14: SSE content capture. fetch responses whose content-type
+ *     is text/event-stream are cloned (the page keeps the original untouched)
+ *     and the clone is pumped by a background SSE frame parser; EventSource
+ *     wrappers record `message` plus named events (via a wrapped
+ *     addEventListener). Per stream: last 50 events, each tail-capped at 8KB;
+ *     a global SSE-only 1MB budget evicts oldest stream buffers first (an
+ *     evicted stream's record stays in netRing with sse.captured=false so the
+ *     metadata count survives). The new network.sse op returns event slices
+ *     (urlFilter/lastN/eventLast/maxCharsPerEvent) under the frame budget.
  *
  * Storage contract — existing keys stay `pi.wp.*`; the two GM connection keys keep
  * the round-trial names (no `pi.` prefix) for continuity:

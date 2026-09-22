@@ -100,6 +100,24 @@ ADR 0007).
   (`GET /api/events → pending sse msgs=37`); the agent digs deeper via
   `page-tool network.log '{"urlFilter":…}'` — the pending entry is what
   makes that reverse query possible.
+- **SSE content capture (v1.14)** — metadata is no longer all the agent gets:
+  fetch responses with `content-type: text/event-stream` are cloned (the page
+  keeps the original untouched) and the clone is pumped by a background SSE
+  frame parser; `EventSource` wrappers record `message` events plus named
+  events (`event: <type>`, via a wrapped `addEventListener`). Storage is
+  bounded and SSE-only: per stream the last 50 events, each tail-capped at
+  8KB, under a global 1MB budget — when the budget is exceeded the oldest
+  stream buffers are evicted, and a stream's buffer dies with its netRing
+  record. An evicted stream's record stays visible with
+  `sse:{captured:false}` (metadata `msgs`/`chars` survive) so the agent can
+  tell “content was dropped” from “no stream”. Reverse-query content with the
+  new read op:
+  `page-tool network.sse '{"urlFilter":"/api/chat","lastN":3,"eventLast":20,"maxCharsPerEvent":2000}'`
+  → `{total, returned, streams:[{stream, url, method, status, pending, msgs,
+  chars, captured, events:[{ts, type, id?, data}]}]}` (events are the most
+  recent `eventLast`, data tail-sliced to `maxCharsPerEvent` so the reply
+  stays inside the broker frame budget). `network.log` entries for SSE carry
+  the matching `sse:{stream, msgs, chars, captured}` summary as the index.
 - **Surviving full page loads** — record state is mirrored to
   `sessionStorage` (`pi.wp.rec`) after every event and restored on
   reinjection (same precedent as `pi.wp.tabId`); a URL change becomes a

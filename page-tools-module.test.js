@@ -142,3 +142,49 @@ test('read ops never hit the write gate', () => {
   assert.equal(replies[0].ok, false);
   assert.ok(!String(replies[0].payload).startsWith('denied_op')); // gate skipped → plain no-match error
 });
+
+test('network.sse returns captured event slices and truthful eviction state', () => {
+  const netRing = [
+    {
+      method: 'GET', url: 'https://api.example/stream', status: 200, ts: 1, pending: true, kind: 'sse',
+      sse: {
+        id: 's1', msgs: 3, chars: 120, captured: true,
+        events: [
+          { ts: 1, type: 'message', data: 'hello' },
+          { ts: 2, type: 'ping', data: 'x'.repeat(5000) },
+          { ts: 3, type: 'message', data: 'world' },
+        ],
+      },
+    },
+    {
+      method: 'GET', url: 'https://api.example/old', status: 200, ts: 0, pending: true, kind: 'sse',
+      sse: { id: 's0', msgs: 900, chars: 9000, captured: false, events: [] },
+    },
+  ];
+  const { handlePageToolRequest } = createPageTools({ gm: gmStub, doc: makeDoc({}), netRing });
+  const replies = [];
+  const send = (id, ok, payload) => replies.push({ id, ok, payload });
+
+  handlePageToolRequest({ id: 'r8', tool: { op: PAGE_OPS.SSE_LOG, params: { urlFilter: '/stream' } } }, send);
+  assert.equal(replies[0].ok, true);
+  const result = JSON.parse(replies[0].payload);
+  assert.equal(result.total, 1);
+  assert.equal(result.returned, 1);
+  assert.equal(result.streams[0].stream, 's1');
+  assert.equal(result.streams[0].captured, true);
+  assert.equal(result.streams[0].events.length, 3);
+  assert.equal(result.streams[0].events[2].data, 'world');
+  assert.equal(result.streams[0].events[2].type, 'message');
+
+  handlePageToolRequest({ id: 'r9', tool: { op: PAGE_OPS.SSE_LOG, params: { maxCharsPerEvent: 64 } } }, send);
+  const sliced = JSON.parse(replies[1].payload);
+  assert.equal(sliced.streams[0].events[1].data.length, 64);
+  assert.ok(sliced.streams[0].events[1].data.endsWith('xxxxx'));
+
+  handlePageToolRequest({ id: 'r10', tool: { op: PAGE_OPS.SSE_LOG, params: { urlFilter: '/old' } } }, send);
+  const evicted = JSON.parse(replies[2].payload);
+  assert.equal(evicted.total, 1);
+  assert.equal(evicted.streams[0].captured, false);
+  assert.deepEqual(evicted.streams[0].events, []);
+  assert.equal(evicted.streams[0].msgs, 900); // metadata survives eviction
+});

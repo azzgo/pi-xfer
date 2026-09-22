@@ -3,7 +3,7 @@
 // realm wrappers never see page-realm calls. Firefox Xray may reject function
 // patching — everything is try/catch-wrapped; worst case capture is silent.
 
-import { CAPTURE_MAX } from './constants.js';
+import { CAPTURE_MAX, SSE_BUDGET_CHARS, SSE_MAX_EVENTS, SSE_MSG_MAX_CHARS } from './constants.js';
 import { jsonSafe } from './json-safe.js';
 
 export const consoleRing = [];   // {level, text, ts, stack?}
@@ -16,9 +16,121 @@ export const netRing = [];       // {method, url, status, ts, durationMs?, error
 
 export function ringPush(ring, rec) {
   ring.push(rec);
-  if (ring.length > CAPTURE_MAX) ring.splice(0, ring.length - CAPTURE_MAX);
+  if (ring.length > CAPTURE_MAX) {
+    const removed = ring.splice(0, ring.length - CAPTURE_MAX);
+    // Records evicted from netRing take their SSE content buffer with them,
+    // so the 1MB SSE budget is freed as streams age out.
+    for (const r of removed) {
+      if (r && r.sseStream) sseEvict(r.sseStream);
+    }
+  }
 }
 
+
+// ---------- SSE content capture (v1.14) ----------
+// A stream's content lives only while its netRing record is alive: `rec.sse`
+// carries the metadata the agent queries (msgs/chars/captured), `rec.sseStream`
+// is the internal link so ring eviction frees the buffer. The budget is
+// SSE-only (SSE_BUDGET_CHARS); per-stream rings hold the last SSE_MAX_EVENTS
+// events, each tail-capped at SSE_MSG_MAX_CHARS, so one stream ≤ ~400KB and
+// the whole page ≤ 1MB no matter how many firehose streams are open.
+const sseStreams = new Map(); // id -> {id, rec, ring, chars}
+let sseSeq = 0;
+let sseBudgetUsed = 0;
+
+function sseRecord(rec) {
+  const st = { id: 's' + (++sseSeq), rec, ring: [], chars: 0 };
+  rec.sse = { id: st.id, msgs: 0, chars: 0, captured: true, events: st.ring };
+  rec.sseStream = st;
+  sseStreams.set(st.id, st);
+  return st;
+}
+
+function ssePush(st, ev) {
+  try {
+    const full = typeof ev.data === 'string' ? ev.data : '';
+    const text = full.length > SSE_MSG_MAX_CHARS ? full.slice(-SSE_MSG_MAX_CHARS) : full;
+    const entry = { ts: Date.now(), type: ev.type || 'message', data: text };
+    if (ev.id) entry.id = ev.id;
+    st.ring.push(entry);
+    if (st.ring.length > SSE_MAX_EVENTS) st.chars -= (st.ring.shift().data || '').length;
+    st.chars += text.length;
+    st.rec.sse.msgs++;
+    st.rec.sse.chars += full.length; // full count — eviction only drops stored content
+    sseBudgetUsed += text.length;
+    while (sseBudgetUsed > SSE_BUDGET_CHARS) {
+      const oldest = sseStreams.values().next().value;
+      if (!oldest || oldest === st) break; // one stream can never exceed the budget
+      sseEvict(oldest);
+    }
+  } catch (e) { /* capture must never break the page */ }
+}
+
+function sseEvict(st) {
+  try {
+    sseStreams.delete(st.id);
+    sseBudgetUsed -= st.chars;
+    const rec = st.rec;
+    if (rec && rec.sse) {
+      rec.sse.captured = false; // metadata (msgs/chars) survives; content dropped
+      rec.sse.events.length = 0;
+    }
+    if (rec && rec.sseStream === st) rec.sseStream = undefined;
+  } catch (e) { /* ignore */ }
+}
+
+// SSE frame parser: `field:value` lines, blank-line separation (\n\n after
+// \r\n/\r normalization), `:` comment lines skipped, data lines joined by \n.
+function sseParseBlock(st, block) {
+  let data = [];
+  let type = 'message';
+  let id;
+  for (const line of block.split('\n')) {
+    if (!line || line.startsWith(':')) continue;
+    const eq = line.indexOf(':');
+    const field = eq === -1 ? line : line.slice(0, eq);
+    const value = eq === -1 ? '' : line.slice(eq + 1).replace(/^ /, '');
+    if (field === 'data') data.push(value);
+    else if (field === 'event') type = value;
+    else if (field === 'id') id = value;
+    // `retry` is a reconnect hint, not content — ignored.
+  }
+  if (data.length) ssePush(st, { type, id, data: data.join('\n') });
+}
+
+// Drain the clone branch in the background; the page keeps the original
+// response untouched. Decoder stream-mode keeps multi-byte UTF-8 intact
+// across chunk boundaries; a page abort just ends the pump.
+async function pumpFetchSse(st, stream) {
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    const reader = stream.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      buf = buf.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        sseParseBlock(st, buf.slice(0, idx));
+        buf = buf.slice(idx + 2);
+      }
+    }
+    const tail = buf.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    if (tail.trim()) sseParseBlock(st, tail);
+  } catch (e) { /* aborted / opaque — the metadata record still stands */ }
+}
+
+function maybeCaptureSse(res, rec) {
+  try {
+    if (rec.kind !== 'sse' || !res || !res.body || typeof res.clone !== 'function') return;
+    const clone = res.clone();
+    if (!clone.body) return;
+    const st = sseRecord(rec);
+    void pumpFetchSse(st, clone.body);
+  } catch (e) { /* clone/pump is best-effort; metadata record still stands */ }
+}
 function captureRealm() {
   try { return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; }
   catch (e) { return window; }
@@ -104,8 +216,15 @@ export function installCapture() {
           } catch (e) { /* ignore */ }
         };
         return origFetch.apply(this, args).then(
-          (res) => { done(res); return res; },
-          (err) => { done(null, err); throw err; },
+          (res) => {
+            done(res);
+            maybeCaptureSse(res, rec);
+            return res;
+          },
+          (err) => {
+            done(null, err);
+            throw err;
+          },
         );
       };
     }
@@ -121,9 +240,30 @@ export function installCapture() {
         try {
           const rec = { method: 'GET', url: String(url || '').slice(0, 500), status: 'pending', ts: Date.now(), pending: true, kind: 'sse', msgs: 0 };
           ringPush(netRing, rec);
+          const st = sseRecord(rec);
           es.addEventListener('open', () => { rec.status = es.status || 200; });
-          es.addEventListener('message', () => { rec.msgs++; });
+          es.addEventListener('message', (ev) => {
+            rec.msgs++;
+            ssePush(st, { type: 'message', id: ev && ev.lastEventId, data: ev && ev.data });
+          });
           es.addEventListener('error', () => { if (es.readyState === 2) rec.pending = false; });
+          // Named events (`event: <type>`) never fire the generic `message`
+          // listener — observe them by wrapping the instance's addEventListener.
+          const origAEL = es.addEventListener.bind(es);
+          const seenNamed = new Set(); // one capture listener per event type,
+          // whatever the page registers
+          es.addEventListener = (type, cb, opts) => {
+            if (typeof type === 'string' && type !== 'message' && type !== 'open' && type !== 'error' && !seenNamed.has(type)) {
+              seenNamed.add(type);
+              try {
+                origAEL(type, (ev) => {
+                  rec.msgs++;
+                  ssePush(st, { type, id: ev && ev.lastEventId, data: ev && ev.data });
+                }, opts);
+              } catch (e) { /* ignore */ }
+            }
+            return origAEL(type, cb, opts);
+          };
         } catch (e) { /* recording must never break the stream */ }
         return es;
       };

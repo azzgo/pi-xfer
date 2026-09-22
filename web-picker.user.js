@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.13.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.13.0：Record 模式——⇧⌥R 开始/停止录制，人操作页面、脚本记时序事件与 console/net 现场切片，随 annotation.submit 的 record 字段整体发给 agent；netRing 改为 pending-first，SSE/长轮询可见）
+// @version      1.14.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -78,6 +78,15 @@
  *     user in their own session, not on the page.
  *   - frames are built only through PROTOCOL constants + frame() builders — the
  *     wire protocol lives in exactly one place, never written inline.
+ *   - page tools v1.14: SSE content capture. fetch responses whose content-type
+ *     is text/event-stream are cloned (the page keeps the original untouched)
+ *     and the clone is pumped by a background SSE frame parser; EventSource
+ *     wrappers record `message` plus named events (via a wrapped
+ *     addEventListener). Per stream: last 50 events, each tail-capped at 8KB;
+ *     a global SSE-only 1MB budget evicts oldest stream buffers first (an
+ *     evicted stream's record stays in netRing with sse.captured=false so the
+ *     metadata count survives). The new network.sse op returns event slices
+ *     (urlFilter/lastN/eventLast/maxCharsPerEvent) under the frame budget.
  *
  * Storage contract — existing keys stay `pi.wp.*`; the two GM connection keys keep
  * the round-trial names (no `pi.` prefix) for continuity:
@@ -123,6 +132,9 @@
   var RESULT_MAX_CHARS = 5e5;
   var REC_MAX_EVENTS = 50;
   var REC_SLICE_MAX = 60;
+  var SSE_BUDGET_CHARS = 1024 * 1024;
+  var SSE_MAX_EVENTS = 50;
+  var SSE_MSG_MAX_CHARS = 8e3;
   var DEFAULT_STYLE_PROPS = [
     "display",
     "position",
@@ -206,6 +218,7 @@
     DOM_HTML: "dom.html",
     CONSOLE_LOGS: "console.logs",
     NETWORK_LOG: "network.log",
+    SSE_LOG: "network.sse",
     FRAMEWORK_INSPECT: "framework.inspect",
     DOM_CLICK: "dom.click",
     DOM_SET_VALUE: "dom.setValue",
@@ -217,6 +230,7 @@
     [PAGE_OPS.DOM_HTML]: "read",
     [PAGE_OPS.CONSOLE_LOGS]: "read",
     [PAGE_OPS.NETWORK_LOG]: "read",
+    [PAGE_OPS.SSE_LOG]: "read",
     [PAGE_OPS.FRAMEWORK_INSPECT]: "read",
     [PAGE_OPS.DOM_CLICK]: "write",
     [PAGE_OPS.DOM_SET_VALUE]: "write",
@@ -347,7 +361,101 @@
   var netRing = [];
   function ringPush(ring, rec) {
     ring.push(rec);
-    if (ring.length > CAPTURE_MAX) ring.splice(0, ring.length - CAPTURE_MAX);
+    if (ring.length > CAPTURE_MAX) {
+      const removed = ring.splice(0, ring.length - CAPTURE_MAX);
+      for (const r of removed) {
+        if (r && r.sseStream) sseEvict(r.sseStream);
+      }
+    }
+  }
+  var sseStreams = /* @__PURE__ */ new Map();
+  var sseSeq = 0;
+  var sseBudgetUsed = 0;
+  function sseRecord(rec) {
+    const st = { id: "s" + ++sseSeq, rec, ring: [], chars: 0 };
+    rec.sse = { id: st.id, msgs: 0, chars: 0, captured: true, events: st.ring };
+    rec.sseStream = st;
+    sseStreams.set(st.id, st);
+    return st;
+  }
+  function ssePush(st, ev) {
+    try {
+      const full = typeof ev.data === "string" ? ev.data : "";
+      const text = full.length > SSE_MSG_MAX_CHARS ? full.slice(-SSE_MSG_MAX_CHARS) : full;
+      const entry = { ts: Date.now(), type: ev.type || "message", data: text };
+      if (ev.id) entry.id = ev.id;
+      st.ring.push(entry);
+      if (st.ring.length > SSE_MAX_EVENTS) st.chars -= (st.ring.shift().data || "").length;
+      st.chars += text.length;
+      st.rec.sse.msgs++;
+      st.rec.sse.chars += full.length;
+      sseBudgetUsed += text.length;
+      while (sseBudgetUsed > SSE_BUDGET_CHARS) {
+        const oldest = sseStreams.values().next().value;
+        if (!oldest || oldest === st) break;
+        sseEvict(oldest);
+      }
+    } catch (e) {
+    }
+  }
+  function sseEvict(st) {
+    try {
+      sseStreams.delete(st.id);
+      sseBudgetUsed -= st.chars;
+      const rec = st.rec;
+      if (rec && rec.sse) {
+        rec.sse.captured = false;
+        rec.sse.events.length = 0;
+      }
+      if (rec && rec.sseStream === st) rec.sseStream = void 0;
+    } catch (e) {
+    }
+  }
+  function sseParseBlock(st, block) {
+    let data = [];
+    let type = "message";
+    let id;
+    for (const line of block.split("\n")) {
+      if (!line || line.startsWith(":")) continue;
+      const eq = line.indexOf(":");
+      const field = eq === -1 ? line : line.slice(0, eq);
+      const value = eq === -1 ? "" : line.slice(eq + 1).replace(/^ /, "");
+      if (field === "data") data.push(value);
+      else if (field === "event") type = value;
+      else if (field === "id") id = value;
+    }
+    if (data.length) ssePush(st, { type, id, data: data.join("\n") });
+  }
+  async function pumpFetchSse(st, stream) {
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      const reader = stream.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        buf = buf.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          sseParseBlock(st, buf.slice(0, idx));
+          buf = buf.slice(idx + 2);
+        }
+      }
+      const tail = buf.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      if (tail.trim()) sseParseBlock(st, tail);
+    } catch (e) {
+    }
+  }
+  function maybeCaptureSse(res, rec) {
+    try {
+      if (rec.kind !== "sse" || !res || !res.body || typeof res.clone !== "function") return;
+      const clone = res.clone();
+      if (!clone.body) return;
+      const st = sseRecord(rec);
+      void pumpFetchSse(st, clone.body);
+    } catch (e) {
+    }
   }
   function captureRealm() {
     try {
@@ -448,6 +556,7 @@
           return origFetch.apply(this, args).then(
             (res) => {
               done(res);
+              maybeCaptureSse(res, rec);
               return res;
             },
             (err) => {
@@ -467,15 +576,32 @@
           try {
             const rec = { method: "GET", url: String(url || "").slice(0, 500), status: "pending", ts: Date.now(), pending: true, kind: "sse", msgs: 0 };
             ringPush(netRing, rec);
+            const st = sseRecord(rec);
             es.addEventListener("open", () => {
               rec.status = es.status || 200;
             });
-            es.addEventListener("message", () => {
+            es.addEventListener("message", (ev) => {
               rec.msgs++;
+              ssePush(st, { type: "message", id: ev && ev.lastEventId, data: ev && ev.data });
             });
             es.addEventListener("error", () => {
               if (es.readyState === 2) rec.pending = false;
             });
+            const origAEL = es.addEventListener.bind(es);
+            const seenNamed = /* @__PURE__ */ new Set();
+            es.addEventListener = (type, cb, opts) => {
+              if (typeof type === "string" && type !== "message" && type !== "open" && type !== "error" && !seenNamed.has(type)) {
+                seenNamed.add(type);
+                try {
+                  origAEL(type, (ev) => {
+                    rec.msgs++;
+                    ssePush(st, { type, id: ev && ev.lastEventId, data: ev && ev.data });
+                  }, opts);
+                } catch (e) {
+                }
+              }
+              return origAEL(type, cb, opts);
+            };
           } catch (e) {
           }
           return es;
@@ -711,6 +837,33 @@
       const all = rings.netRing.filter((en) => !filter || en.url.toLowerCase().includes(filter));
       return { total: all.length, returned: Math.min(lastN, all.length), entries: all.slice(-lastN) };
     }
+    function toolSseLog(params) {
+      const urlFilter = typeof params.urlFilter === "string" ? params.urlFilter.toLowerCase() : null;
+      const lastN = Math.min(20, Math.max(1, Number(params.lastN) || 5));
+      const eventLast = Math.min(SSE_MAX_EVENTS, Math.max(1, Number(params.eventLast) || 10));
+      const maxChars = Math.min(SSE_MSG_MAX_CHARS, Math.max(64, Number(params.maxCharsPerEvent) || 2e3));
+      const all = rings.netRing.filter((en) => en && en.sse && (!urlFilter || en.url.toLowerCase().includes(urlFilter)));
+      const streams = all.slice(-lastN).map((en) => {
+        const s = en.sse;
+        return {
+          stream: s.id,
+          url: en.url,
+          method: en.method,
+          status: en.status,
+          pending: en.pending,
+          msgs: s.msgs,
+          chars: s.chars,
+          captured: s.captured,
+          events: s.captured ? s.events.slice(-eventLast).map((ev) => ({
+            ts: ev.ts,
+            type: ev.type,
+            ...ev.id !== void 0 ? { id: ev.id } : {},
+            data: ev.data.length > maxChars ? ev.data.slice(-maxChars) : ev.data
+          })) : []
+        };
+      });
+      return { total: all.length, returned: streams.length, streams };
+    }
     function chainTargetEl(el) {
       try {
         const uw = typeof unsafeWindow !== "undefined" ? unsafeWindow : null;
@@ -829,6 +982,7 @@
       [PAGE_OPS.DOM_HTML]: toolDomHtml,
       [PAGE_OPS.CONSOLE_LOGS]: toolConsoleLogs,
       [PAGE_OPS.NETWORK_LOG]: toolNetworkLog,
+      [PAGE_OPS.SSE_LOG]: toolSseLog,
       [PAGE_OPS.FRAMEWORK_INSPECT]: toolFrameworkInspect,
       [PAGE_OPS.DOM_CLICK]: toolDomClick,
       [PAGE_OPS.DOM_SET_VALUE]: toolDomSetValue,
