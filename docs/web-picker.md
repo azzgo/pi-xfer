@@ -154,7 +154,10 @@ corner.
 | ⌘/Ctrl+Enter (prompt textarea) | send the batch (same as clicking 发送 →) |
 
 The fab's top-left dot is the broker status: grey = off, amber = connecting,
-green = connected.
+green = connected. Its bottom-right badge is the marker count (picks + record);
+it stays visible as a muted `0` with nothing collected, and clicking it opens
+the note panel — that is the way to reach targets / reverse lookup / network /
+logs even when you have no marker to annotate.
 
 > The script only ever talks to `127.0.0.1` (`@connect` header). Nothing is
 > sent anywhere until you explicitly connect the broker and click 发送.

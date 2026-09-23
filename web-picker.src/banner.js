@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.14.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
+// @version      1.14.1
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -87,6 +87,11 @@
  *     evicted stream's record stays in netRing with sse.captured=false so the
  *     metadata count survives). The new network.sse op returns event slices
  *     (urlFilter/lastN/eventLast/maxCharsPerEvent) under the frame budget.
+ *   - fab badge v1.14.1: the marker count badge on the fab is always shown —
+ *     `0` in a dim slate style when the batch is empty and a lighter slate when
+ *     it has markers — no alarm red. Clicking it opens the note panel either way,
+ *     because targets / reverse lookup / network / logs are useful with no marker
+ *     collected.
  *
  * Storage contract — existing keys stay `pi.wp.*`; the two GM connection keys keep
  * the round-trial names (no `pi.` prefix) for continuity:

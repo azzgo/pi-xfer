@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.14.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
+// @version      1.14.1
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -87,6 +87,11 @@
  *     evicted stream's record stays in netRing with sse.captured=false so the
  *     metadata count survives). The new network.sse op returns event slices
  *     (urlFilter/lastN/eventLast/maxCharsPerEvent) under the frame budget.
+ *   - fab badge v1.14.1: the marker count badge on the fab is always shown —
+ *     `0` in a dim slate style when the batch is empty and a lighter slate when
+ *     it has markers — no alarm red. Clicking it opens the note panel either way,
+ *     because targets / reverse lookup / network / logs are useful with no marker
+ *     collected.
  *
  * Storage contract — existing keys stay `pi.wp.*`; the two GM connection keys keep
  * the round-trial names (no `pi.` prefix) for continuity:
@@ -1412,8 +1417,10 @@
         transform: translate(-50%, -50%); transition: transform .2s ease; pointer-events: none; }
       #fab:hover svg { transform: translate(-50%, -50%) rotate(45deg) scale(1.08); }
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
-        background: #ef4444; color: #fff; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
-        display: none; box-shadow: 0 0 0 2px #161a21; cursor: pointer; }
+        background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
+        box-shadow: 0 0 0 2px #161a21; cursor: pointer; transition: background .2s, color .2s, filter .15s; }
+      #cnt.zero { background: #232a36; color: #7c8aa0; }
+      #cnt:hover { filter: brightness(1.18); }
       #dot { position: absolute; top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px;
         background: #94a3b8; box-shadow: 0 0 0 2px #161a21; transition: background .2s; }
       #dot.connecting { background: var(--wp-amber); }
@@ -1612,12 +1619,12 @@
         </div>
       </div>
     </div>
-    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点红色数字角标开备注面板 · 绿点=broker 已连接">
+    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点数字角标开标注面板（0 时也可开）· 绿点=broker 已连接">
       <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
       </svg>
       <span id="dot"></span>
-      <span id="cnt">0</span>
+      <span id="cnt" class="zero" title="打开标注面板">0</span>
     </button>
     <div id="toast"></div>
     <div id="settings">
@@ -1744,7 +1751,7 @@
     function refreshCount() {
       const n = loadBatch().length + (ctx.getRecord && ctx.getRecord() ? 1 : 0);
       elCnt.textContent = n;
-      elCnt.style.display = n > 0 ? "block" : "none";
+      elCnt.classList.toggle("zero", n === 0);
       if (panelOpen) renderPanel();
     }
     ctx.refreshCount = refreshCount;
@@ -2686,7 +2693,6 @@
       elFab.style.top = ui.pos.y + "px";
     }
     function overBadge(x, y) {
-      if (elCnt.style.display !== "block") return false;
       const r = elCnt.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) return false;
       return x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3;

@@ -1,5 +1,9 @@
 // Note panel — batch list rendering, per-item note edit/delete, group note
-// sync, batch add/clear, count badge refresh.
+// sync, batch add/clear, marker badge refresh.
+//
+// The fab badge is always visible (0 when the batch is empty) — opening the
+// panel is how you reach targets / reverse lookup / network / logs, which are
+// useful even with no markers collected.
 
 import { loadBatch, saveBatch } from '../storage.js';
 import { escapeHtml } from '../dom-utils.js';
@@ -13,7 +17,7 @@ export function initPanel(ctx) {
   function refreshCount() {
     const n = loadBatch().length + (ctx.getRecord && ctx.getRecord() ? 1 : 0);
     elCnt.textContent = n;
-    elCnt.style.display = n > 0 ? 'block' : 'none';
+    elCnt.classList.toggle('zero', n === 0);
     if (panelOpen) renderPanel();
   }
   ctx.refreshCount = refreshCount;

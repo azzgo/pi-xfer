@@ -28,11 +28,10 @@ export function initFab(ctx) {
     elFab.style.left = ui.pos.x + 'px';
     elFab.style.top = ui.pos.y + 'px';
   }
-  // 角标点击开面板：不能依赖 composedPath 判定——fabPointerDown 里的 setPointerCapture
-  // 会把 pointerup 重定向到 fab，事件路径里永远不会出现 #cnt。
-  // 改用坐标命中测试，兼容指针捕获；命中区外扩 3px 好点中。
+  // 角标常驻显示（无 marker 时是 0），命中即可开面板；用坐标命中测试而非
+  // composedPath，因为 fabPointerDown 的 setPointerCapture 会把 pointerup
+  // 重定向到 fab。#cnt.zero 会变灰，但仍然可点。
   function overBadge(x, y) {
-    if (elCnt.style.display !== 'block') return false;
     const r = elCnt.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
     return x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3;

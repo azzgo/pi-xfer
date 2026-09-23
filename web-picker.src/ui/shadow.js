@@ -107,8 +107,10 @@ export function buildUI() {
         transform: translate(-50%, -50%); transition: transform .2s ease; pointer-events: none; }
       #fab:hover svg { transform: translate(-50%, -50%) rotate(45deg) scale(1.08); }
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
-        background: #ef4444; color: #fff; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
-        display: none; box-shadow: 0 0 0 2px #161a21; cursor: pointer; }
+        background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
+        box-shadow: 0 0 0 2px #161a21; cursor: pointer; transition: background .2s, color .2s, filter .15s; }
+      #cnt.zero { background: #232a36; color: #7c8aa0; }
+      #cnt:hover { filter: brightness(1.18); }
       #dot { position: absolute; top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px;
         background: #94a3b8; box-shadow: 0 0 0 2px #161a21; transition: background .2s; }
       #dot.connecting { background: var(--wp-amber); }
@@ -307,12 +309,12 @@ export function buildUI() {
         </div>
       </div>
     </div>
-    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点红色数字角标开备注面板 · 绿点=broker 已连接">
+    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点数字角标开标注面板（0 时也可开）· 绿点=broker 已连接">
       <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
       </svg>
       <span id="dot"></span>
-      <span id="cnt">0</span>
+      <span id="cnt" class="zero" title="打开标注面板">0</span>
     </button>
     <div id="toast"></div>
     <div id="settings">
