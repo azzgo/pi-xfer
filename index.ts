@@ -63,10 +63,19 @@ export default function (pi: ExtensionAPI) {
     description:
       "Send a one-way handoff markdown document to another Pi agent over its xfer socket; returns immediately with a handoff_id (no reply wait). Use /xfer list for target names. One-way channel: never send acknowledgements; only xfer when you have meaningful new information to communicate.",
 
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+
     parameters: Type.Object({
       target: Type.String({ description: "Target agent name (see /xfer list)." }),
       summary: Type.String({ description: "One-sentence summary of the request." }),
       handoff_document: Type.String({ description: "Full markdown handoff doc: context, problem, specific request, relevant files, suggested skills, notes." }),
+    }),
+
+    outputSchema: Type.Object({
+      handoff_id: Type.String(),
+      target: Type.String(),
+      document: Type.String(),
+      status: Type.String(),
     }),
 
     async execute(_callId, params, _signal, onUpdate, ctx) {
@@ -120,6 +129,7 @@ export default function (pi: ExtensionAPI) {
           document: tmpFile,
           status: "sent",
         },
+        structuredContent: { handoff_id: mid, target, document: tmpFile, status: "sent" },
       };
     },
   });
