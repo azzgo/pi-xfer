@@ -59,6 +59,10 @@ leaves `<name>.sock` + `<name>.json` behind. `/xfer gc` reaps them:
 2. socket-notify target `{file, summary}`
 3. return `handoff_id` immediately (no wait)
 
+- **Annotations**: `openWorldHint: true` (cross-agent socket); not read-only, not destructive.
+- **Structured value** (`outputSchema`): `{ handoff_id, target, document, status }` —
+  `document` is the `/tmp` handoff-doc path; codemode callers receive this object
+  instead of the text content. Failures throw.
 Reply by `/xfer <original sender> <message>` — each xfer is an independent
 one-way message. **Exception:** a handoff whose sender is `web-picker` comes
 from the browser userscript, not an agent — it has no xfer socket and can never
