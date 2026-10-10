@@ -33,6 +33,9 @@ export interface MeshEngine {
   queueSend(target: string, message: MeshHandoffMessage): Promise<void>;
 }
 
+/** Bound on queue enqueue so a stuck/unreachable target errors instead of hanging. */
+const QUEUE_SEND_TIMEOUT_MS = 30_000;
+
 export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshHandoffMessage) => void): MeshEngine {
   let registry: { shutdown(): Promise<void> } | null = null;
   let client: any = null;
@@ -64,7 +67,8 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
       registry = regAny;
       const { createClient } = await import("rivetkit/client");
       client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
-      client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      const handle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      await handle.resolve();
     },
 
     async stop() {
@@ -89,7 +93,15 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
     async queueSend(target: string, message: MeshHandoffMessage) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
       const handle = client.get(XFER_INSTANCE_ACTOR, [target]);
-      await handle.send(HANDOFF_QUEUE, message);
+      try {
+        await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
+      } catch (err) {
+        throw new Error(
+          `mesh: enqueue to "${target}" failed — ${err instanceof Error ? err.message : String(err)} ` +
+          `(target may be offline or stuck; the durable queue buffers only after the actor is reachable)`,
+          { cause: err instanceof Error ? err : undefined },
+        );
+      }
     },
   };
   return engine;
