@@ -13,6 +13,7 @@ documents it points to.
    - board scope (append-only, human-cleaned)
    - web-picker record philosophy
 4. **`docs/web-picker.md`** — userscript + broker workflow details
+5. **`docs/release.md`** — how to cut a release: bump version, tag, push; the publish workflow does the rest
 
 ## Working agreements
 
@@ -20,6 +21,7 @@ documents it points to.
 - **Two committed build products** (`web-picker.user.js`, `mesh-runtime.cjs` + `.sha256`): after changing `web-picker.src/` or `mesh-runtime.src/` run `npm run build` and commit the artifacts; `npm test` enforces byte-identical freshness.
 - **Tests**: `npm test` must be green before every push. Tests must be hermetic — never depend on the developer's real `~/.pi/xfer` state.
 - **No runtime npm dependencies** for the extension itself; rivetkit stays out of the dependency list (see the ADR above).
+- **Releases**: follow `docs/release.md` — `npm version` + `git push origin main --follow-tags`; never hand-edit the version and tag separately.
 
 ## Layout pointers
 
