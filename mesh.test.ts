@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { MeshNode } from "./mesh.js";
+import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js";
 import { parseMeshConfig, serializeMeshKey, deserializeMeshKey } from "./mesh-config.js";
 import type { MeshEngine, MeshHandoffMessage, MeshNodeInfo } from "./mesh-engine.js";
 import type { XferNotifyMessage } from "./types.js";
@@ -179,5 +179,26 @@ describe("mesh inbound delivery", () => {
     assert.match(msg.file, /pi-xfer-mid-1\.md$/);
     assert.equal(fs.readFileSync(msg.file, "utf-8"), "# doc body");
     fs.rmSync(msg.file, { force: true });
+  });
+});
+
+describe("mesh runtime bundle", () => {
+  it("loads the committed bundle with a createRivetEngine export", async () => {
+    const mod = await loadMeshRuntimeBundle();
+    assert.equal(typeof mod.createRivetEngine, "function");
+    assert.equal(typeof mod.RIVETKIT_VERSION, "string");
+  });
+
+  it("reports a rebuild hint when the bundle is missing", async () => {
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-no-bundle-"));
+    try {
+      await assert.rejects(() => loadMeshRuntimeBundle(emptyDir), /npm run build/);
+    } finally {
+      fs.rmSync(emptyDir, { recursive: true, force: true });
+    }
+  });
+
+  it("the bundle lives next to the extension source", () => {
+    assert.ok(fs.existsSync(path.join(import.meta.dirname, MESH_RUNTIME_BUNDLE)));
   });
 });

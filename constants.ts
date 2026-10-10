@@ -7,6 +7,9 @@ export const XFER_DIR = path.join(os.homedir(), ".pi", "xfer");
 /** Mesh engine config (endpoint/namespace/token) for the opt-in mesh transport. */
 export const MESH_CONFIG_PATH = path.join(XFER_DIR, "mesh.config.json");
 
+/** Download cache for the mesh native runtime binary (never in git). */
+export const MESH_CACHE_DIR = path.join(XFER_DIR, "cache");
+
 export const CONNECT_TIMEOUT_MS = 5_000;
 export const ACK_TIMEOUT_MS = 5_000;
 export const METADATA_POLL_MS = 1_000;

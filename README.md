@@ -86,9 +86,17 @@ are explicit and never auto-fallback. To join, create `~/.pi/xfer/mesh.config.js
 `/xfer mesh up` starts a RivetKit worker in-process (single `xfer-instance`
 actor, key = xfer name) and refuses if a same-name node already exists on the
 engine. Inbound mesh handoffs land in `/tmp/pi-xfer-<id>.md` and flow through
-the same delivery pipeline as local socks, labeled `· mesh`. rivetkit is an
-optional dependency (~2.4GB with local engine binaries) — run `npm install`
-in this directory; without it `mesh up` fails with a hint.
+the same delivery pipeline as local socks, labeled `· mesh`.
+
+**Distribution**: rivetkit is bundled into the committed `mesh-runtime.cjs`
+(`mesh-runtime.src/` is the source; `npm run build` rebuilds — same双轨模式 as
+web-picker). The extension has zero runtime node_modules. The rivetkit **native
+runtime** (napi addon + engine binary, ~140MB, platform-specific) cannot be
+bundled, so the first `mesh up` downloads the pinned version
+(`RIVETKIT_VERSION` in `mesh-native.ts`, kept in sync with the bundle by
+build.mjs) from npm into `~/.pi/xfer/cache/` (never in git; keyed by version —
+bump the pin and old caches age out). No network at runtime after that;
+failures surface an `npm pack`-based manual recovery hint.
 
 ## Protocol
 
@@ -120,5 +128,7 @@ npm test    # node --test, zero deps (inline .js→.ts resolve hook)
 | `mesh.ts` | mesh node lifecycle + inline handoff send/receive (opt-in) |
 | `mesh-engine.ts` | RivetKit adapter: actor definition, engine REST discovery, queue send |
 | `mesh-config.ts` | `mesh.config.json` parsing + actor key (de)serialization |
+| `mesh-native.ts` | native runtime provisioning: version-pinned npm download → `~/.pi/xfer/cache`, engine-cli mini-package, loader globals |
+| `mesh-runtime.cjs` | committed esbuild bundle (mesh-runtime.src + rivetkit) — what `/xfer mesh up` actually runs |
 | `types.ts` | `PeerInfo`, `XferNotifyMessage`, `Identity` |
 | `web-picker.user.js` | Tampermonkey page-side picker — see [docs/web-picker.md](docs/web-picker.md) |

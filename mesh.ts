@@ -1,18 +1,40 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as url from "node:url";
 import { loadMeshConfig, type MeshConfig } from "./mesh-config.ts";
-import { createRivetEngine, type MeshEngine, type MeshHandoffMessage, type MeshNodeInfo } from "./mesh-engine.ts";
+import type { MeshEngine, MeshHandoffMessage, MeshNodeInfo } from "./mesh-engine.ts";
 import type { XferNotifyMessage } from "./types.ts";
 import { msgId } from "./utils.ts";
+
+/** Name of the committed esbuild bundle hosting the rivetkit runtime. */
+export const MESH_RUNTIME_BUNDLE = "mesh-runtime.cjs";
+
+/**
+ * Load the committed rivetkit runtime bundle (mesh-runtime.cjs, built by
+ * `npm run build`). Throws with recovery guidance when missing.
+ */
+export async function loadMeshRuntimeBundle(dir = import.meta.dirname): Promise<any> {
+  const bundleUrl = url.pathToFileURL(path.join(dir, MESH_RUNTIME_BUNDLE)).href;
+  try {
+    const mod = await import(bundleUrl);
+    if (typeof mod?.createRivetEngine !== "function") throw new Error("bundle does not export createRivetEngine");
+    return mod;
+  } catch (err) {
+    throw new Error(
+      `mesh runtime bundle unavailable (${err instanceof Error ? err.message : String(err)}) — ` +
+      `run \`npm run build\` in the xfer extension directory to rebuild ${MESH_RUNTIME_BUNDLE}`,
+    );
+  }
+}
 
 export interface MeshNodeOptions {
   /** Where mesh.config.json lives; defaults to XFER_DIR via the caller. */
   configPath: string;
   /** Route an inbound mesh handoff into the session (the local deliver pipeline). */
   deliver: (msg: XferNotifyMessage) => void;
-  /** Engine factory override for tests. */
-  engineFactory?: (config: MeshConfig) => MeshEngine;
+  /** Engine factory override for tests; defaults to loading the committed mesh-runtime.cjs bundle. */
+  engineFactory?: (config: MeshConfig) => MeshEngine | Promise<MeshEngine>;
 }
 
 export type MeshStatus =
@@ -26,14 +48,17 @@ export type MeshStatus =
 export class MeshNode {
   private readonly configPath: string;
   private readonly deliver: (msg: XferNotifyMessage) => void;
-  private readonly engineFactory: (config: MeshConfig) => MeshEngine;
+  private readonly engineFactory: (config: MeshConfig) => MeshEngine | Promise<MeshEngine>;
   private engine: MeshEngine | null = null;
   private nodeName: string | null = null;
 
   constructor(options: MeshNodeOptions) {
     this.configPath = options.configPath;
     this.deliver = options.deliver;
-    this.engineFactory = options.engineFactory ?? ((config) => createRivetEngine(config, (message) => this.onHandoff(message)));
+    this.engineFactory = options.engineFactory ?? (async (config) => {
+      const bundle = await loadMeshRuntimeBundle();
+      return bundle.createRivetEngine(config, (message: MeshHandoffMessage) => this.onHandoff(message));
+    });
   }
 
   status(): MeshStatus {

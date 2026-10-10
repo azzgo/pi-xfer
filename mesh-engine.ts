@@ -1,4 +1,5 @@
 import { HANDOFF_QUEUE, XFER_INSTANCE_ACTOR, deserializeMeshKey, type MeshConfig } from "./mesh-config.ts";
+import { ensureNativeRuntimeReady } from "./mesh-native.ts";
 
 /** Inline handoff payload carried by the mesh handoff queue. */
 export interface MeshHandoffMessage {
@@ -38,16 +39,8 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
 
   const engine: MeshEngine = {
     async ensureNode(name: string) {
-      let rivetkit: typeof import("rivetkit");
-      try {
-        rivetkit = await import("rivetkit");
-      } catch (err) {
-        throw new Error(
-          "rivetkit is not installed — run `npm install` in the xfer extension directory (it is an optional dependency, ~2.4GB with the local engine binaries)",
-          { cause: err instanceof Error ? err : undefined },
-        );
-      }
-      const { actor, queue, setup } = rivetkit;
+      await ensureNativeRuntimeReady();
+      const { actor, queue, setup } = await import("rivetkit");
       const xferInstance = actor({
         state: {},
         queues: {
@@ -64,9 +57,11 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
         endpoint: config.endpoint,
         namespace: config.namespace,
         token: config.token,
+        runtime: "native",
       });
-      await (reg as any).startAndWait();
-      registry = reg as any;
+      const regAny = reg as unknown as { startAndWait(): Promise<void>; shutdown(): Promise<void> };
+      await regAny.startAndWait();
+      registry = regAny;
       const { createClient } = await import("rivetkit/client");
       client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
       client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
