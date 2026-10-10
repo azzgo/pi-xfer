@@ -156,6 +156,7 @@ describe("mesh messaging", () => {
     assert.equal(state.sent[0].target, "phone");
     assert.equal(state.sent[0].message.id, id);
     assert.equal(state.sent[0].message.from, "web");
+    assert.equal(state.sent[0].message.to, "phone");
     assert.equal(state.sent[0].message.summary, "fix the thing");
     assert.equal(state.sent[0].message.document, "# Handoff\n\nbody");
   });
@@ -180,12 +181,13 @@ describe("mesh inbound delivery", () => {
     const delivered: XferNotifyMessage[] = [];
     const engine = fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] });
     const sink = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), engine, delivered);
-    (sink as unknown as { onHandoff(m: MeshHandoffMessage): void }).onHandoff({
+    (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
       id: "mid-1",
       from: "web",
+      to: "sink",
       summary: "check auth flow",
       document: "# doc body",
-    });
+    }, "sink");
     assert.equal(delivered.length, 1);
     const msg = delivered[0];
     assert.equal(msg.type, "xfer-notify");
@@ -195,6 +197,46 @@ describe("mesh inbound delivery", () => {
     assert.match(msg.file, /pi-xfer-mid-1\.md$/);
     assert.equal(fs.readFileSync(msg.file, "utf-8"), "# doc body");
     fs.rmSync(msg.file, { force: true });
+  });
+
+  it("refuses a handoff addressed to another node instead of delivering it", async () => {
+    const delivered: XferNotifyMessage[] = [];
+    const sink = makeNode(
+      writeConfig({ endpoint: "http://localhost:6420" }),
+      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] }),
+      delivered,
+    );
+    (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
+      id: "mid-2",
+      from: "web",
+      to: "phone",
+      summary: "meant for phone",
+      document: "# not mine",
+    }, "sink");
+    assert.equal(delivered.length, 1, "misroute is surfaced, not dropped");
+    assert.equal(delivered[0].msg_id, "mid-2");
+    assert.equal(delivered[0].from, "web");
+    assert.ok(!fs.existsSync(path.join(os.tmpdir(), "pi-xfer-mid-2.md")), "no doc is written for a misrouted handoff");
+    assert.match(delivered[0].summary, /misroute/);
+  });
+
+  it("delivers a handoff with no `to` for compatibility with older senders", async () => {
+    const delivered: XferNotifyMessage[] = [];
+    const sink = makeNode(
+      writeConfig({ endpoint: "http://localhost:6420" }),
+      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] }),
+      delivered,
+    );
+    (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
+      id: "mid-3",
+      from: "web",
+      summary: "legacy",
+      document: "# legacy body",
+    }, "sink");
+    assert.equal(delivered.length, 1);
+    assert.equal(delivered[0].msg_id, "mid-3");
+    assert.equal(fs.readFileSync(delivered[0].file, "utf-8"), "# legacy body");
+    fs.rmSync(delivered[0].file, { force: true });
   });
 });
 

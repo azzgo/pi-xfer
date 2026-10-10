@@ -48526,8 +48526,9 @@ function createRivetEngine(config3, onHandoff) {
           [HANDOFF_QUEUE]: queue2()
         },
         run: async (c) => {
+          const selfKey = c.key[0] ?? "";
           for await (const message of c.queue.iter()) {
-            onHandoff(message.body);
+            onHandoff(message.body, selfKey);
           }
         }
       });

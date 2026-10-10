@@ -5,6 +5,8 @@ import { ensureNativeRuntimeReady } from "./mesh-native.ts";
 export interface MeshHandoffMessage {
   id: string;
   from: string;
+  /** Intended recipient node name. Absent on messages from older senders. */
+  to?: string;
   summary: string;
   document: string;
 }
@@ -36,7 +38,7 @@ export interface MeshEngine {
 /** Bound on queue enqueue so a stuck/unreachable target errors instead of hanging. */
 const QUEUE_SEND_TIMEOUT_MS = 30_000;
 
-export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshHandoffMessage) => void): MeshEngine {
+export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshHandoffMessage, selfKey: string) => void): MeshEngine {
   let registry: { shutdown(): Promise<void> } | null = null;
   let client: any = null;
 
@@ -50,8 +52,9 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
           [HANDOFF_QUEUE]: queue<MeshHandoffMessage>(),
         },
         run: async (c) => {
+          const selfKey = c.key[0] ?? "";
           for await (const message of c.queue.iter()) {
-            onHandoff(message.body);
+            onHandoff(message.body, selfKey);
           }
         },
       });

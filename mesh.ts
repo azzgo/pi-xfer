@@ -57,7 +57,7 @@ export class MeshNode {
     this.deliver = options.deliver;
     this.engineFactory = options.engineFactory ?? (async (config) => {
       const bundle = await loadMeshRuntimeBundle();
-      return bundle.createRivetEngine(config, (message: MeshHandoffMessage) => this.onHandoff(message));
+      return bundle.createRivetEngine(config, (message: MeshHandoffMessage, selfKey: string) => this.onHandoff(message, selfKey));
     });
   }
 
@@ -111,7 +111,7 @@ export class MeshNode {
     const id = msgId();
     const from = this.nodeName;
     if (!this.engine || !from) throw new Error("mesh is not online — run /xfer mesh up first");
-    const message: MeshHandoffMessage = { id, from, summary: params.summary, document: params.document };
+    const message: MeshHandoffMessage = { id, from, to: target, summary: params.summary, document: params.document };
     await this.engine.queueSend(target, message);
     return { id };
   }
@@ -121,8 +121,20 @@ export class MeshNode {
     try { await this.down(); } catch { /* best effort on process exit */ }
   }
 
-  /** Inbound queue message → tmp doc on this machine → local deliver pipeline. */
-  private onHandoff(message: MeshHandoffMessage): void {
+  /**
+   * Inbound queue message → tmp doc on this machine → local deliver pipeline.
+   *
+   * `selfKey` is the actor key this process actually owns. A message addressed
+   * to a different node means the transport misrouted it; delivering it here
+   * would silently hand the wrong agent a handoff, so it is refused and
+   * reported instead. Messages without `to` predate this check and are
+   * delivered for compatibility.
+   */
+  private onHandoff(message: MeshHandoffMessage, selfKey: string): void {
+    if (message.to !== undefined && message.to !== selfKey) {
+      this.onMisroute(message, selfKey);
+      return;
+    }
     const docPath = path.join(os.tmpdir(), `pi-xfer-${message.id}.md`);
     fs.writeFileSync(docPath, message.document, { encoding: "utf-8", mode: 0o600 });
     this.deliver({
@@ -131,6 +143,25 @@ export class MeshNode {
       from: message.from,
       file: docPath,
       summary: message.summary,
+    });
+  }
+
+  /**
+   * A handoff addressed elsewhere reached this node: the mesh transport
+   * misrouted it. Surface it rather than dropping it silently — the sender
+   * otherwise sees a successful send while the message never arrives.
+   */
+  private onMisroute(message: MeshHandoffMessage, selfKey: string): void {
+    const detail =
+      `mesh misroute: handoff ${message.id} from "${message.from}" was addressed to ` +
+      `"${message.to}" but reached "${selfKey || "<unknown>"}" — refusing to deliver it here`;
+    console.warn(`[xfer] ${detail}`);
+    this.deliver({
+      type: "xfer-notify",
+      msg_id: message.id,
+      from: message.from,
+      file: "(refused — misrouted)",
+      summary: `⚠️ ${detail}`,
     });
   }
 
