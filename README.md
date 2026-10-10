@@ -7,7 +7,6 @@ Formerly maintained inside [azzgo/dotfiles](https://github.com/azzgo/dotfiles) (
 ## Install
 
 ```bash
-```bash
 pi install npm:pi-xfer
 ```
 
