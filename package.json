@@ -1,7 +1,37 @@
 {
   "name": "pi-xfer",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Cross-context handoff extension for pi coding agents: structured markdown handoffs over local sockets, cross-machine mesh transport, async board, and web picker.",
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "coding-agent",
+    "handoff",
+    "agent-to-agent",
+    "context-transfer",
+    "mesh"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/azzgo/pi-xfer.git"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "*.ts",
+    "!*.test.ts",
+    "ts-resolve-hook.mjs",
+    "mesh-runtime.cjs",
+    "mesh-runtime.cjs.sha256",
+    "web-picker.user.js",
+    "CONTEXT.md",
+    "README.md",
+    "LICENSE",
+    "docs/"
+  ],
   "scripts": {
     "build": "node build.mjs",
     "test": "node --import './ts-resolve-hook.mjs' --test"
