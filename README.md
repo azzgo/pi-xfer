@@ -39,6 +39,10 @@ Manual install, shortcuts and troubleshooting:
 | `/xfer <target> <request>` | handoff to a peer (LLM doc + `xfer_to`) |
 | `/xfer gc` | reap zombie peer sockets (dead pid / no listener) |
 | `/xfer status` | listener status summary |
+| `/xfer mesh` | mesh status (opt-in cross-machine transport) |
+| `/xfer mesh up` / `down` | bring this instance online as its xfer name / destroy the node and go offline |
+| `/xfer mesh list` | list mesh nodes (live engine query, no cache) |
+| `/xfer mesh <name> <request>` | handoff to a mesh node (LLM doc + `xfer_mesh_to`, doc sent inline) |
 
 ### Zombie socket GC
 
@@ -69,6 +73,23 @@ from the browser userscript, not an agent — it has no xfer socket and can neve
 be an `xfer_to` target. The only return channel is the broker page-tool CLI
 described in the doc's "Follow-up channel" section.
 
+### Mesh (opt-in cross-machine transport)
+
+Local Unix-socket delivery above is unaffected by the mesh; the two transports
+are explicit and never auto-fallback. To join, create `~/.pi/xfer/mesh.config.json`:
+
+```json
+{ "endpoint": "http://localhost:6420", "namespace": "default", "token": "sk_..." }
+```
+
+(namespace/token may also ride the endpoint as URL auth: `https://ns:token@host`.)
+`/xfer mesh up` starts a RivetKit worker in-process (single `xfer-instance`
+actor, key = xfer name) and refuses if a same-name node already exists on the
+engine. Inbound mesh handoffs land in `/tmp/pi-xfer-<id>.md` and flow through
+the same delivery pipeline as local socks, labeled `· mesh`. rivetkit is an
+optional dependency (~2.4GB with local engine binaries) — run `npm install`
+in this directory; without it `mesh up` fails with a hint.
+
 ## Protocol
 
 - Unix socket at `~/.pi/xfer/<name>.sock` (always on)
@@ -96,5 +117,8 @@ npm test    # node --test, zero deps (inline .js→.ts resolve hook)
 | `server.ts` | inbound server: parse frames, deliver, ack (unix socket) |
 | `utils.ts` | pure helpers: name encoding, endpoints, peer listing |
 | `constants.ts` | paths + timeouts |
+| `mesh.ts` | mesh node lifecycle + inline handoff send/receive (opt-in) |
+| `mesh-engine.ts` | RivetKit adapter: actor definition, engine REST discovery, queue send |
+| `mesh-config.ts` | `mesh.config.json` parsing + actor key (de)serialization |
 | `types.ts` | `PeerInfo`, `XferNotifyMessage`, `Identity` |
 | `web-picker.user.js` | Tampermonkey page-side picker — see [docs/web-picker.md](docs/web-picker.md) |

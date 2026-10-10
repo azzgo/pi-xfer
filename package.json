@@ -6,6 +6,9 @@
     "build": "node build.mjs",
     "test": "node --import './ts-resolve-hook.mjs' --test"
   },
+  "optionalDependencies": {
+    "rivetkit": "^2.3.26"
+  },
   "devDependencies": {
     "esbuild": "^0.28.2"
   }

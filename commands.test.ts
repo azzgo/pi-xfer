@@ -76,7 +76,7 @@ function makeIdentity(): Identity {
 }
 
 /** Register against stubs; return the captured definition plus invoke helpers. */
-function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string; xferDir?: string; boardDir?: string } = {}): {
+function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string; xferDir?: string; boardDir?: string; mesh?: any } = {}): {
   description: string | undefined;
   handler: (args: string) => Promise<void>;
   completions: (prefix: string) => AutocompleteItem[] | null;
@@ -95,7 +95,7 @@ function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: strin
     state: { identity: makeIdentity(), sessionName: () => undefined },
   } as unknown as XferController;
 
-  registerXferCommand(pi, controller, { brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir, boardDir: options.boardDir });
+  registerXferCommand(pi, controller, { brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir, boardDir: options.boardDir, mesh: options.mesh });
   assert.ok(def, "registerCommand was not captured");
   const ctx = {
     ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
@@ -401,5 +401,85 @@ describe("xfer command: board subcommand", () => {
     await h.handler("board new my topic");
     const ids = (h.completions("board read ") ?? []).map((i) => i.value);
     assert.deepEqual(ids, ["board read c-0001"]);
+  });
+});
+
+/** MeshNode stub recording lifecycle calls; configurable status/list results. */
+function stubMesh(overrides: Partial<{ status: () => any; list: () => Promise<any[]>; up: () => Promise<void>; down: () => Promise<void> }> = {}) {
+  const calls: string[] = [];
+  return {
+    calls,
+    status: overrides.status ?? (() => ({ online: false })),
+    list: overrides.list ?? (async () => { calls.push("list"); return [{ name: "phone", actorId: "a1" }]; }),
+    up: overrides.up ?? (async () => { calls.push("up"); }),
+    down: overrides.down ?? (async () => { calls.push("down"); }),
+    send: async (target: string, params: { summary: string; document: string }) => {
+      calls.push(`send ${target}`);
+      return { id: "mid-9" };
+    },
+  } as any;
+}
+
+describe("xfer command: mesh subcommand", () => {
+  it("shows mesh help", async () => {
+    const mesh = stubMesh();
+    const h = harness({ mesh });
+    await h.handler("mesh");
+    assert.match(h.notifications[0].message, /\/xfer mesh up/);
+    assert.deepEqual(mesh.calls, []);
+  });
+
+  it("up goes online and reports the node name", async () => {
+    const mesh = stubMesh();
+    const h = harness({ mesh });
+    await h.handler("mesh up");
+    assert.deepEqual(mesh.calls, ["up"]);
+    assert.match(h.notifications[0].message, /🟢 Mesh online as "test-agent"/);
+  });
+
+  it("down goes offline", async () => {
+    const mesh = stubMesh();
+    const h = harness({ mesh });
+    await h.handler("mesh down");
+    assert.deepEqual(mesh.calls, ["down"]);
+    assert.match(h.notifications[0].message, /🛑 Mesh offline/);
+  });
+
+  it("list queries the engine live and marks this node", async () => {
+    const mesh = stubMesh({
+      status: () => ({ online: true, name: "test-agent" }),
+      list: async () => { mesh.calls.push("list"); return [{ name: "phone", actorId: "a1" }, { name: "test-agent", actorId: "a2" }]; },
+    });
+    const h = harness({ mesh });
+    await h.handler("mesh list");
+    assert.deepEqual(mesh.calls, ["list"]);
+    assert.match(h.notifications[0].message, /phone/);
+    assert.match(h.notifications[0].message, /test-agent \(this node\)/);
+  });
+
+  it("mesh <name> <request> prompts the agent to use xfer_mesh_to", async () => {
+    const mesh = stubMesh({ status: () => ({ online: true, name: "test-agent" }) });
+    const h = harness({ mesh });
+    await h.handler("mesh phone review the patch");
+    assert.equal(h.sent.length, 1);
+    assert.match(h.sent[0].content, /\*\*Target\*\*: phone \(mesh node/);
+    assert.match(h.sent[0].content, /xfer_mesh_to/);
+    assert.equal(h.sent[0].options?.deliverAs, "followUp");
+  });
+
+  it("mesh <name> without the node online is rejected before prompting", async () => {
+    const mesh = stubMesh();
+    const h = harness({ mesh });
+    await h.handler("mesh phone review the patch");
+    assert.equal(h.sent.length, 0);
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /offline/);
+  });
+
+  it("completions offer the mesh group and its subcommands", () => {
+    const mesh = stubMesh();
+    const h = harness({ mesh });
+    assert.deepEqual((h.completions("mesh") ?? []).map((i) => i.value), ["mesh"]);
+    assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "up"]);
   });
 });

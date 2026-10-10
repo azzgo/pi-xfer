@@ -23,9 +23,11 @@ export class XferController {
   }
 
   /** Route one inbound frame into the session. */
-  private deliverInbound(msg: XferNotifyMessage): void {
+  /** Route one inbound frame into the session. `transport` labels non-local paths ("mesh"). */
+  deliverInbound(msg: XferNotifyMessage, transport?: "mesh"): void {
     const { pi, state } = this;
     const isIdle = state.isRuntimeIdle();
+    const via = transport ? ` · ${transport}` : "";
     const body =
       `**Request**: ${msg.summary}\n\n` +
       `**Doc**: \`${msg.file}\`\n\n` +
@@ -43,7 +45,7 @@ export class XferController {
             `\`node ${path.join(import.meta.dirname, "broker-main.ts")} page-tool ${state.identity?.name ?? "<own-name>"} dom.query '{"selector":"button","maxCount":5}'\``
           )
         : (
-            `📨 [Xfer from **${msg.from}**]\n\n` +
+            `📨 [Xfer from **${msg.from}**${via}]\n\n` +
             body +
             "\n\nXfer is one-way — only reply if you have meaningful new information to communicate back."
           );

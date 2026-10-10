@@ -7,6 +7,8 @@ import { registerBoard, renderCard } from "./board.js";
 import type { XferController } from "./controller.js";
 import { BrokerManager } from "./broker-manager.js";
 import { collectGarbage } from "./gc.js";
+import { MESH_CONFIG_PATH } from "./constants.js";
+import type { MeshNode } from "./mesh.js";
 import { XFER_DIR } from "./constants.js";
 import { endpointForName, listPeers, peerDescription } from "./utils.js";
 
@@ -20,6 +22,9 @@ export interface XferCommandOptions {
   xferDir?: string;
   /** Board directory; defaults to ~/.pi/xfer/board. */
   boardDir?: string;
+  boardDir?: string;
+  /** Mesh transport node; when absent the `/xfer mesh` command group is unavailable. */
+  mesh?: MeshNode;
 }
 
 /** Listener summary shared by `/xfer list` and `/xfer status`. */
@@ -83,6 +88,19 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       }
 
       const peers = listPeers(controller.state.identity?.name ?? "");
+      // `/xfer mesh <TAB>` completes the mesh subcommand group.
+      if (prefix.startsWith("mesh ") || prefix === "mesh") {
+        if (prefix === "mesh") {
+          return [{ value: "mesh", label: "mesh", description: "Mesh transport: status / up / down / list / <name> <request>" }];
+        }
+        const subPrefix = prefix.slice("mesh ".length).replace(/^\s+/, "");
+        const items: AutocompleteItem[] = [
+          { value: "mesh up", label: "up", description: "Bring this instance online as its xfer name (needs mesh.config.json)" },
+          { value: "mesh down", label: "down", description: "Destroy this node and go offline" },
+          { value: "mesh list", label: "list", description: "List mesh nodes (live engine query)" },
+        ].filter(i => i.label.startsWith(subPrefix));
+        return items.length > 0 ? items : null;
+      }
       const all: AutocompleteItem[] = [
         { value: "list", label: "list", description: "List available peers" },
         { value: "name", label: "name", description: "Show or set this agent's name" },
@@ -90,6 +108,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "board", label: "board", description: "Async collaboration board: list / new / read / write / del / clean / open" },
         { value: "gc", label: "gc", description: "Reap zombie peer sockets (dead pid / no listener)" },
         { value: "status", label: "status", description: "Show listener status" },
+        { value: "mesh", label: "mesh", description: "Mesh transport: status / up / down / list / <name> <request>" },
         ...peers.map(peer => ({
           value: peer.xferName,
           label: peer.xferName,
@@ -114,6 +133,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer name [<name>]      — show or set name\n" +
           "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
+          "   /xfer mesh [<up|down|list|name> <request>] — mesh transport\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
 
           "\n" +
@@ -207,6 +227,94 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         // logs — tail <xferDir>/broker.log without touching the daemon.
         ctx.ui.notify(brokerLogTail(brokerXferDir), "info");
+        return;
+      }
+
+      // ── /xfer mesh — opt-in cross-machine transport ──
+      if (cmd === "mesh") {
+        const mesh = options.mesh;
+        if (!mesh) {
+          ctx.ui.notify("❌ Mesh transport is not available in this session", "error");
+          return;
+        }
+        const sub = parts[1];
+        if (!sub || sub === "help") {
+          ctx.ui.notify(
+            "🌐 /xfer mesh               — mesh status\n" +
+            "   /xfer mesh up           — bring this instance online (as its xfer name)\n" +
+            "   /xfer mesh down         — destroy this node and go offline\n" +
+            "   /xfer mesh list         — list mesh nodes (live engine query)\n" +
+            "   /xfer mesh <name> <request> — send a one-way handoff via mesh",
+            "info",
+          );
+          return;
+        }
+        if (sub === "up") {
+          const name = state.identity?.name;
+          if (!name) {
+            ctx.ui.notify("❌ Xfer is not initialised", "error");
+            return;
+          }
+          try {
+            await mesh.up(name);
+            ctx.ui.notify(`🟢 Mesh online as "${name}" (engine: ${MESH_CONFIG_PATH})`, "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        if (sub === "down") {
+          try {
+            await mesh.down();
+            ctx.ui.notify("🛑 Mesh offline", "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        if (sub === "list") {
+          try {
+            const nodes = await mesh.list();
+            const status = mesh.status();
+            const lines = nodes.map((n) => `  ${n.name}${status.online && status.name === n.name ? " (this node)" : ""}`);
+            ctx.ui.notify(nodes.length ? `🌐 Mesh nodes:\n${lines.join("\n")}` : "🌐 No mesh nodes online", "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        const target = sub;
+        const requirement = parts.slice(2).join(" ").trim();
+        if (!requirement) {
+          ctx.ui.notify(`Usage: /xfer mesh ${target} <request>`, "error");
+          return;
+        }
+        if (!mesh.status().online) {
+          ctx.ui.notify("❌ Mesh is offline — run /xfer mesh up first", "error");
+          return;
+        }
+        if (!state.identity) {
+          ctx.ui.notify("❌ Xfer is not initialised", "error");
+          return;
+        }
+        pi.sendUserMessage(
+          `## Handoff Request (mesh, one-way)\n\n` +
+          `**Target**: ${target} (mesh node — use the \`xfer_mesh_to\` tool, not \`xfer_to\`)\n` +
+          `**From**: ${state.identity.name}\n` +
+          `**Request**: ${requirement}\n\n` +
+          `Based on chat context, write a markdown handoff doc ` +
+          `and call \`xfer_mesh_to\` to send it to ${target} over the mesh.\n\n` +
+          `Handoff doc must include:\n` +
+          `- Context summary\n` +
+          `- Problem to solve\n` +
+          `- Specific requirements\n` +
+          `- Relevant files/code references\n` +
+          `- **Suggested skills**: Skills from the agent's repertoire that would help complete the task.\n` +
+          `- **Return address**: from=\`${state.identity.name}\`. Only reply back if you have new information to communicate.\n` +
+          `- Notes\n\n` +
+          `Note: mesh xfer is one-way, no reply wait. The doc is sent inline (no /tmp path on the other machine).`,
+          { deliverAs: "followUp", triggerTurn: true },
+        );
         return;
       }
 
