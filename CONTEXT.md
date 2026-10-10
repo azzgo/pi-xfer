@@ -1,5 +1,15 @@
 # Xfer — Language
 
+## Mesh (opt-in cross-machine transport)
+
+**Mesh**:
+The opt-in cross-machine transport where an agent instance joins a shared actor network to discover and message remote peers. Joining is per-instance and manual; local Unix-socket delivery is unaffected and remains the default path.
+_Avoid_: network, cluster, swarm, overlay
+
+**Node**:
+A pi agent instance that has joined the Mesh — one actor, one outbound engine connection, one independent participant. The unit of joining, addressing, and liveness.
+_Avoid_: peer (reserved for local socket discovery), bridge, worker
+
 Glossary for the xfer extension. Implementation details live in `docs/`; this file only fixes terms.
 
 ## Board (async cross-agent collaboration)
