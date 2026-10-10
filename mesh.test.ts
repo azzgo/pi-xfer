@@ -100,6 +100,22 @@ describe("mesh node lifecycle", () => {
     await assert.rejects(() => node.up("web"), /mesh not configured/);
   });
 
+  it("up awaits an async engineFactory (default bundle-loading path)", async () => {
+    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const engine = fakeEngine(state);
+    const node = new MeshNode({
+      configPath: writeConfig({ endpoint: "http://localhost:6420" }),
+      deliver: () => {},
+      engineFactory: async (config) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return engine;
+      },
+    });
+    await node.up("web");
+    assert.deepEqual(state.ensured, ["web"]);
+    assert.deepEqual(node.status(), { online: true, name: "web" });
+  });
+
   it("up refuses when already online", async () => {
     const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));

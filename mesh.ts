@@ -79,7 +79,7 @@ export class MeshNode {
     const current = this.status();
     if (current.online) throw new Error(`mesh is already online as "${current.name}" — /xfer mesh down first`);
     const config = loadMeshConfig(this.configPath);
-    const engine = this.engineFactory(config);
+    const engine = await this.engineFactory(config);
     const existing = await engine.listNodes();
     const conflict = existing.find((node) => node.name === name);
     if (conflict) {
