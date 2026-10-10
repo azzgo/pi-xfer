@@ -48512,6 +48512,7 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
 }
 
 // mesh-engine.ts
+var QUEUE_SEND_TIMEOUT_MS = 3e4;
 function createRivetEngine(config3, onHandoff) {
   let registry2 = null;
   let client = null;
@@ -48542,7 +48543,8 @@ function createRivetEngine(config3, onHandoff) {
       registry2 = regAny;
       const { createClient: createClient2 } = await Promise.resolve().then(() => (init_mod3(), mod_exports2));
       client = createClient2({ endpoint: config3.endpoint, namespace: config3.namespace, token: config3.token });
-      client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      const handle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      await handle.resolve();
     },
     async stop() {
       if (registry2) {
@@ -48561,7 +48563,14 @@ function createRivetEngine(config3, onHandoff) {
     async queueSend(target2, message) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
       const handle = client.get(XFER_INSTANCE_ACTOR, [target2]);
-      await handle.send(HANDOFF_QUEUE, message);
+      try {
+        await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
+      } catch (err) {
+        throw new Error(
+          `mesh: enqueue to "${target2}" failed — ${err instanceof Error ? err.message : String(err)} (target may be offline or stuck; the durable queue buffers only after the actor is reachable)`,
+          { cause: err instanceof Error ? err : void 0 }
+        );
+      }
     }
   };
   return engine;
