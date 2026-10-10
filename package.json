@@ -4,6 +4,7 @@
   "description": "Cross-context handoff extension for pi coding agents: structured markdown handoffs over local sockets, cross-machine mesh transport, async board, and web picker.",
   "keywords": [
     "pi",
+    "pi-package",
     "pi-extension",
     "coding-agent",
     "handoff",
@@ -11,6 +12,9 @@
     "context-transfer",
     "mesh"
   ],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
