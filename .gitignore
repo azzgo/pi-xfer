@@ -1,4 +1,5 @@
 node_modules/
+.pi/
 *.tgz
 npm-debug.log*
 .DS_Store
