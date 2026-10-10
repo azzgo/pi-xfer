@@ -7,10 +7,22 @@ Formerly maintained inside [azzgo/dotfiles](https://github.com/azzgo/dotfiles) (
 ## Install
 
 ```bash
+```bash
+pi install npm:pi-xfer
+```
+
+Or from GitHub:
+
+```bash
 pi install git+https://github.com/azzgo/pi-xfer
 ```
 
-No npm release yet; GitHub install is the current channel.
+## Web picker userscript
+
+Install the Tampermonkey userscript straight from the raw URL (the `.user.js`
+suffix triggers Tampermonkey's install prompt):
+
+<https://raw.githubusercontent.com/azzgo/pi-xfer/main/web-picker.user.js>
 
 ## Positioning
 
