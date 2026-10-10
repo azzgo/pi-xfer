@@ -43,9 +43,9 @@ export function peerDescription(peer: PeerInfo): string {
   return details.join(" · ");
 }
 
-export function readPeerMetadata(xferName: string): Partial<PeerInfo> {
+export function readPeerMetadata(xferName: string, xferDir: string = XFER_DIR): Partial<PeerInfo> {
   try {
-    const raw: unknown = JSON.parse(fs.readFileSync(metadataForName(xferName), "utf-8"));
+    const raw: unknown = JSON.parse(fs.readFileSync(path.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
     const value = raw as Record<string, unknown>;
     return {
@@ -77,11 +77,11 @@ export function deriveName(pi: ExtensionAPI): string {
   return `${base}_${suffix}`;
 }
 
-/** All reachable peers (sockets present in XFER_DIR, excluding myself). */
-export function listPeers(myName: string): PeerInfo[] {
+/** All reachable peers (sockets present in xferDir, defaulting to XFER_DIR, excluding myself). */
+export function listPeers(myName: string, xferDir: string = XFER_DIR): PeerInfo[] {
   try {
-    fs.mkdirSync(XFER_DIR, { recursive: true, mode: 0o700 });
-    const names = fs.readdirSync(XFER_DIR)
+    fs.mkdirSync(xferDir, { recursive: true, mode: 0o700 });
+    const names = fs.readdirSync(xferDir)
       .filter(f => f.endsWith(".sock"))
       .map(f => decodeAgentName(f.replace(/\.sock$/, "")))
       .filter(n => n !== myName);
@@ -89,7 +89,7 @@ export function listPeers(myName: string): PeerInfo[] {
       .map((xferName): PeerInfo => ({
         xferName,
         endpoint: endpointForName(xferName),
-        ...readPeerMetadata(xferName),
+        ...readPeerMetadata(xferName, xferDir),
       }))
       .sort((a, b) => a.xferName.localeCompare(b.xferName));
   } catch { return []; }

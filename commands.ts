@@ -87,7 +87,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         return items.length > 0 ? items : null;
       }
 
-      const peers = listPeers(controller.state.identity?.name ?? "");
+      const peers = listPeers(controller.state.identity?.name ?? "", xferDir);
       // `/xfer mesh <TAB>` completes the mesh subcommand group.
       if (prefix.startsWith("mesh ") || prefix === "mesh") {
         if (prefix === "mesh") {
@@ -145,7 +145,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
 
       // ── list ──
       if (cmd === "list") {
-        const peers = listPeers(state.identity?.name ?? "");
+        const peers = listPeers(state.identity?.name ?? "", xferDir);
         let text = peers.length
           ? `📡 Peers:\n\n${peers.map(peer => `  ${peer.xferName}\n    ${peerDescription(peer)}`).join("\n\n")}`
           : "📡 No peers found";

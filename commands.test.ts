@@ -95,7 +95,7 @@ function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: strin
     state: { identity: makeIdentity(), sessionName: () => undefined },
   } as unknown as XferController;
 
-  registerXferCommand(pi, controller, { brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir, boardDir: options.boardDir, mesh: options.mesh });
+  registerXferCommand(pi, controller, { brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir ?? tmpDir, boardDir: options.boardDir, mesh: options.mesh });
   assert.ok(def, "registerCommand was not captured");
   const ctx = {
     ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
@@ -132,6 +132,7 @@ function stubBrokerManager(
 
 describe("xfer command: list", () => {
   it("keeps the local section and shows the listener line", async () => {
+    fs.writeFileSync(path.join(tmpDir, "peer-one.sock"), "");
     const h = harness();
     await h.handler("list");
     assert.equal(h.notifications.length, 1);
