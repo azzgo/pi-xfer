@@ -24,6 +24,10 @@ pushed `v*` tag.
    `package.json`'s version and aborts on mismatch, so never hand-edit one
    without the other.
 
+   If you touched `dependencies` / `peerDependencies` / `devDependencies`,
+   run `npm install` first so `package-lock.json` is in sync — `npm ci`
+   in CI fails on an out-of-date lockfile.
+
 2. **Push the branch and the tag together**:
 
    ```bash
