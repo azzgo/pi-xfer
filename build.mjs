@@ -9,47 +9,17 @@
 //    ~/.pi/xfer/cache). Building requires rivetkit in node_modules; when
 //    missing it is installed --no-save at the version pinned in
 //    mesh-native.ts (RIVETKIT_VERSION) so bundle and download pin never drift.
+//
+// buildMeshRuntime() is exported so mesh-bundle.test.ts can rebuild to a temp
+// file and assert the committed bundle is byte-identical (漏提交防线).
 
 import { build } from 'esbuild';
-/** @type {import('esbuild').Plugin} */ 
 import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-
-// ── 1. web-picker.user.js ──
-const banner = readFileSync(join(here, 'web-picker.src/banner.js'), 'utf8');
-
-await build({
-  entryPoints: [join(here, 'web-picker.src/main.js')],
-  bundle: true,
-  format: 'iife',
-  outfile: join(here, 'web-picker.user.js'),
-  banner: { js: banner },
-  charset: 'utf8',
-  target: 'es2020',
-  sourcemap: false,
-  legalComments: 'none',
-  logLevel: 'info',
-});
-
-// ── 2. mesh-runtime.cjs ──
-const versionPin = readFileSync(join(here, 'mesh-native.ts'), 'utf8')
-  .match(/RIVETKIT_VERSION = "([^"]+)"/)?.[1];
-if (!versionPin) throw new Error('cannot read RIVETKIT_VERSION from mesh-native.ts');
-
-const rivetkitPkg = join(here, 'node_modules/rivetkit/package.json');
-if (!existsSync(rivetkitPkg)) {
-  console.log(`rivetkit not installed — installing --no-save for the bundle build (not a runtime dep)...`);
-  const result = spawnSync('npm', ['install', '--no-save', `rivetkit@${versionPin}`], { cwd: here, stdio: 'inherit' });
-  if (result.status !== 0) throw new Error(`failed to install rivetkit@${versionPin} for the bundle build`);
-}
-const rivetkitVersion = JSON.parse(readFileSync(rivetkitPkg, 'utf8')).version;
-if (rivetkitVersion !== versionPin) {
-  throw new Error(`rivetkit ${rivetkitVersion} in node_modules != pinned ${versionPin} (mesh-native.ts) — align them before building`);
-}
 
 // rivetkit's napi-runtime.ts deliberately keeps its native-addon specifier
 // computed so bundlers never capture the .node file; esbuild therefore emits a
@@ -98,17 +68,57 @@ globalThis.__meshLoadEngineCli = async () => {
 };
 `;
 
-await build({
-  entryPoints: [join(here, 'mesh-runtime.src/index.ts')],
-  bundle: true,
-  platform: 'node',
-  format: 'cjs',
-  target: 'node20',
-  outfile: join(here, 'mesh-runtime.cjs'),
-  banner: { js: meshRuntimeBanner },
-  plugins: [napiRuntimeRewrite],
-  charset: 'utf8',
-  sourcemap: false,
-  legalComments: 'none',
-  logLevel: 'info',
-});
+/** Rebuild mesh-runtime.cjs (or any outfile) exactly as `npm run build` does. */
+export async function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs')) {
+  const versionPin = readFileSync(join(here, 'mesh-native.ts'), 'utf8')
+    .match(/RIVETKIT_VERSION = "([^"]+)"/)?.[1];
+  if (!versionPin) throw new Error('cannot read RIVETKIT_VERSION from mesh-native.ts');
+
+  const rivetkitPkg = join(here, 'node_modules/rivetkit/package.json');
+  if (!existsSync(rivetkitPkg)) {
+    console.log(`rivetkit not installed — installing --no-save for the bundle build (not a runtime dep)...`);
+    const result = spawnSync('npm', ['install', '--no-save', `rivetkit@${versionPin}`], { cwd: here, stdio: 'inherit' });
+    if (result.status !== 0) throw new Error(`failed to install rivetkit@${versionPin} for the bundle build`);
+  }
+  const rivetkitVersion = JSON.parse(readFileSync(rivetkitPkg, 'utf8')).version;
+  if (rivetkitVersion !== versionPin) {
+    throw new Error(`rivetkit ${rivetkitVersion} in node_modules != pinned ${versionPin} (mesh-native.ts) — align them before building`);
+  }
+
+  await build({
+    entryPoints: [join(here, 'mesh-runtime.src/index.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node20',
+    outfile,
+    banner: { js: meshRuntimeBanner },
+    plugins: [napiRuntimeRewrite],
+    charset: 'utf8',
+    sourcemap: false,
+    legalComments: 'none',
+    logLevel: 'silent',
+  });
+}
+
+async function main() {
+  const banner = readFileSync(join(here, 'web-picker.src/banner.js'), 'utf8');
+  await build({
+    entryPoints: [join(here, 'web-picker.src/main.js')],
+    bundle: true,
+    format: 'iife',
+    outfile: join(here, 'web-picker.user.js'),
+    banner: { js: banner },
+    charset: 'utf8',
+    target: 'es2020',
+    sourcemap: false,
+    legalComments: 'none',
+    logLevel: 'info',
+  });
+  await buildMeshRuntime();
+  console.log('mesh-runtime.cjs built');
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === (isAbsolute(process.argv[1]) ? process.argv[1] : join(process.cwd(), process.argv[1]))) {
+  await main();
+}
