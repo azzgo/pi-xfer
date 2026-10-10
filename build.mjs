@@ -14,7 +14,8 @@
 // file and assert the committed bundle is byte-identical (漏提交防线).
 
 import { build } from 'esbuild';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -99,6 +100,8 @@ export async function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs'))
     legalComments: 'none',
     logLevel: 'silent',
   });
+  const bundle = readFileSync(outfile);
+  writeFileSync(`${outfile}.sha256`, `${createHash('sha256').update(bundle).digest('hex')}\n`);
 }
 
 async function main() {

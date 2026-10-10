@@ -90,7 +90,9 @@ the same delivery pipeline as local socks, labeled `· mesh`.
 
 **Distribution**: rivetkit is bundled into the committed `mesh-runtime.cjs`
 (`mesh-runtime.src/` is the source; `npm run build` rebuilds — same双轨模式 as
-web-picker). The extension has zero runtime node_modules. The rivetkit **native
+web-picker). Build also writes `mesh-runtime.cjs.sha256`; the test suite
+asserts bundle and checksum match, so rebuilding without committing either
+turns `npm test` red on any machine. The extension has zero runtime node_modules. The rivetkit **native
 runtime** (napi addon + engine binary, ~140MB, platform-specific) cannot be
 bundled, so the first `mesh up` downloads the pinned version
 (`RIVETKIT_VERSION` in `mesh-native.ts`, kept in sync with the bundle by
