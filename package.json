@@ -40,6 +40,13 @@
     "build": "node build.mjs",
     "test": "node --import './ts-resolve-hook.mjs' --test"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
   "devDependencies": {
     "esbuild": "^0.28.2"
   }
