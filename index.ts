@@ -14,8 +14,6 @@ import * as path from "node:path";
 import { sendNotify } from "./client.js";
 import { registerXferCommand } from "./commands.js";
 import { XferController } from "./controller.js";
-import { registerXferCommand } from "./commands.js";
-import { XferController } from "./controller.js";
 import { MESH_CONFIG_PATH } from "./constants.js";
 import { MeshNode } from "./mesh.js";
 import { XferState } from "./state.js";
