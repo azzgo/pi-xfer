@@ -7,7 +7,7 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: NPM_TOKEN
+    environment: npm-publish
     permissions:
       id-token: write
     steps:
