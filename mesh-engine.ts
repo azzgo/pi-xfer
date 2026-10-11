@@ -111,6 +111,7 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
 }
 
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
+/** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
 async function engineApi<T>(config: MeshConfig, method: string, path: string): Promise<T> {
   const url = new URL(path, config.endpoint);
   if (config.namespace) url.searchParams.set("namespace", config.namespace);
@@ -121,6 +122,20 @@ async function engineApi<T>(config: MeshConfig, method: string, path: string): P
     throw new Error(`mesh engine ${method} ${url.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
   }
   return (await response.json()) as T;
+}
+
+/**
+ * Live engine query without joining: the same REST listing MeshNode.list()
+ * uses, for readers that only observe (the admin console) rather than
+ * participate as a node.
+ */
+export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
+  return engineApi<{ actors: any[] }>(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)).then(
+    (actors) =>
+      actors.actors
+        .filter((a) => a.destroy_ts === undefined || a.destroy_ts === null)
+        .map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id })),
+  );
 }
 
 function deserializeKeyString(serialized: unknown): string {
