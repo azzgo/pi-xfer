@@ -22,7 +22,6 @@ export interface XferCommandOptions {
   /** Directory scanned by `/xfer gc` for zombie peer sockets; defaults to XFER_DIR. */
   xferDir?: string;
   /** Board directory; defaults to ~/.pi/xfer/board. */
-  /** Board directory; defaults to ~/.pi/xfer/board. */
   boardDir?: string;
   /** Admin daemon lifecycle manager; defaults to a real AdminManager (tests inject a stub). */
   adminManager?: AdminManager;
