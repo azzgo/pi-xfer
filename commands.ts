@@ -3,6 +3,7 @@ import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { AdminManager, DEFAULT_ADMIN_PORT } from "./admin-manager.js";
 import { registerBoard, renderCard } from "./board.js";
 import type { XferController } from "./controller.js";
 import { BrokerManager } from "./broker-manager.js";
@@ -21,8 +22,10 @@ export interface XferCommandOptions {
   /** Directory scanned by `/xfer gc` for zombie peer sockets; defaults to XFER_DIR. */
   xferDir?: string;
   /** Board directory; defaults to ~/.pi/xfer/board. */
+  /** Board directory; defaults to ~/.pi/xfer/board. */
   boardDir?: string;
-  boardDir?: string;
+  /** Admin daemon lifecycle manager; defaults to a real AdminManager (tests inject a stub). */
+  adminManager?: AdminManager;
   /** Mesh transport node; when absent the `/xfer mesh` command group is unavailable. */
   mesh?: MeshNode;
 }
@@ -33,6 +36,14 @@ function listenerSection(controller: XferController): string {
   let text = "\n\n📡 Listener:";
   text += `\n  unix socket: ${identity ? `${identity.endpoint} — name "${identity.name}"` : "(not initialised)"}`;
   return text;
+}
+
+/** Best-effort open of a URL in the system browser (fire-and-forget). */
+function openUrl(url: string): void {
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
+  import("node:child_process").then(({ spawn }) => {
+    spawn(opener, [url], { detached: true, stdio: "ignore" }).unref();
+  }).catch(() => { /* browser open is best-effort */ });
 }
 
 /** How many trailing broker.log lines `/xfer broker logs` shows. */
@@ -56,6 +67,7 @@ function brokerLogTail(xferDir: string, lines = LOG_TAIL_LINES): string {
 /** Register the `/xfer` slash command. */
 export function registerXferCommand(pi: ExtensionAPI, controller: XferController, options: XferCommandOptions = {}): void {
   const brokerManager = options.brokerManager ?? new BrokerManager();
+  const adminManager = options.adminManager ?? new AdminManager();
   const brokerXferDir = options.brokerXferDir ?? XFER_DIR;
   const xferDir = options.xferDir ?? XFER_DIR;
   const board = registerBoard(pi, { boardDir: options.boardDir, getAuthor: () => controller.state.identity?.name ?? "unknown" });
@@ -68,7 +80,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer name [<name>]      — show or set name\n" +
       "  /xfer board <list|new|read|write|del|clean|open> — async collaboration board\n" +
       "  /xfer gc                 — reap zombie peer sockets (dead pid / no listener)\n" +
-      "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle",
+      "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle\n" +
+      "  /xfer admin [stop]       — local web console (idempotent start + open URL)",
 
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
       // `/xfer board <TAB>` completes board subcommands, then card ids.
@@ -83,6 +96,14 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           { value: "broker status", label: "status", description: "Show broker status (port/pid)" },
           { value: "broker stop", label: "stop", description: "Stop the broker daemon" },
           { value: "broker logs", label: "logs", description: "Show the last broker.log lines" },
+        ].filter(i => i.label.startsWith(subPrefix));
+        return items.length > 0 ? items : null;
+      }
+      // `/xfer admin <TAB>` completes the admin subcommand group only.
+      if (prefix.startsWith("admin ")) {
+        const subPrefix = prefix.slice("admin ".length).replace(/^\s+/, "");
+        const items: AutocompleteItem[] = [
+          { value: "admin stop", label: "stop", description: "Stop the admin web console daemon" },
         ].filter(i => i.label.startsWith(subPrefix));
         return items.length > 0 ? items : null;
       }
@@ -105,6 +126,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "list", label: "list", description: "List available peers" },
         { value: "name", label: "name", description: "Show or set this agent's name" },
         { value: "broker", label: "broker", description: "Broker daemon: start / status / stop / logs" },
+        { value: "admin", label: "admin", description: "Local web console: open (idempotent start) / stop" },
         { value: "board", label: "board", description: "Async collaboration board: list / new / read / write / del / clean / open" },
         { value: "gc", label: "gc", description: "Reap zombie peer sockets (dead pid / no listener)" },
         { value: "status", label: "status", description: "Show listener status" },
@@ -133,6 +155,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer name [<name>]      — show or set name\n" +
           "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
+          "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
           "   /xfer mesh [<up|down|list|name> <request>] — mesh transport\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
 
@@ -227,6 +250,37 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         // logs — tail <xferDir>/broker.log without touching the daemon.
         ctx.ui.notify(brokerLogTail(brokerXferDir), "info");
+        return;
+      }
+
+      // ── /xfer admin [stop] — local web console daemon ──
+      if (cmd === "admin") {
+        const sub = parts[1];
+        if (sub !== undefined && sub !== "stop" && sub !== "open") {
+          ctx.ui.notify("Usage: /xfer admin [stop] — bare command starts (idempotently) and opens the console", "error");
+          return;
+        }
+        if (sub === "stop") {
+          try {
+            const result = await adminManager.stop();
+            ctx.ui.notify(result === "admin not running" ? "⭕ Admin not running" : `🛑 ${result}`, "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        try {
+          const result = await adminManager.start();
+          const info = await adminManager.probe();
+          const url = `http://localhost:${info?.port ?? DEFAULT_ADMIN_PORT}`;
+          openUrl(url);
+          ctx.ui.notify(
+            result === "already running" ? `🟡 Admin already running — ${url}` : `🟢 ${result}\n🌐 ${url}`,
+            "info",
+          );
+        } catch (err) {
+          ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+        }
         return;
       }
 
