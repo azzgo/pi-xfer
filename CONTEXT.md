@@ -32,6 +32,12 @@ _Avoid_: thread, log
 
 ## Web Picker
 
+
+## Admin (local web console)
+
+**Admin**:
+The local, globally-singleton web console (`/xfer admin`) for observing and lightly controlling xfer on its machine: live event stream, local and mesh presence, board list/view, and control buttons (gc, broker start/stop). Binds localhost only; write operations on board content are delegated to the system (open folder / open in editor), never handled in-page. Distinct from the Broker, which serves the web picker, not the human.
+_Avoid_: dashboard (implies observe-only), panel, UI
 ## Language
 
 **Marker**:
