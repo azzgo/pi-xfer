@@ -56,6 +56,12 @@ export interface AdminServerOptions {
   boardDir: string;
   /** Observability hook for tests/hosts: called for every published event. */
   onEvent?: (event: AdminEvent) => void;
+  /** Process teardown for the web stop button; defaults to just closing the server. */
+  shutdown?: () => void;
+  /** Open a path via the system (folder/file); overridable for tests. */
+  openPath?: (targetPath: string, isFile: boolean) => void;
+  /** SSE heartbeat interval in ms; default 15000. */
+  heartbeatMs?: number;
 }
 
 // ---------- SSE hub ----------
@@ -132,7 +138,10 @@ async function meshView(xferDir: string): Promise<MeshView> {
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return await Promise.race([
     promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)),
+    new Promise<T>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+      timer.unref();
+    }),
   ]);
 }
 
@@ -149,8 +158,7 @@ const KIND_COLORS: Record<AdminEvent["kind"], [string, string]> = {
 
 const TONES: Record<string, string> = { peers: "#1a7f37", mesh: "#8250df", board: "#0969da", broker: "#9a6700" };
 
-const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
+const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const md = (src: string): string => esc(src)
   .replace(/^### (.*)$/gm, "<h3>$1</h3>")
   .replace(/^## (.*)$/gm, "<h3>$1</h3>")
@@ -427,6 +435,8 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
   const hub = new EventHub();
   const brokerManager = new BrokerManager({ xferDir });
   let port = DEFAULT_ADMIN_PORT;
+  const openPath = options.openPath ?? openInSystem;
+  const heartbeatMs = options.heartbeatMs ?? 15_000;
 
   const publish = (event: AdminEvent): void => {
     options.onEvent?.(event);
@@ -521,7 +531,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       });
       res.write(": connected\n\n");
       hub.add(res);
-      const heartbeat = setInterval(() => res.write(": hb\n\n"), 15_000);
+      const heartbeat = setInterval(() => res.write(": hb\n\n"), heartbeatMs);
       res.on("close", () => clearInterval(heartbeat));
       return;
     }
@@ -549,9 +559,21 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
     );
   });
 
+  const MAX_BODY_BYTES = 64 * 1024;
+
   async function readBody(req: http.IncomingMessage): Promise<string> {
+    const declared = Number.parseInt(String(req.headers["content-length"] ?? ""), 10);
+    if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+      throw Object.assign(new Error(`request body too large (${declared} bytes)`), { statusCode: 413 });
+    }
     let body = "";
-    for await (const chunk of req) body += chunk;
+    for await (const chunk of req) {
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) {
+        req.destroy();
+        throw Object.assign(new Error(`request body too large (> ${MAX_BODY_BYTES} bytes)`), { statusCode: 413 });
+      }
+    }
     return body;
   }
 
@@ -597,7 +619,12 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       }
       if (url.pathname === "/control/admin/stop") {
         redirect(res, back("/control"));
-        void stopSelf();
+        // Same cleanup as SIGTERM: unlink admin.pid/admin.json before teardown.
+        for (const name of ["admin.pid", "admin.json"]) {
+          try { fs.unlinkSync(path.join(xferDir, name)); } catch { /* already gone */ }
+        }
+        if (options.shutdown) options.shutdown();
+        else server.close();
         return;
       }
       if (url.pathname === "/control/selfcheck") {
@@ -607,7 +634,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       if (url.pathname === "/board/open") {
         const card = form.get("card") ?? "";
         if (card === "") {
-          openInSystem(boardDir, false);
+          openPath(boardDir, false);
           publish({ t: now(), kind: "board", text: "board folder opened", detail: boardDir });
         } else {
           const board = new Board(boardDir);
@@ -617,7 +644,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
             res.end(`card not found: ${card}`);
             return;
           }
-          openInSystem(target.file, true);
+          openPath(target.file, true);
           publish({ t: now(), kind: "board", text: `card opened in editor`, detail: target.id });
         }
         redirect(res, back("/board"));
@@ -626,7 +653,9 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       res.writeHead(404, { "content-type": "text/plain" });
       res.end("not found");
     } catch (err) {
-      res.writeHead(500, { "content-type": "text/plain" });
+      const status = (err as { statusCode?: number }).statusCode ?? 500;
+      // An unread oversized body would hold the keep-alive socket open.
+      res.writeHead(status, { "content-type": "text/plain", connection: "close" });
       res.end(`admin: action failed — ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -652,13 +681,14 @@ function openInSystem(targetPath: string, isFile: boolean): void {
   });
 }
 
-/** Shutdown plumbing wired by main() when running as a daemon. */
-let stopSelf: () => void = () => {};
 
 // ---------- filesystem event sources ----------
 
 export function startWatchers(xferDir: string, boardDir: string, publish: (event: AdminEvent) => void): void {
   const debounce = new Map<string, ReturnType<typeof setTimeout>>();
+  // Non-peer metadata that also lives in the xfer dir (gc.ts GC_SKIP_JSON plus
+  // the admin's own state) — their writes must not fire fake peer events.
+  const SKIP_JSON = new Set(["broker.json", "admin.json", "mesh.config.json", "settings.json"]);
   const once = (key: string, fn: () => void, ms = 100): void => {
     const existing = debounce.get(key);
     if (existing) clearTimeout(existing);
@@ -682,8 +712,7 @@ export function startWatchers(xferDir: string, boardDir: string, publish: (event
         });
         return;
       }
-      if (name.endsWith(".sock") || (name.endsWith(".json") && name !== "admin.json")) {
-        const peerName = name.replace(/\.(sock|json)$/, "");
+      if (name.endsWith(".sock") || (name.endsWith(".json") && !SKIP_JSON.has(name))) {
         once(`peer:${peerName}`, () => {
           const alive = fs.existsSync(path.join(xferDir, `${peerName}.sock`));
           publish({
@@ -747,18 +776,55 @@ export async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { server, publish, setPort } = createAdminServer({ xferDir, boardDir });
-
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`[admin] port ${port} is occupied — use a different --port`);
-      process.exit(1);
-    }
-    throw err;
+  let shutdownRequested = false;
+  const { server, publish, setPort } = createAdminServer({
+    xferDir,
+    boardDir,
+    // The web console's stop button shares the SIGTERM path: admin state is
+    // unlinked (inside createAdminServer) before this teardown runs.
+    shutdown: () => {
+      if (shutdownRequested) return;
+      shutdownRequested = true;
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1_000).unref();
+    },
   });
 
-  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
-  const realPort = (server.address() as { port: number }).port;
+  const listenOn = (p: number): Promise<void> =>
+    new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(p, "127.0.0.1", () => {
+        server.removeAllListeners("error");
+        resolve();
+      });
+    });
+
+  let realPort: number;
+  try {
+    await listenOn(port);
+    realPort = (server.address() as { port: number }).port;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EADDRINUSE" || port === 0) {
+      console.error(`[admin] bind failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    // broker-main.ts precedent: a port held by a foreign program must not
+    // wedge startup — clear stale admin state and fall back to an ephemeral
+    // port; the real port lands in admin.json either way.
+    try {
+      fs.unlinkSync(path.join(xferDir, "admin.pid"));
+      fs.unlinkSync(path.join(xferDir, "admin.json"));
+    } catch { /* already gone */ }
+    console.error(`[admin] port ${port} is occupied by another program — falling back to an ephemeral port`);
+    try {
+      await listenOn(0);
+      realPort = (server.address() as { port: number }).port;
+    } catch (fallbackError) {
+      console.error(`[admin] bind failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+      process.exit(1);
+    }
+  }
   setPort(realPort);
 
   fs.mkdirSync(xferDir, { recursive: true, mode: 0o700 });
@@ -773,16 +839,9 @@ export async function main(): Promise<void> {
 
   console.log(`[admin] listening on http://localhost:${realPort} (pid ${process.pid}, xfer-dir ${xferDir})`);
 
-  let shuttingDown = false;
-  stopSelf = (): void => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 1_000).unref();
-  };
   const shutdown = (): void => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+    if (shutdownRequested) return;
+    shutdownRequested = true;
     try {
       fs.unlinkSync(path.join(xferDir, "admin.pid"));
       fs.unlinkSync(path.join(xferDir, "admin.json"));
