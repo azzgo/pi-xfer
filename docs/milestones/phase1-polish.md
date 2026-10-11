@@ -15,7 +15,7 @@
    面向新来者的上手路径:是什么 → 装 → 30 秒跑通第一个 handoff。当前 README 无法让新人知道怎么用。
 
 3. **演示素材**
-   一个 GIF 或 1–2 分钟视频,做快速功能介绍,嵌入 README。
+   60–90 秒无声 MP4 + 字幕标注,嵌入 README(另传 YouTube 作为备用引用)。设计已定稿,见下方 *演示素材设计计划*。
 
 ### P1 — 应做
 
@@ -88,6 +88,45 @@
 - 控件:胶囊按钮、无阴影、danger 从一开始就是实心红;一切可点元素必须是按钮形态。
 - 提示:`since page open · not persisted` 的内联文案改为 kind 过滤器后的小号斜体 **i**,hover 显示完整说明。
 - 主题:亮色默认,支持暗色切换。
+## 演示素材设计计划(design 节点定稿,2026-10-11)
+
+**形态**:60–90 秒无声 MP4(字幕标注节奏),README 顶部嵌入;同时上传 YouTube,README 加备用引用。不做 GIF。
+
+**镜头脚本(顺序即叙事)**
+1. 痛点钩子(~10s):agent 收到 `[Xfer from peer]` → 打开结构化 handoff 文档
+2. web-picker(~15s):浏览器圈选 + record → 提交 handoff
+3. Admin(~20s):`/xfer admin` 一键起,实时事件流 / mesh 在线 / board(依赖 P0-1 实现)
+4. 原理动画(~15s):mesh 架构示意——本地 socket 路径 + control-plane + handoff 跨机飞行(替代实拍双机)
+5. 收尾(~10s):logo + `pi install npm:pi-xfer` + repo 地址
+
+**制作方式**:[HyperFrames](https://github.com/heygen-com/hyperframes)(Apache 2.0,HTML → 确定性 MP4,agent-friendly)驱动原理动画与字幕合成;镜头 1–3 为真实录屏(OBS),剪辑合成也在 HyperFrames 流程内。工具链不进 extension 运行时依赖,素材源码入仓(如 `demo/`)。
+
+**制作时机**:implement-and-verify 节点,Admin 与核心流可演示之后。
+
+## 其余功能设计要点(design 节点定稿,2026-10-11)
+
+**P0-2 Quickstart** — `docs/guides/quickstart.md`:是什么(3 行)→ `pi install` → 30 秒跑通第一个 handoff(最短可复现命令序列);README 顶部放 3 行复制即用代码块 + 链接。收尾不是链接堆砌,而是一张 **Excalidraw 交互式架构图**(可逐层展开:peer → broker → mesh → control-plane),作为理解入口。验收:新人 5 分钟内发出第一个 handoff,不读 ADR。
+
+**P1-4 web-picker i18n** — `web-picker.src/i18n.js` 扁平 `{key:{en,zh}}` + `t(key)`;默认跟随 `navigator.language`(zh* → zh,否则 en),油猴菜单手动切换(`GM_getValue` 持久);仅 UI 字符串;`npm run build` 重出产物。
+
+**P1-5 提示信息英文化** — `commands.ts`/`broker-manager.ts`/`gc.ts`/`client.ts` 等全部 CLI/agent-facing 输出统一英文:动词开头、错误带原因 + 下一步;硬编码不做 i18n;同步更新测试断言。
+
+**P1-6 `/xfer doctor`** — 逐项检查(peers socket、broker 进程/端口、mesh 配置与 engine、admin 状态)输出 ✓/✗ + 修复提示(指向具体命令);复用现有状态查询,不新造探测;输出遵循 P1-5 规范。
+
+**P1-7 Mesh 部署指南** — `docs/guides/mesh-setup.md`:两条路线(官方托管 / 自托管 VPS,链 rivet.dev)→ `mesh.json` 逐字段说明 → 端到端验证 → 常见故障。配一张**交互式架构图**,与 Quickstart 架构图同源,关键节点可复用演示 MP4 的关键帧截图。写完由未接触过项目的子代理冷读验证"照抄能跑通"。
+
+**P2-8 README 英文叙事重写** — what/why(3 行)→ demo MP4 → quickstart 3 行 → capabilities 表 → Docs 小节;**仅英文,不做中文文档**;在 Admin 实现并产出 demo MP4 之后做。
+
+**P2-9 致谢** — Acknowledgements:设计思想来源视频 + disler/pi-vs-claude-code。
+
+**P2-10 npm 元信息** — `package.json` 补 description/keywords/repository;npm 页面观感检查。
+
+**P2-11 徽章** — README 顶部 npm version + CI badge。
+
+**P2-12 自动 Release Notes** — `publish.yml` 在 npm publish 后调 generate-release-notes API 创建 **draft release**(自动取上一 tag);人工补注后手动 publish,不全自动。
+
+**P2-13 docs 分层** — `docs/guides/`(用户向:quickstart、mesh-setup)/ `docs/adr/` + `CONTEXT.md`(AI/开发向)/ `docs/web-picker.md` 移至 `docs/dev/`;README 增 Docs 小节分组列出。
+
 - 原型存于 throwaway 分支 `prototype/admin-ui`(根目录 `admin.server.prototype.mjs`),main 不保留。
 
 ## 下一步
