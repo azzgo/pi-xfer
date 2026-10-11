@@ -50,6 +50,8 @@ export interface AdminManagerOptions {
   readinessTimeoutMs?: number;
   /** SIGTERM → SIGKILL grace in stop(); default 2000ms. */
   stopTermGraceMs?: number;
+  /** Daemon entry to spawn; defaults to the bundled admin-main.ts (tests point this at a stub). */
+  daemonPath?: string;
 }
 
 /**
@@ -62,6 +64,7 @@ export class AdminManager {
   private readonly boardDir: string;
   private readonly readinessTimeoutMs: number;
   private readonly stopTermGraceMs: number;
+  private readonly daemonPath: string;
 
   constructor(options: AdminManagerOptions = {}) {
     this.port = options.port ?? DEFAULT_ADMIN_PORT;
@@ -69,6 +72,7 @@ export class AdminManager {
     this.boardDir = options.boardDir ?? path.join(this.xferDir, "board");
     this.readinessTimeoutMs = options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
     this.stopTermGraceMs = options.stopTermGraceMs ?? STOP_TERM_GRACE_MS;
+    this.daemonPath = options.daemonPath ?? ADMIN_MAIN;
   }
 
   /**
@@ -99,7 +103,7 @@ export class AdminManager {
       child = spawn(process.execPath, [
         "--import",
         RESOLVE_HOOK,
-        ADMIN_MAIN,
+        this.daemonPath,
         "--port",
         String(port),
         "--xfer-dir",

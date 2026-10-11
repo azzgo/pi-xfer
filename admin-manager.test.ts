@@ -96,3 +96,41 @@ describe("AdminManager", () => {
     assert.equal(fs.existsSync(path.join(xferDir, "admin.pid")), false);
   });
 });
+
+describe("AdminManager error paths", () => {
+  it("start() times out with the admin.log tail when the daemon never becomes ready", async () => {
+    const xferDir = freshXferDir();
+    const stub = path.join(xferDir, "sleepy-daemon.mjs");
+    fs.writeFileSync(stub, "console.error('[stub] booting but never listening');\nsetTimeout(() => {}, 60_000).unref();\n", "utf-8");
+    const manager = new AdminManager({
+      xferDir,
+      boardDir: path.join(xferDir, "board"),
+      port: 0,
+      daemonPath: stub,
+      readinessTimeoutMs: 400,
+    });
+    managers.push(manager);
+    await assert.rejects(
+      () => manager.start(),
+      (err: Error) => {
+        assert.match(err.message, /not ready within 400ms/);
+        assert.match(err.message, /last admin.log lines/);
+        assert.match(err.message, /booting but never listening/, "log tail is surfaced");
+        return true;
+      },
+    );
+  });
+
+  it("start() rejects when the daemon entry does not exist", async () => {
+    const xferDir = freshXferDir();
+    const manager = new AdminManager({
+      xferDir,
+      boardDir: path.join(xferDir, "board"),
+      port: 0,
+      daemonPath: path.join(xferDir, "missing.mjs"),
+      readinessTimeoutMs: 1_000,
+    });
+    managers.push(manager);
+    await assert.rejects(() => manager.start(), /spawn failed|not ready within/);
+  });
+});
