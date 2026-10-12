@@ -22,6 +22,10 @@
     "type": "git",
     "url": "git+https://github.com/azzgo/pi-xfer.git"
   },
+  "bugs": {
+    "url": "https://github.com/azzgo/pi-xfer/issues"
+  },
+  "homepage": "https://github.com/azzgo/pi-xfer#readme",
   "type": "module",
   "engines": {
     "node": ">=22"
