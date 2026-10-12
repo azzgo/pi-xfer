@@ -1,0 +1,10 @@
+{
+  "name": "pi-xfer-demo-capture",
+  "version": "1.0.0",
+  "description": "Capture tooling for the pi-xfer demo video (not a runtime dependency)",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.59.0"
+  },
+  "private": true
+}

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nimbus Notes — Pricing</title>
+<style>
+  :root { --ink:#0f172a; --muted:#64748b; --brand:#6d28d9; --brand2:#4f46e5; --bg:#f8fafc; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: "Inter", -apple-system, "Helvetica Neue", sans-serif; color: var(--ink); background: var(--bg); }
+  header { display:flex; align-items:center; justify-content:space-between; padding: 20px 48px; background:#fff; border-bottom:1px solid #e2e8f0; }
+  .logo { font-weight: 800; font-size: 20px; letter-spacing: -.02em; }
+  .logo span { color: var(--brand); }
+  nav a { margin-left: 28px; color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 500; }
+  nav a:hover { color: var(--ink); }
+  .hero { text-align:center; padding: 64px 24px 24px; }
+  .hero h1 { font-size: 42px; letter-spacing: -.03em; }
+  .hero p { color: var(--muted); margin-top: 12px; font-size: 17px; }
+  .plans { display:flex; gap: 24px; justify-content:center; padding: 40px 24px 64px; }
+  .plan { background:#fff; border:1px solid #e2e8f0; border-radius: 16px; padding: 28px; width: 300px; box-shadow: 0 1px 3px rgb(15 23 42 / .06); }
+  .plan.featured { border-color: var(--brand); box-shadow: 0 8px 30px rgb(109 40 217 / .15); position:relative; }
+  .badge { position:absolute; top:-12px; left:24px; background:var(--brand); color:#fff; font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px; letter-spacing:.05em; }
+  .plan h2 { font-size: 15px; text-transform: uppercase; letter-spacing:.08em; color: var(--muted); }
+  .price { font-size: 40px; font-weight: 800; margin: 12px 0 4px; letter-spacing: -.03em; }
+  .price small { font-size: 14px; font-weight: 500; color: var(--muted); }
+  .plan ul { list-style:none; margin: 20px 0; display:grid; gap: 10px; font-size: 14px; }
+  .plan li::before { content:"✓"; color:#16a34a; font-weight:700; margin-right: 8px; }
+  .cta { display:block; text-align:center; padding: 12px; border-radius: 10px; font-weight: 600; text-decoration:none; font-size:14px; }
+  .cta.primary { background: linear-gradient(135deg, var(--brand), var(--brand2)); color:#fff; }
+  .cta.secondary { background:#eef2ff; color: var(--brand2); }
+  footer { text-align:center; color:var(--muted); font-size: 13px; padding: 24px; border-top:1px solid #e2e8f0; background:#fff; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Nimbus<span>Notes</span></div>
+  <nav>
+    <a href="#">Product</a>
+    <a href="#">Docs</a>
+    <a href="#">Changelog</a>
+    <a href="#" id="nav-signin">Sign in</a>
+  </nav>
+</header>
+<section class="hero">
+  <h1>Simple, honest pricing</h1>
+  <p>Start free. Upgrade when your team outgrows the nest.</p>
+</section>
+<section class="plans">
+  <div class="plan" id="plan-starter">
+    <h2>Starter</h2>
+    <div class="price">$0 <small>/ month</small></div>
+    <ul>
+      <li>3 notebooks</li>
+      <li>Community support</li>
+      <li>1 GB storage</li>
+    </ul>
+    <a class="cta secondary" href="#" id="cta-starter">Get started</a>
+  </div>
+  <div class="plan featured" id="plan-pro">
+    <span class="badge">Most popular</span>
+    <h2>Pro</h2>
+    <div class="price">$12 <small>/ user / month</small></div>
+    <ul>
+      <li>Unlimited notebooks</li>
+      <li>Priority support</li>
+      <li>50 GB storage per user</li>
+      <li>Version history</li>
+    </ul>
+    <a class="cta primary" href="#" id="cta-pro">Start free trial</a>
+  </div>
+  <div class="plan" id="plan-team">
+    <h2>Team</h2>
+    <div class="price">$29 <small>/ user / month</small></div>
+    <ul>
+      <li>Everything in Pro</li>
+      <li>SSO &amp; SCIM</li>
+      <li>Audit log</li>
+    </ul>
+    <a class="cta secondary" href="#" id="cta-team">Contact sales</a>
+  </div>
+</section>
+<footer>© 2026 Nimbus Notes — demo page for the pi-xfer web-picker capture.</footer>
+</body>
+</html>

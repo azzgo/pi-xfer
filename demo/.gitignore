@@ -1,0 +1,6 @@
+out/
+composition/assets/
+composition/out/
+composition/render/
+node_modules/
+*.log

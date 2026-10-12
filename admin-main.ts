@@ -694,6 +694,7 @@ export function startWatchers(xferDir: string, boardDir: string, publish: (event
         return;
       }
       if (name.endsWith(".sock") || (name.endsWith(".json") && !SKIP_JSON.has(name))) {
+        const peerName = name.replace(/\.sock$/, "").replace(/\.json$/, "");
         once(`peer:${peerName}`, () => {
           const alive = fs.existsSync(path.join(xferDir, `${peerName}.sock`));
           publish({

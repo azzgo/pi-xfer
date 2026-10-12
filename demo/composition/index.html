@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0a0a0c; }
+      body { font-family: Inter, "SF Pro Display", ui-sans-serif, system-ui, sans-serif; color: #f4f4f5; }
+      .mono { font-family: "SF Mono", Menlo, ui-monospace, monospace; }
+      .scene { position: absolute; inset: 0; background: #0a0a0c; }
+
+      /* captions */
+      .caption {
+        position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%);
+        padding: 14px 34px; border-radius: 999px; white-space: nowrap;
+        background: rgba(20,20,26,.82); border: 1px solid #2c2c36;
+        font-size: 34px; font-weight: 500; letter-spacing: .01em; color: #e9e9ee;
+      }
+      .caption b { color: #a78bfa; font-weight: 650; }
+
+      .kicker {
+        position: absolute; top: 54px; left: 72px; font-size: 26px; font-weight: 600;
+        letter-spacing: .22em; text-transform: uppercase; color: #8b8b98;
+      }
+
+      /* shot1 split */
+      .pane { position: absolute; top: 150px; bottom: 170px; width: 880px; border-radius: 18px; overflow: hidden; border: 1px solid #26262f; }
+      .pane video { width: 100%; height: 100%; object-fit: cover; }
+      .pane-label { position: absolute; top: 0; left: 0; right: 0; padding: 14px 24px; font-size: 24px; font-weight: 600; color: #cfcfda; background: rgba(16,16,20,.9); }
+      .pane-label .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 12px; }
+
+      /* generic video frame */
+      .frame { position: absolute; border-radius: 18px; overflow: hidden; border: 1px solid #26262f; background: #101014; }
+      .frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+      /* shot4 diagram */
+      .node rect, .node path { fill: #17171e; stroke-width: 2; }
+      .node text { fill: #e6e6eb; font-size: 24px; font-weight: 600; }
+      .node .sub { fill: #8b8b98; font-size: 17px; font-weight: 400; }
+      .edge { stroke: #4b4b58; stroke-width: 2.5; fill: none; }
+      .pkt { font-size: 26px; }
+      .mesh-cloud rect { fill: #1c1630; stroke: #7c6cf0; }
+      .mesh-cloud text { fill: #c4b5fd; }
+      .step-note { position: absolute; bottom: 130px; left: 0; right: 0; text-align: center; font-size: 34px; font-weight: 600; color: #d9d9e2; }
+
+      /* shot5 */
+      .logo { font-size: 130px; font-weight: 750; letter-spacing: -.04em; }
+      .logo .x { color: #a78bfa; }
+      .install { font-size: 44px; color: #d9d9e2; background: #141419; border: 1px solid #2c2c36; border-radius: 14px; padding: 26px 46px; }
+      .install .cmd { color: #7ee787; }
+      .repo { font-size: 30px; color: #8b8b98; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="76" data-width="1920" data-height="1080">
+
+      <!-- ============ Shot 1 · hook: real handoff, split screen (0–10) ============ -->
+      <div id="shot1" class="scene clip" data-start="0" data-duration="10" data-track-index="1">
+        <div class="kicker">1 · One-way structured handoffs</div>
+        <div class="pane" style="left:56px">
+          <video id="v1a" src="assets/shot1-alpha.mp4" data-start="0" data-duration="10" muted playsinline preload="auto"></video>
+          <div class="pane-label"><span class="dot" style="background:#7ee787"></span>alpha · sender</div>
+        </div>
+        <div class="pane" style="right:56px">
+          <video id="v1b" src="assets/shot1-beta.mp4" data-start="0" data-duration="10" muted playsinline preload="auto"></video>
+          <div class="pane-label"><span class="dot" style="background:#a78bfa"></span>beta · receiver</div>
+        </div>
+        <div id="cap1a" class="caption clip" data-start="1.2" data-duration="8.4">alpha hands beta a structured markdown doc — <b>no chat fragments</b></div>
+      </div>
+
+      <!-- ============ Shot 2 · web picker (10–26) ============ -->
+      <div id="shot2" class="scene clip" data-start="10" data-duration="16" data-track-index="1">
+        <div class="kicker">2 · Web picker — browser → handoff</div>
+        <div class="frame" style="left:56px; top:150px; width:1180px; height:800px">
+          <video id="v2a" src="assets/shot2-page.mp4" data-start="10" data-duration="16" muted playsinline preload="auto"></video>
+        </div>
+        <div class="frame" style="right:56px; top:150px; width:600px; height:800px">
+          <video id="v2b" src="assets/shot2-terminal.mp4" data-start="10" data-duration="16" muted playsinline preload="auto"></video>
+        </div>
+        <div id="cap2a" class="caption clip" data-start="10.8" data-duration="6">pick elements on any page, add notes</div>
+        <div id="cap2b" class="caption clip" data-start="17.5" data-duration="7.6">submit → real handoff delivered to your <b>pi</b> session</div>
+      </div>
+
+      <!-- ============ Shot 3 · admin console (26–48) ============ -->
+      <div id="shot3" class="scene clip" data-start="26" data-duration="22" data-track-index="1">
+        <div class="kicker">3 · Admin — the live console</div>
+        <div class="frame" style="left:140px; top:140px; width:1640px; height:830px">
+          <video id="v3" src="assets/shot3-admin.mp4" data-start="26" data-duration="22" muted playsinline preload="auto"></video>
+        </div>
+        <div id="cap3a" class="caption clip" data-start="26.8" data-duration="9">one command: <b>/xfer admin</b> — live event stream, peers, board</div>
+        <div id="cap3b" class="caption clip" data-start="36.5" data-duration="10.5">stats update as real handoffs land · gc · broker control</div>
+      </div>
+
+      <!-- ============ Shot 4 · how mesh works (48–66) ============ -->
+      <div id="shot4" class="scene clip" data-start="48" data-duration="18" data-track-index="1">
+        <div class="kicker">4 · Under the hood</div>
+        <div class="step-note" id="step-note"></div>
+        <svg id="mesh-svg" width="1920" height="1080" viewBox="0 0 1920 1080" style="position:absolute;inset:0">
+          <!-- machine A -->
+          <g class="node" id="mach-a">
+            <rect x="90" y="380" width="430" height="320" rx="20" stroke="#3f7f5f"/>
+            <text x="130" y="440">Machine A</text>
+            <g id="peer-a1"><rect x="130" y="480" width="160" height="70" rx="12" stroke="#7ee787"/><text x="152" y="524">peer α</text></g>
+            <g id="peer-a2"><rect x="310" y="480" width="160" height="70" rx="12" stroke="#7ee787"/><text x="332" y="524">peer β</text></g>
+            <text class="sub" x="130" y="600" id="socket-path">local socket · ~/.pi/xfer</text>
+          </g>
+          <!-- machine B -->
+          <g class="node" id="mach-b">
+            <rect x="1400" y="380" width="430" height="320" rx="20" stroke="#3f7f5f"/>
+            <text x="1440" y="440">Machine B</text>
+            <g id="peer-b"><rect x="1490" y="480" width="180" height="70" rx="12" stroke="#7ee787"/><text x="1514" y="524">peer γ</text></g>
+            <text class="sub" x="1490" y="600" id="offline-note"></text>
+          </g>
+          <!-- control plane -->
+          <g class="mesh-cloud node" id="cloud">
+            <rect x="770" y="120" width="380" height="150" rx="20"/>
+            <text x="860" y="185">control plane</text>
+            <text class="sub" x="880" y="225">rivetkit mesh</text>
+          </g>
+          <!-- durable queue -->
+          <g class="node" id="queue">
+            <rect x="800" y="470" width="320" height="120" rx="16" stroke="#7c6cf0"/>
+            <text x="850" y="525">durable queue</text>
+            <text class="sub" x="870" y="560" id="queue-count"></text>
+          </g>
+          <!-- edges -->
+          <path class="edge" id="edge-local" d="M 290 515 L 310 515"/>
+          <path class="edge" id="edge-a-cloud" d="M 470 420 C 620 340 660 220 770 200"/>
+          <path class="edge" id="edge-b-cloud" d="M 1450 420 C 1300 340 1260 220 1150 200"/>
+          <path class="edge" id="edge-a-queue" d="M 520 540 C 640 560 680 535 800 530"/>
+          <path class="edge" id="edge-queue-b" d="M 1120 530 C 1240 535 1280 560 1400 540"/>
+          <!-- packets -->
+          <g id="pkt-local" class="pkt" opacity="0"><text>📨</text></g>
+          <g id="pkt-mesh" class="pkt" opacity="0"><text>📨</text></g>
+        </svg>
+        <div id="cap4" class="caption clip" data-start="48.8" data-duration="17">same one-way protocol — local sockets, or the mesh across machines</div>
+      </div>
+
+      <!-- ============ Shot 5 · outro (66–76) ============ -->
+      <div id="shot5" class="scene clip" data-start="66" data-duration="10" data-track-index="1">
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:56px">
+          <div class="logo" id="logo">pi<span class="x">-xfer</span></div>
+          <div class="install mono" id="install"><span class="cmd">$</span> pi install npm:pi-xfer</div>
+          <div class="repo" id="repo">github.com/azzgo/pi-xfer</div>
+        </div>
+      </div>
+
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+        const S = (t) => t;
+
+        // ---- shot 4: mesh principle animation (local time origin at 48s) ----
+        const note = document.getElementById("step-note");
+        const steps = [
+          ["On one machine: a handoff flies over a local socket", 48.0, 52.0],
+          ["peers join the mesh through the control plane", 52.0, 55.5],
+          ["handoffs queue durably until the receiver is online", 55.5, 59.5],
+          ["delivered across machines — even if the peer was offline", 59.5, 64.0],
+        ];
+        steps.forEach(([text, from, to]) => {
+          tl.call(() => (note.textContent = text), null, S(from));
+        });
+        tl.set("#step-note", { opacity: 0 }, S(48));
+        tl.to("#step-note", { opacity: 1, duration: 0.4 }, S(48.2));
+
+        // step 1: local socket packet between peer a1 -> a2
+        tl.fromTo("#edge-local", { opacity: 0 }, { opacity: 1, duration: 0.3 }, S(48.4));
+        tl.fromTo("#pkt-local", { opacity: 0, x: 290, y: 500 }, { opacity: 1, duration: 0.2 }, S(48.8))
+          .to("#pkt-local", { x: 250, duration: 1.6, ease: "power1.inOut" }, S(48.8))
+          .to("#pkt-local", { opacity: 0, duration: 0.3 }, S(50.5));
+
+        // step 2: join control plane
+        tl.fromTo("#edge-a-cloud", { opacity: 0 }, { opacity: 1, duration: 0.5 }, S(52.0))
+          .fromTo("#edge-b-cloud", { opacity: 0 }, { opacity: 1, duration: 0.5 }, S(52.3))
+          .fromTo("#cloud", { opacity: 0.4, scale: 0.95, transformOrigin: "50% 50%" }, { opacity: 1, scale: 1, duration: 0.6 }, S(52.0));
+
+        // step 3: durable queue
+        tl.fromTo("#queue", { opacity: 0.3, y: 14 }, { opacity: 1, y: 0, duration: 0.6 }, S(55.5));
+        tl.fromTo("#edge-a-queue", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S(55.8));
+        const qc = document.getElementById("queue-count");
+        tl.call(() => (qc.textContent = ""), null, S(55.6));
+        [["1 in flight", 56.2], ["1 in flight ✓ ack", 57.2]].forEach(([t, at]) => tl.call(() => (qc.textContent = t), null, S(at)));
+
+        // step 4: cross-machine delivery with offline fallback
+        tl.set("#offline-note", { opacity: 1 }, S(59.5));
+        tl.call(() => (document.getElementById("offline-note").textContent = "was offline"), null, S(59.5));
+        tl.fromTo("#edge-queue-b", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S(59.6));
+        tl.fromTo("#pkt-mesh", { opacity: 0, x: 1100, y: 515 }, { opacity: 1, duration: 0.2 }, S(60.0))
+          .to("#pkt-mesh", { x: 420, duration: 2.6, ease: "power1.inOut" }, S(60.0))
+          .to("#pkt-mesh", { opacity: 0, duration: 0.3 }, S(62.6));
+        tl.to("#peer-b", { scale: 1.06, transformOrigin: "50% 50%", duration: 0.25, yoyo: true, repeat: 1 }, S(62.7));
+
+        tl.to("#step-note", { opacity: 0, duration: 0.4 }, S(64.0));
+
+        // ---- shot 5: outro ----
+        tl.fromTo("#logo", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.7, ease: "power2.out" }, S(66.2));
+        tl.fromTo("#install", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, S(67.2));
+        tl.fromTo("#repo", { opacity: 0 }, { opacity: 1, duration: 0.6 }, S(68.4));
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>
