@@ -207,7 +207,7 @@ describe("doctor: mesh", () => {
     const mesh = checkFor(report, "Mesh");
     assert.equal(mesh.status, "pass");
     assert.match(mesh.detail, /not configured \(opt-in\)/);
-    assert.equal(mesh.fix, "see the mesh setup guide");
+    assert.equal(mesh.fix, "see docs/guides/mesh-setup.md");
   });
 
   it("fails an unparseable config", async () => {

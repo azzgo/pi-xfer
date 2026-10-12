@@ -546,7 +546,7 @@ describe("xfer command: doctor", () => {
       const message = h.notifications[0].message;
       assert.match(message, /✓ Broker +not running \(opt-in\)[^\n]*\n {4}→ \/xfer broker start/);
       assert.match(message, /✓ Admin +not running \(opt-in\)\n {4}→ \/xfer admin/);
-      assert.match(message, /✓ Mesh +not configured \(opt-in\)[^\n]*\n {4}→ see the mesh setup guide/);
+      assert.match(message, /✓ Mesh +not configured \(opt-in\)[^\n]*\n {4}→ see docs\/guides\/mesh-setup.md/);
       assert.equal(h.notifications[0].type, "info", "an unstarted opt-in service is not a problem to report");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

@@ -46,6 +46,7 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 
 ## Layout
 
+- `docs/guides/` — user guides ([quickstart](docs/guides/quickstart.md), [mesh setup](docs/guides/mesh-setup.md))
 - `docs/adr/` — decision records (mesh transport, board scope, web-picker record philosophy)
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
 - `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product

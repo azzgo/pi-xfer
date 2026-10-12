@@ -1,0 +1,233 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "pi-xfer Mesh — a cross-machine handoff",
+    "subtitle": "The mesh layer of the transport map: one actor per pi session, engine-side discovery, durable queue",
+    "output": "mesh-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:azzgo/pi-xfer.git",
+      "link_mode": "local-only",
+      "revision": "553187501f554d7a50b46047913db2ceddd65b6f"
+    }
+  },
+  "components": [
+    {
+      "id": "cfg",
+      "type": "database",
+      "label": "mesh.config.json",
+      "sublabel": "~/.pi/xfer · endpoint · namespace · token",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        260,
+        64
+      ],
+      "sources": [
+        {
+          "path": "constants.ts",
+          "line": 8,
+          "label": "MESH_CONFIG_PATH"
+        },
+        {
+          "path": "mesh-config.ts",
+          "line": 51,
+          "label": "loadMeshConfig"
+        }
+      ]
+    },
+    {
+      "id": "alpha",
+      "type": "backend",
+      "label": "pi session “alpha” — Machine 1",
+      "sublabel": "in-process actor runner · /xfer mesh up",
+      "pos": [
+        40,
+        190
+      ],
+      "size": [
+        260,
+        64
+      ],
+      "sources": [
+        {
+          "path": "mesh.ts",
+          "line": 78,
+          "label": "MeshNode.up"
+        },
+        {
+          "path": "mesh-engine.ts",
+          "line": 41,
+          "label": "createRivetEngine"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "cloud",
+      "label": "Engine / control plane",
+      "sublabel": "RivetKit · actor registry · discovery",
+      "tag": "<endpoint>/ui",
+      "pos": [
+        480,
+        190
+      ],
+      "size": [
+        230,
+        64
+      ],
+      "sources": [
+        {
+          "path": "mesh-engine.ts",
+          "line": 85,
+          "label": "REST actor listing"
+        }
+      ]
+    },
+    {
+      "id": "beta",
+      "type": "backend",
+      "label": "pi session “beta” — Machine 2",
+      "sublabel": "Node · xfer-instance actor",
+      "pos": [
+        920,
+        140
+      ],
+      "size": [
+        240,
+        64
+      ],
+      "sources": [
+        {
+          "path": "mesh-engine.ts",
+          "line": 73,
+          "label": "getOrCreate actor"
+        }
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "Durable handoff queue",
+      "sublabel": "actor queue “handoff” · document sent inline",
+      "pos": [
+        920,
+        300
+      ],
+      "size": [
+        240,
+        64
+      ],
+      "sources": [
+        {
+          "path": "mesh-config.ts",
+          "line": 14,
+          "label": "HANDOFF_QUEUE"
+        },
+        {
+          "path": "mesh-engine.ts",
+          "line": 96,
+          "label": "queueSend"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Machine 1",
+      "wraps": [
+        "cfg",
+        "alpha"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Machine 2",
+      "wraps": [
+        "beta",
+        "queue"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "cfg-to-alpha",
+      "from": "cfg",
+      "to": "alpha",
+      "label": "read at /xfer mesh up",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "alpha-to-engine",
+      "from": "alpha",
+      "to": "engine",
+      "label": "connect out · register actor",
+      "variant": "emphasis"
+    },
+    {
+      "id": "engine-to-beta",
+      "from": "engine",
+      "to": "beta",
+      "label": "discovery · route to target actor"
+    },
+    {
+      "id": "alpha-to-queue",
+      "from": "alpha",
+      "to": "queue",
+      "label": "enqueue inline handoff",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          170,
+          420
+        ],
+        [
+          1040,
+          420
+        ]
+      ]
+    },
+    {
+      "id": "queue-to-beta",
+      "from": "queue",
+      "to": "beta",
+      "label": "drain when online",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "Joining",
+      "items": [
+        "/xfer mesh up joins the session as one xfer-instance actor keyed by its xfer name",
+        "Duplicate names are refused, not auto-renamed — a same-key send would silently route to the first owner"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Offline semantics",
+      "items": [
+        "A node offline when the handoff is sent drains its queue on rejoin",
+        "Buffering starts only after the target actor has been created — a never-online target errors after ~30 s"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Control plane",
+      "items": [
+        "Rivet Cloud (api.rivet.dev) or a self-hosted engine — both configured through mesh.config.json",
+        "Namespace and token may be embedded in the endpoint as URL auth",
+        "Check the setup with /xfer doctor — the Mesh line reads the config and queries the engine"
+      ]
+    }
+  ]
+}

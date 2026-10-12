@@ -170,15 +170,16 @@ async function adminCheck(adminManager: Pick<AdminManager, "probe">): Promise<Do
 }
 
 async function meshCheck(deps: DoctorDeps): Promise<DoctorCheck> {
+  const GUIDE = "see docs/guides/mesh-setup.md";
   let config: MeshConfig;
   try {
     config = loadMeshConfig(deps.meshConfigPath);
   } catch (err) {
     const shown = displayPath(deps.meshConfigPath) ?? deps.meshConfigPath;
     if (!fs.existsSync(deps.meshConfigPath)) {
-      return { name: "Mesh", status: "pass", detail: `not configured (opt-in) — create ${shown}`, fix: "see the mesh setup guide" };
+      return { name: "Mesh", status: "pass", detail: `not configured (opt-in) — create ${shown}`, fix: GUIDE };
     }
-    return fail("Mesh", `config unusable: ${message(err)}`, "see the mesh setup guide");
+    return fail("Mesh", `config unusable: ${message(err)}`, GUIDE);
   }
   const list = deps.listMeshNodes ?? listMeshNodes;
   try {
