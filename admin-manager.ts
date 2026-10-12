@@ -101,6 +101,7 @@ export class AdminManager {
     let child: ChildProcess;
     try {
       child = spawn(process.execPath, [
+        "--disable-warning=ExperimentalWarning",
         "--import",
         RESOLVE_HOOK,
         this.daemonPath,

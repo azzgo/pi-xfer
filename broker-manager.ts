@@ -133,6 +133,7 @@ export class BrokerManager {
     let child: ChildProcess;
     try {
       child = spawn(process.execPath, [
+        "--disable-warning=ExperimentalWarning",
         "--import",
         RESOLVE_HOOK,
         BROKER_MAIN,
