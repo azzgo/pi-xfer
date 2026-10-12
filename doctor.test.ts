@@ -147,21 +147,24 @@ describe("doctor: broker + admin", () => {
     assert.equal(broker.status, "pass");
     assert.match(broker.detail, /running on port 4719/);
     assert.match(broker.detail, /web picker/);
+    assert.equal(broker.fix, undefined);
     assert.match(checkFor(report, "Admin").detail, /http:\/\/localhost:7788/);
   });
 
-  it("fails a stopped broker with /xfer broker start", async () => {
+  it("passes a stopped broker (opt-in) and still offers the start command", async () => {
     const report = await runDoctor(deps({ broker: stubBroker(null) }));
     const broker = checkFor(report, "Broker");
-    assert.equal(broker.status, "fail");
-    assert.match(broker.detail, /not running/);
+    assert.equal(broker.status, "pass");
+    assert.match(broker.detail, /not running \(opt-in\)/);
+    assert.match(broker.detail, /web picker/);
     assert.equal(broker.fix, "/xfer broker start");
   });
 
-  it("fails a stopped admin with /xfer admin", async () => {
+  it("passes a stopped admin (opt-in) and still offers the start command", async () => {
     const report = await runDoctor(deps({ admin: stubAdmin(null) }));
     const admin = checkFor(report, "Admin");
-    assert.equal(admin.status, "fail");
+    assert.equal(admin.status, "pass");
+    assert.match(admin.detail, /not running \(opt-in\)/);
     assert.equal(admin.fix, "/xfer admin");
   });
 
@@ -170,6 +173,15 @@ describe("doctor: broker + admin", () => {
     const broker = checkFor(report, "Broker");
     assert.equal(broker.status, "fail");
     assert.match(broker.detail, /probe failed: socket exploded/);
+    assert.equal(broker.fix, "/xfer broker status");
+  });
+
+  it("keeps a machine that runs no opt-in service all-pass", async () => {
+    const report = await runDoctor(deps({ broker: stubBroker(null), admin: stubAdmin(null) }));
+    assert.equal(report.failed, 0);
+    assert.equal(report.warned, 0);
+    assert.equal(report.passed, report.checks.length);
+    assert.equal(doctorSeverity(report), "info");
   });
 });
 
@@ -190,10 +202,10 @@ describe("doctor: mesh", () => {
     assert.equal(mesh.fix, undefined);
   });
 
-  it("warns (opt-in) when no config exists and points at the mesh setup guide", async () => {
+  it("passes when no config exists (opt-in) and points at the mesh setup guide", async () => {
     const report = await runDoctor(deps());
     const mesh = checkFor(report, "Mesh");
-    assert.equal(mesh.status, "warn");
+    assert.equal(mesh.status, "pass");
     assert.match(mesh.detail, /not configured \(opt-in\)/);
     assert.equal(mesh.fix, "see the mesh setup guide");
   });
@@ -231,41 +243,53 @@ describe("doctor: mesh", () => {
 });
 
 describe("doctor: rendering", () => {
-  it("renders one marked line per check plus a summary", async () => {
+  it("renders all three marks — pass-with-hint, warn, fail — plus a summary", async () => {
     const dir = tmpDir();
     fs.writeFileSync(path.join(dir, "ghost.json"), JSON.stringify({ pid: deadPid() }));
     fs.writeFileSync(path.join(dir, "ghost.sock"), "");
-    const report = await runDoctor(deps({ xferDir: dir, broker: stubBroker(null) }));
+    const configPath = path.join(tmpDir(), "mesh.config.json");
+    fs.writeFileSync(configPath, JSON.stringify({ endpoint: "https://rivet.example" }));
+    const report = await runDoctor(deps({
+      xferDir: dir,
+      broker: stubBroker(null),
+      admin: stubAdmin(null),
+      meshConfigPath: configPath,
+      listMeshNodes: async () => { throw new Error("fetch failed"); },
+    }));
     const text = formatDoctorReport(report);
 
     assert.match(text, /^🩺 \/xfer doctor\n/);
-    assert.match(text, /\n {2}✓ Socket dir {2}.*exists and is writable/);
-    assert.match(text, /\n {2}! Peers {4}.*ghost\n {4}→ \/xfer gc/);
-    assert.match(text, /\n {2}✗ Broker {6}not running[^\n]*\n {4}→ \/xfer broker start/);
-    assert.match(text, /\n {2}✓ Admin {6}.*http:\/\/localhost:7788/);
-    assert.match(text, /\n {2}! Mesh {5}.*\n {4}→ see the mesh setup guide/);
-    assert.match(text, /\n\n2 checks passed, 2 warnings, 1 failed$/);
+    assert.match(text, /\n {2}✓ Socket dir +.*exists and is writable/);
+    assert.match(text, /\n {2}! Peers +.*ghost\n {4}→ \/xfer gc/);
+    assert.match(text, /\n {2}✓ Broker +not running \(opt-in\)[^\n]*\n {4}→ \/xfer broker start/);
+    assert.match(text, /\n {2}✓ Admin +not running \(opt-in\)\n {4}→ \/xfer admin/);
+    assert.match(text, /\n {2}✗ Mesh +engine unreachable[^\n]*\n {4}→ \/xfer mesh list/);
+    assert.match(text, /\n\n3 checks passed, 1 warning, 1 failed$/);
   });
 
-  it("never inlines a fix hint into the check line", () => {
+  it("never inlines a fix hint into the check line, on any status", () => {
     const text = formatDoctorReport({
       checks: [
         { name: "Peers", status: "warn", detail: "a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s", fix: "/xfer gc" },
-        { name: "Broker", status: "pass", detail: "running on port 4719", fix: "/xfer broker start" },
+        { name: "Broker", status: "pass", detail: "not running (opt-in)", fix: "/xfer broker start" },
+        { name: "Admin", status: "pass", detail: "running at http://localhost:7788" },
       ],
-      passed: 1,
+      passed: 2,
       warned: 1,
       failed: 0,
     });
     const lines = text.split("\n");
-    assert.equal(lines.filter((l) => l.includes("→")).length, 1);
+    assert.equal(lines.filter((l) => l.includes("→")).length, 2);
     assert.equal(lines[1], "  ! Peers   a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s");
     assert.equal(lines[2], "    → /xfer gc");
+    assert.equal(lines[3], "  ✓ Broker  not running (opt-in)");
+    assert.equal(lines[4], "    → /xfer broker start");
+    assert.equal(lines[5], "  ✓ Admin   running at http://localhost:7788");
   });
 
-  it("reports info only when every check passed, warning otherwise, never error", () => {
+  it("warns on any ! or ✗, stays info on all-pass, and never returns error", () => {
     const report = (status: "pass" | "warn" | "fail"): DoctorReport => ({
-      checks: [{ name: "Broker", status, detail: "x" }],
+      checks: [{ name: "Peers", status, detail: "x", fix: "/xfer gc" }],
       passed: status === "pass" ? 1 : 0,
       warned: status === "warn" ? 1 : 0,
       failed: status === "fail" ? 1 : 0,
@@ -273,6 +297,20 @@ describe("doctor: rendering", () => {
     assert.equal(doctorSeverity(report("pass")), "info");
     assert.equal(doctorSeverity(report("warn")), "warning");
     assert.equal(doctorSeverity(report("fail")), "warning");
+  });
+
+  it("escalates to warning as soon as zombies show up", async () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, "ghost.json"), JSON.stringify({ pid: deadPid() }));
+    fs.writeFileSync(path.join(dir, "ghost.sock"), "");
+    const report = await runDoctor(deps({
+      xferDir: dir,
+      broker: stubBroker(null),
+      admin: stubAdmin(null),
+    }));
+    assert.equal(report.warned, 1);
+    assert.equal(report.failed, 0);
+    assert.equal(doctorSeverity(report), "warning");
   });
 
   it("omits warning and failure counts when there are none", () => {

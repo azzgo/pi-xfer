@@ -10,6 +10,12 @@
  * that clears it. The one cap it imposes is time — the mesh engine query is raced
  * against `MESH_PROBE_TIMEOUT_MS` so a half-reachable control plane degrades into
  * a "fail" line instead of hanging the command.
+ *
+ * Status semantics — `warn` is reserved for states that are genuinely off but
+ * self-heal (`/xfer gc` for zombie sockets). An opt-in service that simply is not
+ * running is a normal state, so it passes and still offers its start command;
+ * `fail` is for the socket dir, a throwing probe, and a mesh that is configured
+ * but whose config or engine is broken.
  */
 import * as fs from "node:fs";
 import type { AdminManager } from "./admin-manager.ts";
@@ -21,14 +27,14 @@ import { loadMeshConfig } from "./mesh-config.ts";
 import { listMeshNodes, type MeshNodeInfo } from "./mesh-engine.ts";
 import { decodeAgentName, displayPath, listPeers, withTimeout } from "./utils.ts";
 
-/** pass = healthy, warn = usable but worth a look, fail = blocked until a command is run. */
+/** pass = healthy (including "opt-in service not started"), warn = off but self-healing, fail = broken. */
 export type DoctorStatus = "pass" | "warn" | "fail";
 
 export interface DoctorCheck {
   name: string;
   status: DoctorStatus;
   detail: string;
-  /** The command that clears the finding; rendered on warn/fail lines. */
+  /** The command that starts or clears the check; rendered on its own indented line whenever set. */
   fix?: string;
 }
 
@@ -76,26 +82,29 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
 /**
  * Render the report as one line per check plus a summary. A fix hint gets its own
  * indented line rather than a trailing `→ …`: a long peer list wraps in the terminal,
- * and a hint appended to it lands flush left like a stray error.
+ * and a hint appended to it lands flush left like a stray error. Passing checks carry
+ * hints too — "not running (opt-in)" is a pass that still tells you how to start it.
  */
 export function formatDoctorReport(report: DoctorReport): string {
   const width = Math.max(...report.checks.map((c) => c.name.length));
   const lines = ["🩺 /xfer doctor"];
   for (const check of report.checks) {
     lines.push(`  ${MARK[check.status]} ${check.name.padEnd(width)}  ${check.detail}`);
-    if (check.fix && check.status !== "pass") lines.push(`    → ${check.fix}`);
+    if (check.fix) lines.push(`    → ${check.fix}`);
   }
   lines.push("", summaryLine(report));
   return lines.join("\n");
 }
 
 /**
- * Notification severity for the whole report: `info` only when every check passed,
- * `warning` otherwise. Doctor never reports `error` — it diagnoses, and the repair is
- * the user's to run, so a red block would misread as "the extension is broken".
+ * Notification severity for the whole report: `warning` only when a `warn` or `fail`
+ * survives, `info` otherwise. Doctor never reports `error` — it diagnoses, and the
+ * repair is the user's to run, so a red block would misread as "the extension is
+ * broken". Unstarted opt-in services pass, so a machine that runs none of them still
+ * gets a clean, all-`info` report.
  */
 export function doctorSeverity(report: DoctorReport): "info" | "warning" {
-  return report.passed === report.checks.length ? "info" : "warning";
+  return report.warned + report.failed > 0 ? "warning" : "info";
 }
 
 function summaryLine(report: DoctorReport): string {
@@ -140,7 +149,7 @@ async function brokerCheck(brokerManager: Pick<BrokerManager, "probe">): Promise
   try {
     const info = await brokerManager.probe();
     if (info === null) {
-      return fail("Broker", "not running — the web picker cannot reach any agent", "/xfer broker start");
+      return { name: "Broker", status: "pass", detail: "not running (opt-in) — the web picker needs it", fix: "/xfer broker start" };
     }
     return { name: "Broker", status: "pass", detail: `running on port ${info.port} — the web picker channel is ready` };
   } catch (err) {
@@ -152,7 +161,7 @@ async function adminCheck(adminManager: Pick<AdminManager, "probe">): Promise<Do
   try {
     const info = await adminManager.probe();
     if (info === null) {
-      return fail("Admin", "not running — no local web console", "/xfer admin");
+      return { name: "Admin", status: "pass", detail: "not running (opt-in)", fix: "/xfer admin" };
     }
     return { name: "Admin", status: "pass", detail: `running at http://localhost:${info.port}` };
   } catch (err) {
@@ -167,7 +176,7 @@ async function meshCheck(deps: DoctorDeps): Promise<DoctorCheck> {
   } catch (err) {
     const shown = displayPath(deps.meshConfigPath) ?? deps.meshConfigPath;
     if (!fs.existsSync(deps.meshConfigPath)) {
-      return { name: "Mesh", status: "warn", detail: `not configured (opt-in) — create ${shown}`, fix: "see the mesh setup guide" };
+      return { name: "Mesh", status: "pass", detail: `not configured (opt-in) — create ${shown}`, fix: "see the mesh setup guide" };
     }
     return fail("Mesh", `config unusable: ${message(err)}`, "see the mesh setup guide");
   }

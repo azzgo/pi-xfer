@@ -511,7 +511,7 @@ describe("xfer command: mesh subcommand", () => {
 });
 
 describe("xfer command: doctor", () => {
-  it("reports every check with a ✓/✗/! marker and a summary line", async () => {
+  it("reports every check and notifies info when nothing is off", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-doctor-"));
     try {
       const h = harness({
@@ -526,16 +526,15 @@ describe("xfer command: doctor", () => {
       assert.match(message, /✓ Socket dir/);
       assert.match(message, /✓ Broker/);
       assert.match(message, /✓ Admin/);
-      assert.match(message, /! Mesh/);
-      assert.equal(h.notifications[0].type, "warning", "one ! is enough to warn, never error");
-      assert.match(message, /! Mesh.*\n {4}→ see the mesh setup guide/);
-      assert.match(message, /\d+ checks? passed.*1 warning$/);
+      assert.match(message, /✓ Mesh/);
+      assert.match(message, /5 checks passed$/);
+      assert.equal(h.notifications[0].type, "info");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("points a stopped broker at /xfer broker start and notifies as a warning", async () => {
+  it("passes unstarted opt-in services but still prints their start commands", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-doctor-"));
     try {
       const h = harness({
@@ -544,8 +543,32 @@ describe("xfer command: doctor", () => {
         adminManager: stubAdminManager(),
       });
       await h.handler("doctor");
-      assert.equal(h.notifications[0].type, "warning", "a failing check is a diagnosis, not a plugin error");
-      assert.match(h.notifications[0].message, /✗ Broker.*\n {4}→ \/xfer broker start/);
+      const message = h.notifications[0].message;
+      assert.match(message, /✓ Broker +not running \(opt-in\)[^\n]*\n {4}→ \/xfer broker start/);
+      assert.match(message, /✓ Admin +not running \(opt-in\)\n {4}→ \/xfer admin/);
+      assert.match(message, /✓ Mesh +not configured \(opt-in\)[^\n]*\n {4}→ see the mesh setup guide/);
+      assert.equal(h.notifications[0].type, "info", "an unstarted opt-in service is not a problem to report");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("warns on zombie sockets and points at /xfer gc", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-doctor-"));
+    try {
+      const ghost = spawnSync("true");
+      assert.ok(typeof ghost.pid === "number");
+      fs.writeFileSync(path.join(dir, "ghost.json"), JSON.stringify({ pid: ghost.pid }));
+      fs.writeFileSync(path.join(dir, "ghost.sock"), "");
+      const h = harness({
+        xferDir: dir,
+        brokerManager: stubBrokerManager(),
+        adminManager: stubAdminManager({ port: 7788, pid: process.pid }),
+      });
+      await h.handler("doctor");
+      assert.equal(h.notifications[0].type, "warning", "one ! is enough to warn, never error");
+      assert.match(h.notifications[0].message, /! Peers +.*ghost\n {4}→ \/xfer gc/);
+      assert.match(h.notifications[0].message, /4 checks passed, 1 warning$/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
