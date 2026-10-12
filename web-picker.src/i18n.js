@@ -17,11 +17,13 @@ const STRINGS = {
   'menu.toggleRecord': { en: 'Start/stop recording (⇧⌥R)', zh: '开始/停止录制 (⇧⌥R)' },
   'menu.reinject': { en: 'Re-inject trigger', zh: '重新注入 trigger' },
   'menu.lang': { en: 'Language → 中文', zh: '语言 → English' },
+  'menu.fabSize': { en: 'Fab size → large', zh: '悬浮按钮 → 大' },
 
   'toast.autoRevoked': { en: 'Auto-connect revoked for {origin}', zh: '已撤销 {origin} 的自动连接授权' },
   'toast.reinjected': { en: 'Trigger re-injected', zh: 'trigger 已重新注入' },
   'toast.reinjectStuck': { en: 'Trigger still on the page', zh: 'trigger 仍在页面上' },
   'toast.langSwitched': { en: 'Language set to English — reload the page to apply', zh: '语言已设为中文 — 刷新页面生效' },
+  'toast.fabSize': { en: 'Fab size: {size}', zh: '悬浮按钮大小：{size}' },
 
   'bar.cycle': { en: 'cycle layer', zh: '切层' },
   'bar.jump': { en: 'jump', zh: '跳层' },

@@ -132,6 +132,7 @@
   var GM_BROKER = "wp.brokerUrl";
   var GM_TARGET = "wp.lastTarget";
   var GM_FPROPS = "wp.frameworkProps";
+  var GM_FAB_SIZE = "pi.wp.fabSize";
   var DEFAULT_BROKER_URL = "ws://127.0.0.1:4719";
   var CAPTURE_MAX = 200;
   var RESULT_MAX_CHARS = 5e5;
@@ -1038,10 +1039,12 @@
     "menu.toggleRecord": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制 (⇧⌥R)" },
     "menu.reinject": { en: "Re-inject trigger", zh: "重新注入 trigger" },
     "menu.lang": { en: "Language → 中文", zh: "语言 → English" },
+    "menu.fabSize": { en: "Fab size → large", zh: "悬浮按钮 → 大" },
     "toast.autoRevoked": { en: "Auto-connect revoked for {origin}", zh: "已撤销 {origin} 的自动连接授权" },
     "toast.reinjected": { en: "Trigger re-injected", zh: "trigger 已重新注入" },
     "toast.reinjectStuck": { en: "Trigger still on the page", zh: "trigger 仍在页面上" },
     "toast.langSwitched": { en: "Language set to English — reload the page to apply", zh: "语言已设为中文 — 刷新页面生效" },
+    "toast.fabSize": { en: "Fab size: {size}", zh: "悬浮按钮大小：{size}" },
     "bar.cycle": { en: "cycle layer", zh: "切层" },
     "bar.jump": { en: "jump", zh: "跳层" },
     "bar.select": { en: "select", zh: "选中" },
@@ -1544,7 +1547,7 @@
       #recbar #recdiscard { background: #1e293b; color: #94a3b8; }
       #recbar #recdiscard:hover { background: #334155; color: #e2e8f0; }
       /* ---- fab ---- */
-      #fab { position: fixed; width: 46px; height: 46px; border-radius: 14px;
+      #fab { position: fixed; width: 36px; height: 36px; border-radius: 11px;
         border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, #1b2230, #12161f);
         color: #fff; padding: 0; outline: none; cursor: grab;
         box-shadow: 0 10px 26px rgba(10,14,25,.45), inset 0 1px 0 rgba(255,255,255,.09);
@@ -1555,6 +1558,8 @@
       #fab svg { width: 20px; height: 20px; position: absolute; inset: 50% auto auto 50%;
         transform: translate(-50%, -50%); transition: transform .2s ease; pointer-events: none; }
       #fab:hover svg { transform: translate(-50%, -50%) rotate(45deg) scale(1.08); }
+      #fab.large { width: 46px; height: 46px; border-radius: 14px; }
+      #fab.large svg { width: 20px; height: 20px; }
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
         box-shadow: 0 0 0 2px #161a21; cursor: pointer; transition: background .2s, color .2s, filter .15s; }
@@ -1781,6 +1786,7 @@
   `;
     const $ = (id) => root.getElementById(id);
     const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    if (gm.get(GM_FAB_SIZE, "small") === "large") elFab.classList.add("large");
     let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
     try {
       const saved = sessionStorage.getItem(KEY_POS);
@@ -3423,6 +3429,12 @@
         const lang2 = toggleLang();
         ui.toast(t("toast.langSwitched"));
         debugLog("language set to", lang2);
+      });
+      GM_registerMenuCommand(t("menu.fabSize"), () => {
+        const next = gm.get(GM_FAB_SIZE, "small") === "small" ? "large" : "small";
+        gm.set(GM_FAB_SIZE, next);
+        ui.els.elFab.classList.toggle("large", next === "large");
+        ui.toast(t("toast.fabSize", { size: next }));
       });
     } catch (e) {
     }

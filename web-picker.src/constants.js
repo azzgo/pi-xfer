@@ -15,6 +15,7 @@ export const HOTKEY_REC = { code: 'KeyR', alt: true, shift: true };
 export const GM_BROKER = 'wp.brokerUrl';        // broker WS URL override (settings modal)
 export const GM_TARGET = 'wp.lastTarget';       // last used local target name
 export const GM_FPROPS = 'wp.frameworkProps';   // framework.inspect props/state opt-in (default off)
+export const GM_FAB_SIZE = 'pi.wp.fabSize';     // fab size: 'small' (default) | 'large'
 export const DEFAULT_BROKER_URL = 'ws://127.0.0.1:4719';
 
 // page-tool capture/result caps + computed-style defaults (v1.6)

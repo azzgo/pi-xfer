@@ -5,7 +5,7 @@
 // registration order only decides which functions exist when the first event
 // fires — by the end of this file everything is in place.
 
-import { GM_DEBUG } from './constants.js';
+import { GM_DEBUG, GM_FAB_SIZE } from './constants.js';
 import { gm, debugLog, loadBatch } from './storage.js';
 import { framePageResponse } from './protocol.js';
 import { installCapture, consoleRing, netRing } from './capture.js';
@@ -122,6 +122,12 @@ if (!window.__PI_WEBPICKER__) {
       const lang = toggleLang();
       ui.toast(t('toast.langSwitched'));
       debugLog('language set to', lang);
+    });
+    GM_registerMenuCommand(t('menu.fabSize'), () => {
+      const next = gm.get(GM_FAB_SIZE, 'small') === 'small' ? 'large' : 'small';
+      gm.set(GM_FAB_SIZE, next);
+      ui.els.elFab.classList.toggle('large', next === 'large');
+      ui.toast(t('toast.fabSize', { size: next }));
     });
   } catch (e) { /* menu registration unavailable in this manager */ }
 }

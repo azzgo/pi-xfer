@@ -4,6 +4,8 @@
 
 import { HOST_FLAG, KEY_POS } from '../constants.js';
 import { t } from '../i18n.js';
+import { gm } from '../storage.js';
+import { GM_FAB_SIZE } from '../constants.js';
 
 export function buildUI() {
   const host = document.createElement('div');
@@ -96,7 +98,7 @@ export function buildUI() {
       #recbar #recdiscard { background: #1e293b; color: #94a3b8; }
       #recbar #recdiscard:hover { background: #334155; color: #e2e8f0; }
       /* ---- fab ---- */
-      #fab { position: fixed; width: 46px; height: 46px; border-radius: 14px;
+      #fab { position: fixed; width: 36px; height: 36px; border-radius: 11px;
         border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, #1b2230, #12161f);
         color: #fff; padding: 0; outline: none; cursor: grab;
         box-shadow: 0 10px 26px rgba(10,14,25,.45), inset 0 1px 0 rgba(255,255,255,.09);
@@ -107,6 +109,8 @@ export function buildUI() {
       #fab svg { width: 20px; height: 20px; position: absolute; inset: 50% auto auto 50%;
         transform: translate(-50%, -50%); transition: transform .2s ease; pointer-events: none; }
       #fab:hover svg { transform: translate(-50%, -50%) rotate(45deg) scale(1.08); }
+      #fab.large { width: 46px; height: 46px; border-radius: 14px; }
+      #fab.large svg { width: 20px; height: 20px; }
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
         box-shadow: 0 0 0 2px #161a21; cursor: pointer; transition: background .2s, color .2s, filter .15s; }
@@ -347,6 +351,7 @@ export function buildUI() {
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
         elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops'),
         elSAuto = $('sauto'), elSWrite = $('swrite');
+  if (gm.get(GM_FAB_SIZE, 'small') === 'large') elFab.classList.add('large');
 
   let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
   try {
