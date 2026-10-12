@@ -3,6 +3,7 @@
 // built UI injected from main.js.
 
 import { HOST_FLAG, KEY_POS } from '../constants.js';
+import { t } from '../i18n.js';
 
 export function buildUI() {
   const host = document.createElement('div');
@@ -259,74 +260,74 @@ export function buildUI() {
     <div id="badge"></div>
     <div id="info"></div>
     <div id="bar"><b>PICK</b>
-      <span class="muted"><kbd>[</kbd><kbd>]</kbd>切层</span>
-      <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>跳层</span>
-      <span class="muted"><kbd>Enter</kbd>选中</span>
-      <span class="muted" id="gh"><kbd>⇧Enter</kbd>加组/移出</span>
-      <span class="muted" id="gclear" style="display:none" title="清空待处理组合（也可按 ⌫）"><kbd>⌫</kbd>清空组合</span>
-      <span class="muted" id="fz"><kbd>F</kbd>冻结</span>
-      <span class="muted" id="escx" title="退出拾取模式"><kbd>Esc</kbd>退出</span>
+      <span class="muted"><kbd>[</kbd><kbd>]</kbd>${t('bar.cycle')}</span>
+      <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>${t('bar.jump')}</span>
+      <span class="muted"><kbd>Enter</kbd>${t('bar.select')}</span>
+      <span class="muted" id="gh"><kbd>⇧Enter</kbd>${t('bar.group')}</span>
+      <span class="muted" id="gclear" style="display:none" title="${t('gclear.title')}"><kbd>⌫</kbd>${t('bar.clearGroup')}</span>
+      <span class="muted" id="fz"><kbd>F</kbd>${t('bar.freeze')}</span>
+      <span class="muted" id="escx" title="${t('escx.title')}"><kbd>Esc</kbd>${t('bar.exit')}</span>
     </div>
     <div id="recbar">
       <span class="rdot"></span><b>REC</b>
       <span id="reccount">0 events</span>
-      <span id="recbadge" title="打开标注面板">面板</span>
-      <button id="recstop">■ 停止</button>
-      <button id="recdiscard">丢弃</button>
+      <span id="recbadge" title="${t('recbadge.title')}">${t('recbadge')}</span>
+      <button id="recstop">${t('recstop')}</button>
+      <button id="recdiscard">${t('recdiscard')}</button>
     </div>
     <div id="card">
       <div class="sel" id="sel"></div>
-      <textarea id="txt" placeholder="备注（可选，留空直接回车提交）"></textarea>
+      <textarea id="txt" placeholder="${t('card.placeholder')}"></textarea>
       <div class="row">
-        <button class="ghost" id="cancel">取消 Esc</button>
-        <button class="primary" id="ok">✓ 确认 Enter</button>
+        <button class="ghost" id="cancel">${t('card.cancel')}</button>
+        <button class="primary" id="ok">${t('card.ok')}</button>
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>已选备注</b><span class="cnt2" id="pcount"></span><button id="pclose" title="关闭 Esc">✕</button></div>
+      <div class="ph" id="ph"><b>${t('panel.title')}</b><span class="cnt2" id="pcount"></span><button id="pclose" title="${t('panel.pclose.title')}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
-        <div class="lbl">发送到 agent（⌘/Ctrl+Enter 发送 · prompt 可留空）</div>
-        <textarea id="prompt" placeholder="要让 agent 做什么？留空 = 回应各标注的 note / 解释元素渲染逻辑"></textarea>
+        <div class="lbl">${t('send.label')}</div>
+        <textarea id="prompt" placeholder="${t('prompt.placeholder')}"></textarea>
         <div class="trow">
-          <span class="lbl">目标</span>
+          <span class="lbl">${t('target.label')}</span>
           <div id="tcombo">
-            <input id="tinput" placeholder="未连接 broker" autocomplete="off" spellcheck="false" />
+            <input id="tinput" placeholder="${t('tinput.placeholder')}" autocomplete="off" spellcheck="false" />
             <div id="tdrop"></div>
           </div>
-          <button class="ghost icon" id="trefresh" title="刷新 target 列表">⟳</button>
+          <button class="ghost icon" id="trefresh" title="${t('trefresh.title')}">⟳</button>
         </div>
         <div class="srow">
-          <span id="connstate"><span class="dot"></span><span id="conntext">未连接 · 点击连接</span></span>
-          <button class="ghost" id="clearbtn">清空</button>
+          <span id="connstate"><span class="dot"></span><span id="conntext">${t('conn.off')}</span></span>
+          <button class="ghost" id="clearbtn">${t('clearbtn')}</button>
           <div id="sendgroup">
-            <button class="primary" id="sendbtn">发送 →</button>
-            <button class="primary more" id="sendmore" title="更多操作">▾</button>
+            <button class="primary" id="sendbtn">${t('sendbtn')}</button>
+            <button class="primary more" id="sendmore" title="${t('sendmore.title')}">▾</button>
             <div id="sendmenu">
-              <div class="mitem" id="copyprompt">⧉ 复制 handoff prompt<div class="msub">broker 拼好完整 handoff 文档 → 剪贴板（发给任意有 bash 的 agent）</div></div>
+              <div class="mitem" id="copyprompt">${t('copyprompt')}<div class="msub">${t('copyprompt.sub')}</div></div>
             </div>
           </div>
         </div>
       </div>
     </div>
-    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点数字角标开标注面板（0 时也可开）· 绿点=broker 已连接">
+    <button id="fab" title="${t('fab.title')}">
       <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
       </svg>
       <span id="dot"></span>
-      <span id="cnt" class="zero" title="打开标注面板">0</span>
+      <span id="cnt" class="zero" title="${t('recbadge.title')}">0</span>
     </button>
     <div id="toast"></div>
     <div id="settings">
-      <b>连接设置</b>
-      <div class="lbl">BROKER 地址（WS）</div>
+      <b>${t('settings.title')}</b>
+      <div class="lbl">${t('settings.burl')}</div>
       <input id="sburl" placeholder="ws://127.0.0.1:4719" />
-      <label class="chk"><input type="checkbox" id="sprops" /> framework.inspect 附带组件 props/state（默认关）</label>
-      <label class="chk"><input type="checkbox" id="sauto" /> 本域名自动连接 broker（手动连上过一次即授权，页面刷新后静默重连）</label>
-      <label class="chk"><input type="checkbox" id="swrite" /> 允许 agent 操作本页（dom.click / dom.setValue，默认关）</label>
+      <label class="chk"><input type="checkbox" id="sprops" /> ${t('settings.sprops')}</label>
+      <label class="chk"><input type="checkbox" id="sauto" /> ${t('settings.sauto')}</label>
+      <label class="chk"><input type="checkbox" id="swrite" /> ${t('settings.swrite')}</label>
       <div class="row">
-        <button class="ghost" id="scancel">取消</button>
-        <button class="primary" id="ssave">保存并连接</button>
+        <button class="ghost" id="scancel">${t('settings.cancel')}</button>
+        <button class="primary" id="ssave">${t('settings.save')}</button>
       </div>
     </div>
   `;

@@ -3,6 +3,7 @@
 // pointerdown 拦截 + composed:false 克隆补发）也在这里。
 
 import { HOTKEY, HOTKEY_REC } from '../constants.js';
+import { t } from '../i18n.js';
 
 export function initHotkeys(ctx) {
   const { root, els, toast } = ctx;
@@ -12,14 +13,14 @@ export function initHotkeys(ctx) {
     const fz = root.getElementById('fz');
     if (!fz) return;
     fz.classList.toggle('on', ctx.pickState.frozen);
-    fz.title = ctx.pickState.frozen ? '冻结：页面交互已屏蔽，浮层不会因点击/hover 关闭（点击此提示可切换）' : '实时：hover 可触发页面（展开子菜单等）（点击此提示可切换）';
+    fz.title = ctx.pickState.frozen ? t('fz.on.title') : t('fz.off.title');
   }
   ctx.updateFreezeUI = updateFreezeUI;
 
   function toggleFreeze() {
     ctx.pickState.frozen = !ctx.pickState.frozen;
     updateFreezeUI();
-    toast(ctx.pickState.frozen ? '冻结：页面交互已屏蔽' : '实时：hover 可触发页面');
+    toast(ctx.pickState.frozen ? t('fz.on') : t('fz.off'));
   }
   ctx.toggleFreeze = toggleFreeze;
 

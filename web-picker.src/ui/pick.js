@@ -9,6 +9,7 @@ import { HOST_FLAG } from '../constants.js';
 import { loadBatch, saveBatch } from '../storage.js';
 import { cssPath, xPath, nearestScrollable, selectorPreview, escapeHtml } from '../dom-utils.js';
 import { sourceInfo } from '../framework.js';
+import { t } from '../i18n.js';
 
 export function initPick(ctx) {
   const { host, root, els, toast } = ctx;
@@ -64,7 +65,7 @@ export function initPick(ctx) {
     elBadge.style.display = 'block';
     elBadge.style.left = (r.left + r.width / 2) + 'px';
     elBadge.style.top = r.top + 'px';
-    elBadge.innerHTML = (idx + 1) + '<small>/' + stack.length + '层 · ' + Math.round(r.width) + '×' + Math.round(r.height) + '</small>';
+    elBadge.innerHTML = (idx + 1) + `<small>/${t('pick.layers', { n: stack.length })} · ` + Math.round(r.width) + '×' + Math.round(r.height) + '</small>';
     elInfo.style.display = 'block';
     elInfo.style.left = r.left + 'px';
     elInfo.style.top = r.top + 'px';
@@ -195,8 +196,8 @@ export function initPick(ctx) {
   function toggleGroup(el) {
     if (!el) return;
     const i = groupEls.indexOf(el);
-    if (i >= 0) { groupEls.splice(i, 1); toast('已移出组合（剩 ' + groupEls.length + ' 项）'); }
-    else { groupEls.push(el); toast('已加入组合（共 ' + groupEls.length + ' 项）'); }
+    if (i >= 0) { groupEls.splice(i, 1); toast(t('group.removed', { n: groupEls.length })); }
+    else { groupEls.push(el); toast(t('group.added', { n: groupEls.length })); }
     renderGroupMarks();
     updateGroupUI();
   }
@@ -209,7 +210,7 @@ export function initPick(ctx) {
     if (groupCard) closeGroupCard();       // 组都没了，组备注卡片一并收起
     renderGroupMarks();
     updateGroupUI();
-    toast('已清空待处理组合（' + n + ' 项）');
+    toast(t('group.cleared', { n }));
   }
   ctx.clearPendingGroup = clearPendingGroup;
   function groupAt(x, y) {
@@ -233,7 +234,7 @@ export function initPick(ctx) {
       tag.className = 'gi';
       tag.textContent = String(i + 1);
       tag.setAttribute('data-gi', String(i));     // 点徽标按它移出对应元素
-      tag.title = '点击移出组合';
+      tag.title = t('group.tagTitle');
       m.appendChild(tag);
       elGWrap.appendChild(m);
     });
@@ -248,14 +249,14 @@ export function initPick(ctx) {
     groupEls.splice(i, 1);
     renderGroupMarks();
     updateGroupUI();
-    toast('已移出组合（剩 ' + groupEls.length + ' 项）');
+    toast(t('group.removed', { n: groupEls.length }));
   });
   ctx.toggleGroup = toggleGroup;
   function updateGroupUI() {
     const n = groupEls.length;
     elGH.classList.toggle('on', n > 0);
-    elGH.innerHTML = '<kbd>⇧Enter</kbd>加组/移出' +
-      (n ? ' · <kbd>Enter</kbd>组备注(' + n + ')' : '');
+    elGH.innerHTML = `<kbd>⇧Enter</kbd>${t('bar.group')}` +
+      (n ? t('gh.note', { n }) : '');
     elGCLEAR.style.display = n ? 'inline-flex' : 'none';
   }
   ctx.updateGroupUI = updateGroupUI;
@@ -269,8 +270,8 @@ export function initPick(ctx) {
     if (top + 240 > window.innerHeight) top = Math.max(8, window.innerHeight - 250);
     elSel.textContent = groupEls.map((el) => cssPath(el)).join('\n');
     elTxt.value = '';
-    elTxt.placeholder = '组备注（可选，整组共用这一条）';
-    elOk.textContent = '✓ 提交 ' + groupEls.length + ' 项 Enter';
+    elTxt.placeholder = t('card.groupPlaceholder');
+    elOk.textContent = t('card.groupOk', { n: groupEls.length });
     Object.assign(elCard.style, { display: 'block', left: left + 'px', top: top + 'px' });
     setTimeout(() => elTxt.focus(), 0);
   }
@@ -279,8 +280,8 @@ export function initPick(ctx) {
     if (!groupCard) return;
     groupCard = false;
     elCard.style.display = 'none';
-    elTxt.placeholder = '备注（可选，留空直接回车提交）';
-    elOk.textContent = '✓ 确认 Enter';
+    elTxt.placeholder = t('card.placeholder');
+    elOk.textContent = t('card.ok');
   }
   ctx.closeGroupCard = closeGroupCard;
   function submitGroup() {
@@ -296,7 +297,7 @@ export function initPick(ctx) {
     renderGroupMarks();
     updateGroupUI();
     closeGroupCard();
-    toast('已选中 ' + n + ' 项 · 组 ' + gid);
+    toast(t('group.selected', { n, gid }));
   }
   ctx.submitGroup = submitGroup;
 

@@ -5,6 +5,7 @@ import { GM_FPROPS, DEFAULT_BROKER_URL } from '../constants.js';
 import { gm } from '../storage.js';
 import { autoLinkKey } from '../broker-conn.js';
 import { writeOpsKey } from '../page-tools.js';
+import { t } from '../i18n.js';
 
 export function initSettings(ctx) {
   const { els, toast } = ctx;
@@ -26,22 +27,22 @@ export function initSettings(ctx) {
 
   elSProps.addEventListener('change', () => {
     gm.set(GM_FPROPS, elSProps.checked);   // immediate persist — no reconnect needed to toggle
-    toast('framework.inspect props/state ' + (elSProps.checked ? '已开启' : '已关闭'));
+    toast(t('settings.toast.fprops', { state: t(elSProps.checked ? 'settings.toast.on' : 'settings.toast.off') }));
   });
   elSAuto.addEventListener('change', () => {
     // immediate persist — 撤销授权即刻生效（退避循环由 allowed() 门控）
     gm.set(autoLinkKey(location.origin), elSAuto.checked);
-    toast('本页自动连接 ' + (elSAuto.checked ? '已开启' : '已撤销'));
+    toast(t('settings.toast.autoLink', { state: t(elSAuto.checked ? 'settings.toast.on' : 'settings.toast.revoked') }));
   });
   elSWrite.addEventListener('change', () => {
     gm.set(writeOpsKey(location.origin), elSWrite.checked);
-    toast('agent 页面操作权限 ' + (elSWrite.checked ? '已开启' : '已关闭'));
+    toast(t('settings.toast.write', { state: t(elSWrite.checked ? 'settings.toast.on' : 'settings.toast.off') }));
   });
   elSSave.addEventListener('click', () => {
     const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;
     gm.set('wp.brokerUrl', url);
     closeSettings();
-    toast('已保存，连接中…');
+    toast(t('settings.toast.saved'));
     conn.connect();
   });
   elSCancel.addEventListener('click', closeSettings);

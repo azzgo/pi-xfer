@@ -13,6 +13,7 @@
 
 import { KEY_REC, REC_MAX_EVENTS, REC_SLICE_MAX, HOST_FLAG } from './constants.js';
 import { cssPath, escapeHtml } from './dom-utils.js';
+import { t } from './i18n.js';
 
 const INPUT_DEBOUNCE_MS = 1000;
 
@@ -178,7 +179,7 @@ export function initRecord(ctx) {
     save();
     renderRecBar();
     startUrlWatch();
-    toast('录制开始 · 操作页面，⇧⌥R 停止');
+    toast(t('record.started'));
   }
 
   function stop(discard) {
@@ -202,12 +203,12 @@ export function initRecord(ctx) {
     if (discard) {
       status = null; rec = null;
       try { sessionStorage.removeItem(KEY_REC); } catch (e) { /* nothing to clean */ }
-      toast('录制已丢弃');
+      toast(t('record.discarded'));
     } else {
       status = 'done';
       rec.console = ctx.consoleRing.filter((c) => c.ts >= rec.start).slice(-REC_SLICE_MAX);
       rec.net = ctx.netRing.filter((n) => n.ts >= rec.start).slice(-REC_SLICE_MAX);
-      toast('录制完成 · ' + rec.events.length + ' 事件 · 打开面板发送');
+      toast(t('record.done', { n: rec.events.length }));
     }
     save();
     renderRecBar();
@@ -232,10 +233,10 @@ export function initRecord(ctx) {
       (e.value !== undefined ? ' = ' + escapeHtml(e.value) : '') + '</div>'
     ).join('');
     return '<div class="item recitem" data-rec="1">' +
-      '<div class="psel">⏺ 记录 ' + escapeHtml(rec.id) + ' · ' + rec.events.length + ' 事件</div>' +
+      `<div class="psel">${t('record.summary', { id: escapeHtml(rec.id), n: rec.events.length })}</div>` +
       '<div class="rsevs">' + ev + '</div>' +
       '<div class="prow"><span class="pts">' + new Date(rec.start).toLocaleTimeString() + ' → ' + new Date(rec.end).toLocaleTimeString() + '</span>' +
-      '<button class="del" data-rec-del="1">删除</button></div></div>';
+      `<button class="del" data-rec-del="1">${t('btn.delete')}</button></div></div>`;
   };
 
   elRecStop.addEventListener('click', (e) => { e.stopPropagation(); stop(false); });

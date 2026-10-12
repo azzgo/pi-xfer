@@ -6,6 +6,7 @@
 import { GM_TARGET } from '../constants.js';
 import { gm } from '../storage.js';
 import { escapeHtml } from '../dom-utils.js';
+import { t } from '../i18n.js';
 
 export function initCombo(ctx) {
   const { els, toast } = ctx;
@@ -35,9 +36,9 @@ export function initCombo(ctx) {
       escapeHtml(s.slice(i + q.length));
   }
   function renderDrop() {
-    if (!targets.length) { elTDrop.innerHTML = '<div class="tempty">（无活跃 local session）</div>'; return; }
+    if (!targets.length) { elTDrop.innerHTML = `<div class="tempty">${t('combo.noSessions')}</div>`; return; }
     const list = comboList();
-    if (!list.length) { elTDrop.innerHTML = '<div class="tempty">无匹配目标</div>'; return; }
+    if (!list.length) { elTDrop.innerHTML = `<div class="tempty">${t('combo.noMatch')}</div>`; return; }
     if (comboHl >= list.length) comboHl = list.length - 1;
     if (comboHl < 0) comboHl = 0;
     const q = comboFilter.trim();
@@ -48,7 +49,7 @@ export function initCombo(ctx) {
           (t.name === comboSel ? ' <span class="tick">✓</span>' : '') + '</div>' +
         '<div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + '</div>' +
       '</div>';
-    }).join('') + '<div class="thint">输入过滤 · ↑↓ 选择 · Enter 确认 · Esc 关闭</div>';
+    }).join('') + `<div class="thint">${t('combo.hint')}</div>`;
     const hl = elTDrop.querySelector('.titem.hl');     // 键盘移动时保持高亮行可见
     if (hl) {
       if (hl.offsetTop < elTDrop.scrollTop) elTDrop.scrollTop = hl.offsetTop;
@@ -79,14 +80,14 @@ export function initCombo(ctx) {
     gm.set(GM_TARGET, name);
     closeDrop();
     elTInput.blur();
-    toast('目标已切换：' + name);
+    toast(t('combo.switched', { name }));
   }
   function renderTargetCombo() {
     const last = gm.get(GM_TARGET, '');
     comboSel = '';
     elTInput.disabled = true;
     elTInput.value = '';
-    elTInput.placeholder = conn.getState() !== 'on' ? '未连接 broker' : '无活跃 local session';
+    elTInput.placeholder = conn.getState() !== 'on' ? t('tinput.placeholder') : t('combo.none');
     closeDrop();
     if (conn.getState() !== 'on' || !targets.length) return;
     elTInput.disabled = false;
@@ -143,6 +144,6 @@ export function initCombo(ctx) {
   elTRefresh.addEventListener('click', () => {
     if (conn.getState() !== 'on') { ctx.openSettings(); return; }
     refreshTargets().then(() =>
-      toast(targets.length ? '目标列表已刷新（' + targets.length + '）' : '没有发现活跃 local session'));
+      toast(targets.length ? t('combo.refreshed', { n: targets.length }) : t('combo.noneFound')));
   });
 }

@@ -15,6 +15,7 @@
 // authorization itself is revoked only via settings/menu).
 
 import { GM_BROKER, DEFAULT_BROKER_URL } from './constants.js';
+import { t } from './i18n.js';
 import {
   PROTOCOL,
   frameHello, frameSubmit, frameCompose, frameTargetsList,
@@ -92,7 +93,7 @@ export function createBrokerConn(deps) {
     catch (e) {
       connectSettle = null;
       setState('off');
-      if (!silent) toast('WS 创建失败: ' + e.message);
+      if (!silent) toast(t('conn.wsFailed', { msg: e.message }));
       settle(false);
       if (silent) { silent = false; scheduleReconnect(); }
       return attempt;
@@ -110,7 +111,7 @@ export function createBrokerConn(deps) {
         if (!silent) gm.set(autoLinkKey(location.origin), true);
         clearBackoff();
         const wasSilent = silent; silent = false;
-        if (!wasSilent) toast('broker 已连接');
+        if (!wasSilent) toast(t('conn.on'));
         debugLog('auto-link: connected', wasSilent ? '(auto)' : '(manual)');
         const settled = connectSettle; connectSettle = null;
         if (settled) settled(true);
@@ -133,7 +134,7 @@ export function createBrokerConn(deps) {
           p.resolve(p.kind === 'submit' ? { ok: false, code: f.code, message: f.message }
             : p.kind === 'compose' ? { ok: false, code: f.code, message: f.message } : []);
         } else {
-          toast('broker 错误: ' + (f.code || '?'));
+          toast(t('conn.brokerError', { code: f.code || '?' }));
         }
         return;
       }
@@ -152,7 +153,7 @@ export function createBrokerConn(deps) {
       if (ws !== sock) return;               // superseded by a newer connect
       ws = null;
       for (const p of pending.values()) p.resolve(p.kind === 'submit'
-        ? { ok: false, code: 'closed', message: 'broker 连接已断开' }
+        ? { ok: false, code: 'closed', message: t('conn.closed') }
         : []);
       pending.clear();
       const settled = connectSettle; connectSettle = null;
@@ -168,14 +169,14 @@ export function createBrokerConn(deps) {
         if (autoLinkAllowed() && !manualDown) {
           scheduleReconnect();
         } else {
-          toast('broker 连接已断开');
+          toast(t('conn.closed'));
         }
       }
     };
     sock.onerror = () => {
       if (ws === sock && wsState !== 'off') {
         setState('off');
-        if (!silent) toast('broker 连不上: ' + url + '（连接设置里可改地址）');
+        if (!silent) toast(t('conn.unreachable', { url }));
       }
     };
     return attempt;
@@ -187,7 +188,7 @@ export function createBrokerConn(deps) {
     silent = false;
     setState('off');
     if (ws) { try { ws.close(); } catch (e) {} ws = null; }
-    toast('已断开');
+    toast(t('conn.disconnected'));
   }
 
   // 页面加载（含 HMR 整页刷新后的重新注入）时调用：本 origin 已授权且上一次
@@ -217,17 +218,17 @@ export function createBrokerConn(deps) {
   // record (v1.13)：可选的 Record-mode 时间线，随帧带出（加性字段，旧 broker 忽略）。
   function submitToAgent(prompt, targetName, record) {
     return new Promise((resolve) => {
-      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
       const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'submit', resolve });
       const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
       if (!sendFrame(frameSubmit(id, promptText, targetName, record))) {
         pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
+        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
         return;
       }
       setTimeout(() => {
-        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: 'broker 无响应' }); }
+        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); }
       }, 10000);
     });
   }
@@ -238,17 +239,17 @@ export function createBrokerConn(deps) {
   // agent 的完整 prompt 交还给页面。
   function requestCompose(prompt, targetName, record) {
     return new Promise((resolve) => {
-      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' }); return; }
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
       const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'compose', resolve });
       const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
       if (!sendFrame(frameCompose(id, promptText, targetName, record))) {
         pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: 'broker 未连接' });
+        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
         return;
       }
       setTimeout(() => {
-        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: 'broker 无响应' }); }
+        if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); }
       }, 10000);
     });
   }

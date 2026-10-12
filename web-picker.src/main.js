@@ -20,6 +20,7 @@ import { initSettings } from './ui/settings.js';
 import { initFab } from './ui/fab.js';
 import { initHotkeys } from './ui/hotkeys.js';
 import { initRecord } from './record.js';
+import { t, toggleLang } from './i18n.js';
 
 if (!window.__PI_WEBPICKER__) {
   window.__PI_WEBPICKER__ = true;
@@ -75,7 +76,7 @@ if (!window.__PI_WEBPICKER__) {
   // auto-link：本 origin 授权过（手动连上过一次）就静默重连——覆盖 HMR 整页
   // 刷新、broker 重启两类断链；从未连接过的页面保持完全静默。
   conn.maybeAutoConnect();
-  debugLog('ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ⌫ 清组 · ' + location.host);
+  debugLog('ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · ' + location.host);
 
   // ---------- programmatic API (DevTools console) ----------
   window.__PI_WP_API__ = {
@@ -104,18 +105,23 @@ if (!window.__PI_WEBPICKER__) {
 
   // ---------- Tampermonkey menu ----------
   try {
-    GM_registerMenuCommand('连接 broker', () => conn.connect());
-    GM_registerMenuCommand('断开 broker', () => conn.disconnect());
-    GM_registerMenuCommand('连接设置…', ctx.openSettings);
-    GM_registerMenuCommand('撤销本页自动连接', () => {
+    GM_registerMenuCommand(t('menu.connect'), () => conn.connect());
+    GM_registerMenuCommand(t('menu.disconnect'), () => conn.disconnect());
+    GM_registerMenuCommand(t('menu.settings'), ctx.openSettings);
+    GM_registerMenuCommand(t('menu.revokeAuto'), () => {
       conn.revokeAutoLink();
-      ui.toast('已撤销 ' + location.origin + ' 的自动连接授权');
+      ui.toast(t('toast.autoRevoked', { origin: location.origin }));
     });
-    GM_registerMenuCommand('打开标注面板 (⇧⌥L)', ctx.togglePanel);
-    GM_registerMenuCommand('开始拾取 (⇧⌥P)', () => ctx.setActive(true));
-    GM_registerMenuCommand('开始/停止录制 (⇧⌥R)', () => ctx.toggleRecord());
-    GM_registerMenuCommand('重新注入 trigger', () => {
-      ui.toast(ui.reinjectTrigger() ? 'trigger 已重新注入' : 'trigger 仍在页面上');
+    GM_registerMenuCommand(t('menu.openPanel'), ctx.togglePanel);
+    GM_registerMenuCommand(t('menu.startPick'), () => ctx.setActive(true));
+    GM_registerMenuCommand(t('menu.toggleRecord'), () => ctx.toggleRecord());
+    GM_registerMenuCommand(t('menu.reinject'), () => {
+      ui.toast(ui.reinjectTrigger() ? t('toast.reinjected') : t('toast.reinjectStuck'));
+    });
+      GM_registerMenuCommand(t('menu.lang'), () => {
+      const lang = toggleLang();
+      ui.toast(t('toast.langSwitched'));
+      debugLog('language set to', lang);
     });
   } catch (e) { /* menu registration unavailable in this manager */ }
 }

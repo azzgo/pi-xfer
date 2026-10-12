@@ -473,8 +473,8 @@
     try {
       if (typeof v === "string") return v;
       if (v instanceof Error) return v.stack || String(v);
-      const t = jsonSafe(v).text;
-      return t.length > 400 ? t.slice(0, 400) + "…" : t;
+      const t2 = jsonSafe(v).text;
+      return t2.length > 400 ? t2.slice(0, 400) + "…" : t2;
     } catch (e) {
       return String(v);
     }
@@ -797,8 +797,8 @@
         for (const child of Array.from(el.childNodes)) {
           try {
             if (child.nodeType === 3) {
-              const t = (child.textContent || "").trim();
-              if (t) clone.appendChild(doc.createTextNode(t.slice(0, 80) + " "));
+              const t2 = (child.textContent || "").trim();
+              if (t2) clone.appendChild(doc.createTextNode(t2.slice(0, 80) + " "));
             } else if (child.nodeType === 1) {
               clone.appendChild(pruneClone(child, depth - 1));
             }
@@ -886,10 +886,10 @@
           if (!k.startsWith("__reactFiber$") && !k.startsWith("__reactInternalInstance$")) continue;
           let f = el[k], guard = 0;
           while (f && guard++ < 200 && chain.length < maxDepth) {
-            const t = f.type;
-            if (t && (t.name || t.displayName)) {
+            const t2 = f.type;
+            if (t2 && (t2.name || t2.displayName)) {
               const src = f._debugSource;
-              const level = { component: t.displayName || t.name || "" };
+              const level = { component: t2.displayName || t2.name || "" };
               if (src && src.fileName) {
                 level.file = src.fileName;
                 level.line = src.lineNumber || 0;
@@ -1026,6 +1026,145 @@
     return { PAGE_TOOLS, handlePageToolRequest, writeAllowed };
   }
 
+  // web-picker.src/i18n.js
+  var GM_LANG = "pi.wp.lang";
+  var STRINGS = {
+    "menu.connect": { en: "Connect broker", zh: "连接 broker" },
+    "menu.disconnect": { en: "Disconnect broker", zh: "断开 broker" },
+    "menu.settings": { en: "Connection settings…", zh: "连接设置…" },
+    "menu.revokeAuto": { en: "Revoke auto-connect for this page", zh: "撤销本页自动连接" },
+    "menu.openPanel": { en: "Open pick panel (⇧⌥L)", zh: "打开标注面板 (⇧⌥L)" },
+    "menu.startPick": { en: "Start picking (⇧⌥P)", zh: "开始拾取 (⇧⌥P)" },
+    "menu.toggleRecord": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制 (⇧⌥R)" },
+    "menu.reinject": { en: "Re-inject trigger", zh: "重新注入 trigger" },
+    "menu.lang": { en: "Language → 中文", zh: "语言 → English" },
+    "toast.autoRevoked": { en: "Auto-connect revoked for {origin}", zh: "已撤销 {origin} 的自动连接授权" },
+    "toast.reinjected": { en: "Trigger re-injected", zh: "trigger 已重新注入" },
+    "toast.reinjectStuck": { en: "Trigger still on the page", zh: "trigger 仍在页面上" },
+    "toast.langSwitched": { en: "Language set to English — reload the page to apply", zh: "语言已设为中文 — 刷新页面生效" },
+    "bar.cycle": { en: "cycle layer", zh: "切层" },
+    "bar.jump": { en: "jump", zh: "跳层" },
+    "bar.select": { en: "select", zh: "选中" },
+    "bar.group": { en: "add/remove group", zh: "加组/移出" },
+    "bar.clearGroup": { en: "clear group", zh: "清空组合" },
+    "gclear.title": { en: "Clear pending group (or press ⌫)", zh: "清空待处理组合（也可按 ⌫）" },
+    "bar.freeze": { en: "freeze", zh: "冻结" },
+    "escx.title": { en: "Exit pick mode", zh: "退出拾取模式" },
+    "bar.exit": { en: "exit", zh: "退出" },
+    "recbadge.title": { en: "Open pick panel", zh: "打开标注面板" },
+    "recbadge": { en: "panel", zh: "面板" },
+    "recstop": { en: "■ Stop", zh: "■ 停止" },
+    "recdiscard": { en: "Discard", zh: "丢弃" },
+    "card.placeholder": { en: "Note (optional, Enter to submit)", zh: "备注（可选，留空直接回车提交）" },
+    "card.cancel": { en: "Cancel Esc", zh: "取消 Esc" },
+    "card.ok": { en: "✓ OK Enter", zh: "✓ 确认 Enter" },
+    "card.groupPlaceholder": { en: "Group note (optional, shared by the whole group)", zh: "组备注（可选，整组共用这一条）" },
+    "card.groupOk": { en: "✓ Submit {n} Enter", zh: "✓ 提交 {n} 项 Enter" },
+    "panel.title": { en: "Picks", zh: "已选备注" },
+    "panel.empty": { en: "No elements picked yet", zh: "还没有选中任何元素" },
+    "panel.pclose.title": { en: "Close Esc", zh: "关闭 Esc" },
+    "count.items": { en: "{n}", zh: "{n} 条" },
+    "group.label": { en: "⧉ group {g}", zh: "⧉ 组 {g}" },
+    "note.placeholder": { en: "Note… (auto-saves on blur)", zh: "备注…（失焦自动保存）" },
+    "btn.delete": { en: "Delete", zh: "删除" },
+    "pick.added": { en: "Picked {sel}", zh: "已选中 {sel}" },
+    "pick.deleted": { en: "Deleted {sel}", zh: "已删除 {sel}" },
+    "pick.cleared": { en: "Cleared {n} picks", zh: "已清空 {n} 条标注" },
+    "pick.layers": { en: "{n}", zh: "{n}层" },
+    "group.added": { en: "Added to group ({n} total)", zh: "已加入组合（共 {n} 项）" },
+    "group.removed": { en: "Removed from group ({n} left)", zh: "已移出组合（剩 {n} 项）" },
+    "group.cleared": { en: "Pending group cleared ({n} items)", zh: "已清空待处理组合（{n} 项）" },
+    "group.tagTitle": { en: "Click to remove from group", zh: "点击移出组合" },
+    "group.selected": { en: "Picked {n} · group {gid}", zh: "已选中 {n} 项 · 组 {gid}" },
+    "gh.note": { en: " · <kbd>Enter</kbd>group note ({n})", zh: " · <kbd>Enter</kbd>组备注({n})" },
+    "note.saved": { en: "Note saved", zh: "备注已保存" },
+    "note.synced": { en: " (synced to {n} in group)", zh: "（已同步组内 {n} 项）" },
+    "record.deleted": { en: "Record deleted", zh: "已删除操作记录" },
+    "record.summary": { en: "⏺ Record {id} · {n} events", zh: "⏺ 记录 {id} · {n} 事件" },
+    "record.started": { en: "Recording started · interact with the page, ⇧⌥R to stop", zh: "录制开始 · 操作页面，⇧⌥R 停止" },
+    "record.discarded": { en: "Recording discarded", zh: "录制已丢弃" },
+    "record.done": { en: "Recording done · {n} events · open the panel to send", zh: "录制完成 · {n} 事件 · 打开面板发送" },
+    "send.label": { en: "Send to agent (⌘/Ctrl+Enter to send · prompt optional)", zh: "发送到 agent（⌘/Ctrl+Enter 发送 · prompt 可留空）" },
+    "prompt.placeholder": { en: "What should the agent do? Leave empty = respond to each pick’s note / explain the element’s rendering", zh: "要让 agent 做什么？留空 = 回应各标注的 note / 解释元素渲染逻辑" },
+    "target.label": { en: "Target", zh: "目标" },
+    "tinput.placeholder": { en: "broker not connected", zh: "未连接 broker" },
+    "trefresh.title": { en: "Refresh target list", zh: "刷新 target 列表" },
+    "conn.off": { en: "Not connected · click to connect", zh: "未连接 · 点击连接" },
+    "conn.on": { en: "broker connected", zh: "broker 已连接" },
+    "conn.connecting": { en: "Connecting…", zh: "连接中…" },
+    "pill.disconnect.title": { en: "Click to disconnect broker", zh: "点击断开 broker" },
+    "pill.off.title": { en: "Click to connect broker (opens settings on failure)", zh: "点击连接 broker（失败会打开连接设置）" },
+    "clearbtn": { en: "Clear", zh: "清空" },
+    "sendbtn": { en: "Send →", zh: "发送 →" },
+    "sendmore.title": { en: "More actions", zh: "更多操作" },
+    "copyprompt": { en: "⧉ Copy handoff prompt", zh: "⧉ 复制 handoff prompt" },
+    "copyprompt.sub": { en: "broker composes the full handoff doc → clipboard (send to any agent with bash)", zh: "broker 拼好完整 handoff 文档 → 剪贴板（发给任意有 bash 的 agent）" },
+    "settings.title": { en: "Connection settings", zh: "连接设置" },
+    "settings.burl": { en: "BROKER URL (WS)", zh: "BROKER 地址（WS）" },
+    "settings.sprops": { en: "framework.inspect includes component props/state (default off)", zh: "framework.inspect 附带组件 props/state（默认关）" },
+    "settings.sauto": { en: "Auto-connect broker on this domain (authorized after one manual connect; silently reconnects on reload)", zh: "本域名自动连接 broker（手动连上过一次即授权，页面刷新后静默重连）" },
+    "settings.swrite": { en: "Allow agent to operate this page (dom.click / dom.setValue, default off)", zh: "允许 agent 操作本页（dom.click / dom.setValue，默认关）" },
+    "settings.cancel": { en: "Cancel", zh: "取消" },
+    "settings.save": { en: "Save & connect", zh: "保存并连接" },
+    "settings.toast.on": { en: "on", zh: "已开启" },
+    "settings.toast.off": { en: "off", zh: "已关闭" },
+    "settings.toast.revoked": { en: "revoked", zh: "已撤销" },
+    "settings.toast.fprops": { en: "framework.inspect props/state {state}", zh: "framework.inspect props/state {state}" },
+    "settings.toast.autoLink": { en: "Auto-connect on this page {state}", zh: "本页自动连接 {state}" },
+    "settings.toast.write": { en: "Agent page-write permission {state}", zh: "agent 页面操作权限 {state}" },
+    "settings.toast.saved": { en: "Saved, connecting…", zh: "已保存，连接中…" },
+    "fz.on.title": { en: "Frozen: page interaction blocked, overlays won’t close on click/hover (click to toggle)", zh: "冻结：页面交互已屏蔽，浮层不会因点击/hover 关闭（点击此提示可切换）" },
+    "fz.off.title": { en: "Live: hover can trigger the page (open submenus etc.) (click to toggle)", zh: "实时：hover 可触发页面（展开子菜单等）（点击此提示可切换）" },
+    "fz.on": { en: "Frozen: page interaction blocked", zh: "冻结：页面交互已屏蔽" },
+    "fz.off": { en: "Live: hover can trigger the page", zh: "实时：hover 可触发页面" },
+    "combo.noSessions": { en: "(no active local sessions)", zh: "（无活跃 local session）" },
+    "combo.none": { en: "no active local sessions", zh: "无活跃 local session" },
+    "combo.noMatch": { en: "No matching target", zh: "无匹配目标" },
+    "combo.hint": { en: "Type to filter · ↑↓ select · Enter confirm · Esc close", zh: "输入过滤 · ↑↓ 选择 · Enter 确认 · Esc 关闭" },
+    "combo.switched": { en: "Target switched: {name}", zh: "目标已切换：{name}" },
+    "combo.refreshed": { en: "Target list refreshed ({n})", zh: "目标列表已刷新（{n}）" },
+    "combo.noneFound": { en: "No active local sessions found", zh: "没有发现活跃 local session" },
+    "send.connectFirst": { en: "Connect the broker first (status pill at bottom left)", zh: "先连接 broker（点击左下状态）" },
+    "send.needContent": { en: "Pick elements, record actions, or write a prompt first", zh: "先标注元素、录制操作、或写 prompt" },
+    "send.composing": { en: "Requesting full handoff prompt from broker…", zh: "正在向 broker 请求完整 handoff prompt…" },
+    "send.composeFailed": { en: "Failed to compose prompt: {detail}", zh: "拼 prompt 失败: {detail}" },
+    "send.clipboard": { en: "Clipboard unavailable (needs GM_setClipboard or https/localhost)", zh: "剪贴板不可用（需 GM_setClipboard 或 https/localhost）" },
+    "send.copied": { en: "Handoff prompt copied ({n} chars · paste to any agent)", zh: "handoff prompt 已复制（{n} 字符 · 可粘贴给任意 agent）" },
+    "send.noTarget": { en: "No target available: run xfer listen in a pi session first", zh: "没有可用目标：先启动 pi session 的 xfer listen" },
+    "send.promptOnly.confirm": { en: "No elements picked — send prompt only?", zh: "没有标注任何元素，只发 prompt？" },
+    "send.sending": { en: "Sending…", zh: "发送中…" },
+    "send.delivered": { en: "Delivered to agent (handoff {id})", zh: "已送达 agent（handoff {id}）" },
+    "send.failed": { en: "Send failed: {detail}", zh: "发送失败: {detail}" },
+    "send.connecting": { en: "Connecting {url} …", zh: "正在连接 {url} …" },
+    "conn.wsFailed": { en: "WebSocket creation failed: {msg}", zh: "WS 创建失败: {msg}" },
+    "conn.brokerError": { en: "broker error: {code}", zh: "broker 错误: {code}" },
+    "conn.closed": { en: "broker connection closed", zh: "broker 连接已断开" },
+    "conn.unreachable": { en: "Cannot reach broker: {url} (edit the address in connection settings)", zh: "broker 连不上: {url}（连接设置里可改地址）" },
+    "conn.disconnected": { en: "Disconnected", zh: "已断开" },
+    "conn.notConnected": { en: "broker not connected", zh: "broker 未连接" },
+    "conn.noResponse": { en: "broker no response", zh: "broker 无响应" }
+  };
+  var lang = (function detect() {
+    const saved = gm.get(GM_LANG, "");
+    if (saved === "en" || saved === "zh") return saved;
+    return (typeof navigator !== "undefined" && navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
+  })();
+  function toggleLang() {
+    lang = lang === "zh" ? "en" : "zh";
+    gm.set(GM_LANG, lang);
+    return lang;
+  }
+  function t(key, vars) {
+    const entry = STRINGS[key];
+    if (!entry) {
+      console.warn("[pi.wp.i18n] missing key:", key);
+      return key;
+    }
+    let s = entry[lang] !== void 0 ? entry[lang] : entry.en;
+    if (vars) for (const k in vars) s = s.split("{" + k + "}").join(String(vars[k]));
+    return s;
+  }
+
   // web-picker.src/broker-conn.js
   var BACKOFF_STEPS = [1e3, 4e3, 16e3];
   var BACKOFF_CAP = 6e4;
@@ -1109,7 +1248,7 @@
       } catch (e) {
         connectSettle = null;
         setState("off");
-        if (!silent) toast("WS 创建失败: " + e.message);
+        if (!silent) toast(t("conn.wsFailed", { msg: e.message }));
         settle(false);
         if (silent) {
           silent = false;
@@ -1135,7 +1274,7 @@
           clearBackoff();
           const wasSilent = silent;
           silent = false;
-          if (!wasSilent) toast("broker 已连接");
+          if (!wasSilent) toast(t("conn.on"));
           debugLog2("auto-link: connected", wasSilent ? "(auto)" : "(manual)");
           const settled = connectSettle;
           connectSettle = null;
@@ -1160,7 +1299,7 @@
             pending.delete(f.id);
             p.resolve(p.kind === "submit" ? { ok: false, code: f.code, message: f.message } : p.kind === "compose" ? { ok: false, code: f.code, message: f.message } : []);
           } else {
-            toast("broker 错误: " + (f.code || "?"));
+            toast(t("conn.brokerError", { code: f.code || "?" }));
           }
           return;
         }
@@ -1181,7 +1320,7 @@
       sock.onclose = () => {
         if (ws !== sock) return;
         ws = null;
-        for (const p of pending.values()) p.resolve(p.kind === "submit" ? { ok: false, code: "closed", message: "broker 连接已断开" } : []);
+        for (const p of pending.values()) p.resolve(p.kind === "submit" ? { ok: false, code: "closed", message: t("conn.closed") } : []);
         pending.clear();
         const settled = connectSettle;
         connectSettle = null;
@@ -1198,14 +1337,14 @@
           if (autoLinkAllowed() && !manualDown) {
             scheduleReconnect();
           } else {
-            toast("broker 连接已断开");
+            toast(t("conn.closed"));
           }
         }
       };
       sock.onerror = () => {
         if (ws === sock && wsState !== "off") {
           setState("off");
-          if (!silent) toast("broker 连不上: " + url + "（连接设置里可改地址）");
+          if (!silent) toast(t("conn.unreachable", { url }));
         }
       };
       return attempt;
@@ -1222,7 +1361,7 @@
         }
         ws = null;
       }
-      toast("已断开");
+      toast(t("conn.disconnected"));
     }
     function maybeAutoConnect() {
       if (!autoLinkAllowed() || manualDown) return false;
@@ -1238,7 +1377,7 @@
     function submitToAgent(prompt, targetName, record) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
-          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
           return;
         }
         const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -1246,13 +1385,13 @@
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
         if (!sendFrame(frameSubmit(id, promptText, targetName, record))) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
           return;
         }
         setTimeout(() => {
           if (pending.has(id)) {
             pending.delete(id);
-            resolve({ ok: false, code: "timeout", message: "broker 无响应" });
+            resolve({ ok: false, code: "timeout", message: t("conn.noResponse") });
           }
         }, 1e4);
       });
@@ -1260,7 +1399,7 @@
     function requestCompose(prompt, targetName, record) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
-          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
           return;
         }
         const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -1268,13 +1407,13 @@
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
         if (!sendFrame(frameCompose(id, promptText, targetName, record))) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", message: "broker 未连接" });
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
           return;
         }
         setTimeout(() => {
           if (pending.has(id)) {
             pending.delete(id);
-            resolve({ ok: false, code: "timeout", message: "broker 无响应" });
+            resolve({ ok: false, code: "timeout", message: t("conn.noResponse") });
           }
         }, 1e4);
       });
@@ -1569,74 +1708,74 @@
     <div id="badge"></div>
     <div id="info"></div>
     <div id="bar"><b>PICK</b>
-      <span class="muted"><kbd>[</kbd><kbd>]</kbd>切层</span>
-      <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>跳层</span>
-      <span class="muted"><kbd>Enter</kbd>选中</span>
-      <span class="muted" id="gh"><kbd>⇧Enter</kbd>加组/移出</span>
-      <span class="muted" id="gclear" style="display:none" title="清空待处理组合（也可按 ⌫）"><kbd>⌫</kbd>清空组合</span>
-      <span class="muted" id="fz"><kbd>F</kbd>冻结</span>
-      <span class="muted" id="escx" title="退出拾取模式"><kbd>Esc</kbd>退出</span>
+      <span class="muted"><kbd>[</kbd><kbd>]</kbd>${t("bar.cycle")}</span>
+      <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>${t("bar.jump")}</span>
+      <span class="muted"><kbd>Enter</kbd>${t("bar.select")}</span>
+      <span class="muted" id="gh"><kbd>⇧Enter</kbd>${t("bar.group")}</span>
+      <span class="muted" id="gclear" style="display:none" title="${t("gclear.title")}"><kbd>⌫</kbd>${t("bar.clearGroup")}</span>
+      <span class="muted" id="fz"><kbd>F</kbd>${t("bar.freeze")}</span>
+      <span class="muted" id="escx" title="${t("escx.title")}"><kbd>Esc</kbd>${t("bar.exit")}</span>
     </div>
     <div id="recbar">
       <span class="rdot"></span><b>REC</b>
       <span id="reccount">0 events</span>
-      <span id="recbadge" title="打开标注面板">面板</span>
-      <button id="recstop">■ 停止</button>
-      <button id="recdiscard">丢弃</button>
+      <span id="recbadge" title="${t("recbadge.title")}">${t("recbadge")}</span>
+      <button id="recstop">${t("recstop")}</button>
+      <button id="recdiscard">${t("recdiscard")}</button>
     </div>
     <div id="card">
       <div class="sel" id="sel"></div>
-      <textarea id="txt" placeholder="备注（可选，留空直接回车提交）"></textarea>
+      <textarea id="txt" placeholder="${t("card.placeholder")}"></textarea>
       <div class="row">
-        <button class="ghost" id="cancel">取消 Esc</button>
-        <button class="primary" id="ok">✓ 确认 Enter</button>
+        <button class="ghost" id="cancel">${t("card.cancel")}</button>
+        <button class="primary" id="ok">${t("card.ok")}</button>
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>已选备注</b><span class="cnt2" id="pcount"></span><button id="pclose" title="关闭 Esc">✕</button></div>
+      <div class="ph" id="ph"><b>${t("panel.title")}</b><span class="cnt2" id="pcount"></span><button id="pclose" title="${t("panel.pclose.title")}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
-        <div class="lbl">发送到 agent（⌘/Ctrl+Enter 发送 · prompt 可留空）</div>
-        <textarea id="prompt" placeholder="要让 agent 做什么？留空 = 回应各标注的 note / 解释元素渲染逻辑"></textarea>
+        <div class="lbl">${t("send.label")}</div>
+        <textarea id="prompt" placeholder="${t("prompt.placeholder")}"></textarea>
         <div class="trow">
-          <span class="lbl">目标</span>
+          <span class="lbl">${t("target.label")}</span>
           <div id="tcombo">
-            <input id="tinput" placeholder="未连接 broker" autocomplete="off" spellcheck="false" />
+            <input id="tinput" placeholder="${t("tinput.placeholder")}" autocomplete="off" spellcheck="false" />
             <div id="tdrop"></div>
           </div>
-          <button class="ghost icon" id="trefresh" title="刷新 target 列表">⟳</button>
+          <button class="ghost icon" id="trefresh" title="${t("trefresh.title")}">⟳</button>
         </div>
         <div class="srow">
-          <span id="connstate"><span class="dot"></span><span id="conntext">未连接 · 点击连接</span></span>
-          <button class="ghost" id="clearbtn">清空</button>
+          <span id="connstate"><span class="dot"></span><span id="conntext">${t("conn.off")}</span></span>
+          <button class="ghost" id="clearbtn">${t("clearbtn")}</button>
           <div id="sendgroup">
-            <button class="primary" id="sendbtn">发送 →</button>
-            <button class="primary more" id="sendmore" title="更多操作">▾</button>
+            <button class="primary" id="sendbtn">${t("sendbtn")}</button>
+            <button class="primary more" id="sendmore" title="${t("sendmore.title")}">▾</button>
             <div id="sendmenu">
-              <div class="mitem" id="copyprompt">⧉ 复制 handoff prompt<div class="msub">broker 拼好完整 handoff 文档 → 剪贴板（发给任意有 bash 的 agent）</div></div>
+              <div class="mitem" id="copyprompt">${t("copyprompt")}<div class="msub">${t("copyprompt.sub")}</div></div>
             </div>
           </div>
         </div>
       </div>
     </div>
-    <button id="fab" title="元素拾取 · 点击进入（或按 ⇧⌥P）· 点数字角标开标注面板（0 时也可开）· 绿点=broker 已连接">
+    <button id="fab" title="${t("fab.title")}">
       <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
         <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
       </svg>
       <span id="dot"></span>
-      <span id="cnt" class="zero" title="打开标注面板">0</span>
+      <span id="cnt" class="zero" title="${t("recbadge.title")}">0</span>
     </button>
     <div id="toast"></div>
     <div id="settings">
-      <b>连接设置</b>
-      <div class="lbl">BROKER 地址（WS）</div>
+      <b>${t("settings.title")}</b>
+      <div class="lbl">${t("settings.burl")}</div>
       <input id="sburl" placeholder="ws://127.0.0.1:4719" />
-      <label class="chk"><input type="checkbox" id="sprops" /> framework.inspect 附带组件 props/state（默认关）</label>
-      <label class="chk"><input type="checkbox" id="sauto" /> 本域名自动连接 broker（手动连上过一次即授权，页面刷新后静默重连）</label>
-      <label class="chk"><input type="checkbox" id="swrite" /> 允许 agent 操作本页（dom.click / dom.setValue，默认关）</label>
+      <label class="chk"><input type="checkbox" id="sprops" /> ${t("settings.sprops")}</label>
+      <label class="chk"><input type="checkbox" id="sauto" /> ${t("settings.sauto")}</label>
+      <label class="chk"><input type="checkbox" id="swrite" /> ${t("settings.swrite")}</label>
       <div class="row">
-        <button class="ghost" id="scancel">取消</button>
-        <button class="primary" id="ssave">保存并连接</button>
+        <button class="ghost" id="scancel">${t("settings.cancel")}</button>
+        <button class="primary" id="ssave">${t("settings.save")}</button>
       </div>
     </div>
   `;
@@ -1760,7 +1899,7 @@
       const b = loadBatch();
       b.push(rec);
       saveBatch(b);
-      toast("已选中 " + rec.selector);
+      toast(t("pick.added", { sel: rec.selector }));
       refreshCount();
     }
     ctx.addPick = addPick;
@@ -1772,13 +1911,13 @@
     function renderPanel() {
       const b = loadBatch();
       const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : "";
-      elPcount.textContent = b.length || recHtml ? b.length + (recHtml ? 1 : 0) + " 条" : "";
+      elPcount.textContent = b.length || recHtml ? t("count.items", { n: b.length + (recHtml ? 1 : 0) }) : "";
       if (!b.length && !recHtml) {
-        elPlist.innerHTML = '<div class="empty">还没有选中任何元素</div>';
+        elPlist.innerHTML = `<div class="empty">${t("panel.empty")}</div>`;
         return;
       }
       elPlist.innerHTML = recHtml + b.map(
-        (r, i) => '<div class="item" data-i="' + i + '"><div class="psel">' + escapeHtml(r.selector) + "</div>" + (r.group ? '<div class="pgroup">⧉ 组 ' + escapeHtml(r.group) + "</div>" : "") + (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + " · " + r.source.file + ":" + r.source.line) + "</div>" : "") + (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + "</div>" : "") + '<textarea placeholder="备注…（失焦自动保存）">' + escapeHtml(r.note || "") + '</textarea><div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + '</span><button class="del">删除</button></div></div>'
+        (r, i) => '<div class="item" data-i="' + i + '"><div class="psel">' + escapeHtml(r.selector) + "</div>" + (r.group ? `<div class="pgroup">${t("group.label", { g: escapeHtml(r.group) })}</div>` : "") + (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + " · " + r.source.file + ":" + r.source.line) + "</div>" : "") + (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + "</div>" : "") + `<textarea placeholder="${t("note.placeholder")}">` + escapeHtml(r.note || "") + '</textarea><div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + `</span><button class="del">${t("btn.delete")}</button></div></div>`
       ).join("");
     }
     ctx.renderPanel = renderPanel;
@@ -1804,14 +1943,14 @@
     ctx.togglePanel = togglePanel;
     elPclose.addEventListener("click", closePanel);
     elPlist.addEventListener("change", (e) => {
-      const t = e.target;
-      if (!t || t.tagName !== "TEXTAREA") return;
-      const item = t.closest(".item");
+      const t2 = e.target;
+      if (!t2 || t2.tagName !== "TEXTAREA") return;
+      const item = t2.closest(".item");
       if (!item) return;
       const b = loadBatch();
       const i = +item.getAttribute("data-i");
       if (!b[i]) return;
-      b[i].note = t.value.trim();
+      b[i].note = t2.value.trim();
       let synced = 0;
       if (b[i].group) {
         for (let j = 0; j < b.length; j++) {
@@ -1823,14 +1962,14 @@
         }
       }
       saveBatch(b);
-      toast("备注已保存" + (synced ? "（已同步组内 " + synced + " 项）" : ""));
+      toast(t2("note.saved") + (synced ? t2("note.synced", { n: synced }) : ""));
     });
     elPlist.addEventListener("click", (e) => {
       const recDel = e.target && e.target.closest ? e.target.closest("[data-rec-del]") : null;
       if (recDel) {
         if (ctx.clearRecord) ctx.clearRecord();
         renderPanel();
-        toast("已删除操作记录");
+        toast(t("record.deleted"));
         return;
       }
       const del = e.target && e.target.closest ? e.target.closest(".del") : null;
@@ -1845,7 +1984,7 @@
       saveBatch(b);
       refreshCount();
       renderPanel();
-      toast("已删除 " + sel);
+      toast(t("pick.deleted", { sel }));
     });
   }
 
@@ -1856,10 +1995,10 @@
       if (!k.startsWith("__reactFiber$") && !k.startsWith("__reactInternalInstance$")) continue;
       let f = el[k], guard = 0;
       while (f && guard++ < 200) {
-        const t = f.type;
+        const t2 = f.type;
         const src = f._debugSource;
-        if (t && (t.name || t.displayName) && src && src.fileName) {
-          return { framework: "react", component: t.displayName || t.name || "", file: src.fileName, line: src.lineNumber || 0, column: src.columnNumber || 0 };
+        if (t2 && (t2.name || t2.displayName) && src && src.fileName) {
+          return { framework: "react", component: t2.displayName || t2.name || "", file: src.fileName, line: src.lineNumber || 0, column: src.columnNumber || 0 };
         }
         f = f.return;
       }
@@ -1967,7 +2106,7 @@
       elBadge.style.display = "block";
       elBadge.style.left = r.left + r.width / 2 + "px";
       elBadge.style.top = r.top + "px";
-      elBadge.innerHTML = idx + 1 + "<small>/" + stack.length + "层 · " + Math.round(r.width) + "×" + Math.round(r.height) + "</small>";
+      elBadge.innerHTML = idx + 1 + `<small>/${t("pick.layers", { n: stack.length })} · ` + Math.round(r.width) + "×" + Math.round(r.height) + "</small>";
       elInfo.style.display = "block";
       elInfo.style.left = r.left + "px";
       elInfo.style.top = r.top + "px";
@@ -2068,8 +2207,8 @@
     window.addEventListener("click", clickCapture, true);
     window.addEventListener("contextmenu", clickCapture, true);
     window.addEventListener("wheel", wheelCapture, { capture: true, passive: false });
-    for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "contextmenu"]) {
-      host.addEventListener(t, (e) => e.stopPropagation(), false);
+    for (const t2 of ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "contextmenu"]) {
+      host.addEventListener(t2, (e) => e.stopPropagation(), false);
     }
     function shiftLayer(delta) {
       if (!stack.length) return;
@@ -2112,10 +2251,10 @@
       const i = groupEls.indexOf(el);
       if (i >= 0) {
         groupEls.splice(i, 1);
-        toast("已移出组合（剩 " + groupEls.length + " 项）");
+        toast(t("group.removed", { n: groupEls.length }));
       } else {
         groupEls.push(el);
-        toast("已加入组合（共 " + groupEls.length + " 项）");
+        toast(t("group.added", { n: groupEls.length }));
       }
       renderGroupMarks();
       updateGroupUI();
@@ -2127,7 +2266,7 @@
       if (groupCard) closeGroupCard();
       renderGroupMarks();
       updateGroupUI();
-      toast("已清空待处理组合（" + n + " 项）");
+      toast(t("group.cleared", { n }));
     }
     ctx.clearPendingGroup = clearPendingGroup;
     function groupAt(x, y) {
@@ -2154,7 +2293,7 @@
         tag.className = "gi";
         tag.textContent = String(i + 1);
         tag.setAttribute("data-gi", String(i));
-        tag.title = "点击移出组合";
+        tag.title = t("group.tagTitle");
         m.appendChild(tag);
         elGWrap.appendChild(m);
       });
@@ -2168,13 +2307,13 @@
       groupEls.splice(i, 1);
       renderGroupMarks();
       updateGroupUI();
-      toast("已移出组合（剩 " + groupEls.length + " 项）");
+      toast(t("group.removed", { n: groupEls.length }));
     });
     ctx.toggleGroup = toggleGroup;
     function updateGroupUI() {
       const n = groupEls.length;
       elGH.classList.toggle("on", n > 0);
-      elGH.innerHTML = "<kbd>⇧Enter</kbd>加组/移出" + (n ? " · <kbd>Enter</kbd>组备注(" + n + ")" : "");
+      elGH.innerHTML = `<kbd>⇧Enter</kbd>${t("bar.group")}` + (n ? t("gh.note", { n }) : "");
       elGCLEAR.style.display = n ? "inline-flex" : "none";
     }
     ctx.updateGroupUI = updateGroupUI;
@@ -2188,8 +2327,8 @@
       if (top + 240 > window.innerHeight) top = Math.max(8, window.innerHeight - 250);
       elSel.textContent = groupEls.map((el) => cssPath(el)).join("\n");
       elTxt.value = "";
-      elTxt.placeholder = "组备注（可选，整组共用这一条）";
-      elOk.textContent = "✓ 提交 " + groupEls.length + " 项 Enter";
+      elTxt.placeholder = t("card.groupPlaceholder");
+      elOk.textContent = t("card.groupOk", { n: groupEls.length });
       Object.assign(elCard.style, { display: "block", left: left + "px", top: top + "px" });
       setTimeout(() => elTxt.focus(), 0);
     }
@@ -2198,8 +2337,8 @@
       if (!groupCard) return;
       groupCard = false;
       elCard.style.display = "none";
-      elTxt.placeholder = "备注（可选，留空直接回车提交）";
-      elOk.textContent = "✓ 确认 Enter";
+      elTxt.placeholder = t("card.placeholder");
+      elOk.textContent = t("card.ok");
     }
     ctx.closeGroupCard = closeGroupCard;
     function submitGroup() {
@@ -2215,7 +2354,7 @@
       renderGroupMarks();
       updateGroupUI();
       closeGroupCard();
-      toast("已选中 " + n + " 项 · 组 " + gid);
+      toast(t("group.selected", { n, gid }));
     }
     ctx.submitGroup = submitGroup;
     function payloadFor(el, note) {
@@ -2286,7 +2425,7 @@
     function comboList() {
       const q = comboFilter.trim().toLowerCase();
       if (!q) return targets.slice();
-      return targets.filter((t) => ((t.name || "") + " " + (t.cwd || "") + " " + (t.status || "")).toLowerCase().includes(q));
+      return targets.filter((t2) => ((t2.name || "") + " " + (t2.cwd || "") + " " + (t2.status || "")).toLowerCase().includes(q));
     }
     function markMatch(text, q) {
       const s = String(text == null ? "" : text);
@@ -2296,21 +2435,21 @@
     }
     function renderDrop() {
       if (!targets.length) {
-        elTDrop.innerHTML = '<div class="tempty">（无活跃 local session）</div>';
+        elTDrop.innerHTML = `<div class="tempty">${t("combo.noSessions")}</div>`;
         return;
       }
       const list = comboList();
       if (!list.length) {
-        elTDrop.innerHTML = '<div class="tempty">无匹配目标</div>';
+        elTDrop.innerHTML = `<div class="tempty">${t("combo.noMatch")}</div>`;
         return;
       }
       if (comboHl >= list.length) comboHl = list.length - 1;
       if (comboHl < 0) comboHl = 0;
       const q = comboFilter.trim();
-      elTDrop.innerHTML = list.map((t, i) => {
-        const sub = (t.cwd || "?") + (t.status ? " · " + t.status : "");
-        return '<div class="titem' + (i === comboHl ? " hl" : "") + '" data-name="' + escapeHtml(t.name) + '"><div class="tname">' + (q ? markMatch(t.name, q) : escapeHtml(t.name)) + (t.name === comboSel ? ' <span class="tick">✓</span>' : "") + '</div><div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + "</div></div>";
-      }).join("") + '<div class="thint">输入过滤 · ↑↓ 选择 · Enter 确认 · Esc 关闭</div>';
+      elTDrop.innerHTML = list.map((t2, i) => {
+        const sub = (t2.cwd || "?") + (t2.status ? " · " + t2.status : "");
+        return '<div class="titem' + (i === comboHl ? " hl" : "") + '" data-name="' + escapeHtml(t2.name) + '"><div class="tname">' + (q ? markMatch(t2.name, q) : escapeHtml(t2.name)) + (t2.name === comboSel ? ' <span class="tick">✓</span>' : "") + '</div><div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + "</div></div>";
+      }).join("") + `<div class="thint">${t("combo.hint")}</div>`;
       const hl = elTDrop.querySelector(".titem.hl");
       if (hl) {
         if (hl.offsetTop < elTDrop.scrollTop) elTDrop.scrollTop = hl.offsetTop;
@@ -2322,7 +2461,7 @@
       if (elTInput.disabled || comboOpen) return;
       comboOpen = true;
       comboFilter = "";
-      comboHl = Math.max(0, targets.findIndex((t) => t.name === comboSel));
+      comboHl = Math.max(0, targets.findIndex((t2) => t2.name === comboSel));
       elTDrop.classList.add("open");
       renderDrop();
       if (selectAll) setTimeout(() => elTInput.select(), 0);
@@ -2341,18 +2480,18 @@
       gm.set(GM_TARGET, name);
       closeDrop();
       elTInput.blur();
-      toast("目标已切换：" + name);
+      toast(t("combo.switched", { name }));
     }
     function renderTargetCombo() {
       const last = gm.get(GM_TARGET, "");
       comboSel = "";
       elTInput.disabled = true;
       elTInput.value = "";
-      elTInput.placeholder = conn.getState() !== "on" ? "未连接 broker" : "无活跃 local session";
+      elTInput.placeholder = conn.getState() !== "on" ? t("tinput.placeholder") : t("combo.none");
       closeDrop();
       if (conn.getState() !== "on" || !targets.length) return;
       elTInput.disabled = false;
-      comboSel = targets.some((t) => t.name === last) ? last : targets[0].name;
+      comboSel = targets.some((t2) => t2.name === last) ? last : targets[0].name;
       if (comboOpen) renderDrop();
       else elTInput.value = comboSel;
     }
@@ -2417,7 +2556,7 @@
         ctx.openSettings();
         return;
       }
-      refreshTargets().then(() => toast(targets.length ? "目标列表已刷新（" + targets.length + "）" : "没有发现活跃 local session"));
+      refreshTargets().then(() => toast(targets.length ? t("combo.refreshed", { n: targets.length }) : t("combo.noneFound")));
     });
   }
 
@@ -2445,7 +2584,7 @@
     async function copyHandoffPrompt() {
       ctx.closeSendMenu();
       if (conn.getState() !== "on") {
-        toast("先连接 broker（点击左下状态）");
+        toast(t("send.connectFirst"));
         return;
       }
       const prompt = elPrompt.value.trim();
@@ -2453,49 +2592,49 @@
       const hasPicks = loadBatch().length > 0;
       const record = ctx.getRecord ? ctx.getRecord() : null;
       if (!prompt && !hasPicks && !record) {
-        toast("先标注元素、录制操作、或写 prompt");
+        toast(t("send.needContent"));
         return;
       }
-      toast("正在向 broker 请求完整 handoff prompt…");
+      toast(t("send.composing"));
       const res = await conn.requestCompose(prompt, target, record);
       if (!res.ok) {
-        toast("拼 prompt 失败: " + res.code + (res.message ? " — " + res.message : ""));
+        toast(t("send.composeFailed", { detail: res.code + (res.message ? " — " + res.message : "") }));
         return;
       }
       if (!copyText(res.text)) {
-        toast("剪贴板不可用（需 GM_setClipboard 或 https/localhost）");
+        toast(t("send.clipboard"));
         return;
       }
-      toast("handoff prompt 已复制（" + res.text.length + " 字符 · 可粘贴给任意 agent）");
+      toast(t("send.copied", { n: res.text.length }));
     }
     async function doSend() {
       const prompt = elPrompt.value.trim();
       const target = ctx.getComboSel();
       if (!target) {
-        toast(conn.getState() !== "on" ? "先连接 broker（点击左下状态）" : "没有可用目标：先启动 pi session 的 xfer listen");
+        toast(conn.getState() !== "on" ? t("send.connectFirst") : t("send.noTarget"));
         return;
       }
       const hasPicks = loadBatch().length > 0;
       const record = ctx.getRecord ? ctx.getRecord() : null;
       if (!prompt && !hasPicks && !record) {
-        toast("先标注元素、录制操作、或写 prompt");
+        toast(t("send.needContent"));
         return;
       }
-      if (!hasPicks && !record && !confirm("没有标注任何元素，只发 prompt？")) return;
+      if (!hasPicks && !record && !confirm(t("send.promptOnly.confirm"))) return;
       elSend.disabled = true;
-      elSend.textContent = "发送中…";
+      elSend.textContent = t("send.sending");
       const res = await conn.submitToAgent(prompt, target, record);
       elSend.disabled = false;
-      elSend.textContent = "发送 →";
+      elSend.textContent = t("sendbtn");
       if (res.ok) {
         gm.set(GM_TARGET, target);
-        toast("已送达 agent（handoff " + (res.result && res.result.handoff_id ? res.result.handoff_id : "?") + "）");
+        toast(t("send.delivered", { id: res.result && res.result.handoff_id ? res.result.handoff_id : "?" }));
         elPrompt.value = "";
         ctx.clearBatch();
         if (record && ctx.clearRecord) ctx.clearRecord();
         ctx.closePanel();
       } else {
-        toast("发送失败: " + res.code + (res.message ? " — " + res.message : ""));
+        toast(t("send.failed", { detail: res.code + (res.message ? " — " + res.message : "") }));
       }
     }
     elSend.addEventListener("click", doSend);
@@ -2531,7 +2670,7 @@
       if (!n) return;
       ctx.clearBatch();
       ctx.renderPanel();
-      toast("已清空 " + n + " 条标注");
+      toast(t("pick.cleared", { n }));
     });
     elConn.addEventListener("click", () => {
       if (conn.getState() === "on") {
@@ -2539,15 +2678,15 @@
         return;
       }
       if (conn.getState() !== "off") return;
-      toast("正在连接 " + conn.brokerUrl() + " …");
+      toast(t("send.connecting", { url: conn.brokerUrl() }));
       conn.connect().then((ok) => {
         if (!ok) ctx.openSettings();
       });
     });
     ctx.renderConnPill = (s) => {
       elConn.className = s === "on" ? "on" : s === "connecting" ? "connecting" : "";
-      elConn.title = s === "on" ? "点击断开 broker" : s === "connecting" ? "连接中…" : "点击连接 broker（失败会打开连接设置）";
-      elConnText.textContent = s === "on" ? "broker 已连接" : s === "connecting" ? "连接中…" : "未连接 · 点击连接";
+      elConn.title = s === "on" ? t("pill.disconnect.title") : s === "connecting" ? t("conn.connecting") : t("pill.off.title");
+      elConnText.textContent = s === "on" ? t("conn.on") : s === "connecting" ? t("conn.connecting") : t("conn.off");
     };
   }
 
@@ -2572,21 +2711,21 @@
     ctx.settingsOpen = () => elSettings.style.display === "block";
     elSProps.addEventListener("change", () => {
       gm.set(GM_FPROPS, elSProps.checked);
-      toast("framework.inspect props/state " + (elSProps.checked ? "已开启" : "已关闭"));
+      toast(t("settings.toast.fprops", { state: t(elSProps.checked ? "settings.toast.on" : "settings.toast.off") }));
     });
     elSAuto.addEventListener("change", () => {
       gm.set(autoLinkKey(location.origin), elSAuto.checked);
-      toast("本页自动连接 " + (elSAuto.checked ? "已开启" : "已撤销"));
+      toast(t("settings.toast.autoLink", { state: t(elSAuto.checked ? "settings.toast.on" : "settings.toast.revoked") }));
     });
     elSWrite.addEventListener("change", () => {
       gm.set(writeOpsKey(location.origin), elSWrite.checked);
-      toast("agent 页面操作权限 " + (elSWrite.checked ? "已开启" : "已关闭"));
+      toast(t("settings.toast.write", { state: t(elSWrite.checked ? "settings.toast.on" : "settings.toast.off") }));
     });
     elSSave.addEventListener("click", () => {
       const url = elSUrl.value.trim() || DEFAULT_BROKER_URL;
       gm.set("wp.brokerUrl", url);
       closeSettings();
-      toast("已保存，连接中…");
+      toast(t("settings.toast.saved"));
       conn.connect();
     });
     elSCancel.addEventListener("click", closeSettings);
@@ -2719,11 +2858,11 @@
     const barDrag = makeDraggable(elBar, elBar, {
       key: KEY_BAR_POS,
       onTap(target) {
-        const t = target && target.closest ? target : null;
-        if (!t) return;
-        if (t.closest("#gclear")) ctx.clearPendingGroup();
-        else if (t.closest("#fz")) ctx.toggleFreeze();
-        else if (t.closest("#escx")) ctx.setActive(false);
+        const t2 = target && target.closest ? target : null;
+        if (!t2) return;
+        if (t2.closest("#gclear")) ctx.clearPendingGroup();
+        else if (t2.closest("#fz")) ctx.toggleFreeze();
+        else if (t2.closest("#escx")) ctx.setActive(false);
       }
     });
     const cardDrag = makeDraggable(elCard, elCard, {});
@@ -2748,13 +2887,13 @@
       const fz = root.getElementById("fz");
       if (!fz) return;
       fz.classList.toggle("on", ctx.pickState.frozen);
-      fz.title = ctx.pickState.frozen ? "冻结：页面交互已屏蔽，浮层不会因点击/hover 关闭（点击此提示可切换）" : "实时：hover 可触发页面（展开子菜单等）（点击此提示可切换）";
+      fz.title = ctx.pickState.frozen ? t("fz.on.title") : t("fz.off.title");
     }
     ctx.updateFreezeUI = updateFreezeUI;
     function toggleFreeze() {
       ctx.pickState.frozen = !ctx.pickState.frozen;
       updateFreezeUI();
-      toast(ctx.pickState.frozen ? "冻结：页面交互已屏蔽" : "实时：hover 可触发页面");
+      toast(ctx.pickState.frozen ? t("fz.on") : t("fz.off"));
     }
     ctx.toggleFreeze = toggleFreeze;
     window.addEventListener("keydown", (e) => {
@@ -2879,10 +3018,10 @@
       const path = e.composedPath ? e.composedPath() : [];
       if (path.indexOf(root) < 0) return;
       e.stopPropagation();
-      const t = path[0];
-      if (!t || !t.dispatchEvent) return;
+      const t2 = path[0];
+      if (!t2 || !t2.dispatchEvent) return;
       try {
-        t.dispatchEvent(new FocusEvent("focusin", {
+        t2.dispatchEvent(new FocusEvent("focusin", {
           bubbles: true,
           composed: false,
           cancelable: false
@@ -2895,8 +3034,8 @@
       const path = e.composedPath ? e.composedPath() : [];
       if (path.indexOf(root) < 0) return;
       e.stopPropagation();
-      const t = path[0];
-      if (!t || !t.dispatchEvent) return;
+      const t2 = path[0];
+      if (!t2 || !t2.dispatchEvent) return;
       const base = {
         bubbles: true,
         composed: false,
@@ -2910,7 +3049,7 @@
         detail: e.detail
       };
       try {
-        t.dispatchEvent(new PointerEvent(e.type, Object.assign(base, {
+        t2.dispatchEvent(new PointerEvent(e.type, Object.assign(base, {
           pointerId: e.pointerId,
           pointerType: e.pointerType,
           isPrimary: e.isPrimary,
@@ -2918,12 +3057,12 @@
         })));
       } catch (err) {
         try {
-          t.dispatchEvent(new MouseEvent(e.type, base));
+          t2.dispatchEvent(new MouseEvent(e.type, base));
         } catch (err2) {
         }
       }
     }
-    ["pointerdown", "mousedown"].forEach((t) => window.addEventListener(t, isolatePress, true));
+    ["pointerdown", "mousedown"].forEach((t2) => window.addEventListener(t2, isolatePress, true));
   }
 
   // web-picker.src/record.js
@@ -3099,7 +3238,7 @@
       save();
       renderRecBar();
       startUrlWatch();
-      toast("录制开始 · 操作页面，⇧⌥R 停止");
+      toast(t("record.started"));
     }
     function stop(discard) {
       if (status !== "rec" || !rec) return;
@@ -3127,12 +3266,12 @@
           sessionStorage.removeItem(KEY_REC);
         } catch (e) {
         }
-        toast("录制已丢弃");
+        toast(t("record.discarded"));
       } else {
         status = "done";
         rec.console = ctx.consoleRing.filter((c) => c.ts >= rec.start).slice(-REC_SLICE_MAX);
         rec.net = ctx.netRing.filter((n) => n.ts >= rec.start).slice(-REC_SLICE_MAX);
-        toast("录制完成 · " + rec.events.length + " 事件 · 打开面板发送");
+        toast(t("record.done", { n: rec.events.length }));
       }
       save();
       renderRecBar();
@@ -3160,7 +3299,7 @@
       const ev = rec.events.map(
         (e) => '<div class="rsev"><span class="rst">+' + e.t + "ms</span> <b>" + escapeHtml(e.kind) + "</b> " + escapeHtml(e.sel || e.to || "") + (e.value !== void 0 ? " = " + escapeHtml(e.value) : "") + "</div>"
       ).join("");
-      return '<div class="item recitem" data-rec="1"><div class="psel">⏺ 记录 ' + escapeHtml(rec.id) + " · " + rec.events.length + ' 事件</div><div class="rsevs">' + ev + '</div><div class="prow"><span class="pts">' + new Date(rec.start).toLocaleTimeString() + " → " + new Date(rec.end).toLocaleTimeString() + '</span><button class="del" data-rec-del="1">删除</button></div></div>';
+      return `<div class="item recitem" data-rec="1"><div class="psel">${t("record.summary", { id: escapeHtml(rec.id), n: rec.events.length })}</div><div class="rsevs">` + ev + '</div><div class="prow"><span class="pts">' + new Date(rec.start).toLocaleTimeString() + " → " + new Date(rec.end).toLocaleTimeString() + `</span><button class="del" data-rec-del="1">${t("btn.delete")}</button></div></div>`;
     };
     elRecStop.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -3229,7 +3368,7 @@
     ctx.updateGroupUI();
     ctx.renderTargetCombo();
     conn.maybeAutoConnect();
-    debugLog("ready — ⇧⌥P 拾取 · ⇧⌥L 面板 · ⇧Enter 加组 · ⌫ 清组 · " + location.host);
+    debugLog("ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · " + location.host);
     window.__PI_WP_API__ = {
       start: () => {
         ctx.setActive(true);
@@ -3267,18 +3406,23 @@
       reinject: ui.reinjectTrigger
     };
     try {
-      GM_registerMenuCommand("连接 broker", () => conn.connect());
-      GM_registerMenuCommand("断开 broker", () => conn.disconnect());
-      GM_registerMenuCommand("连接设置…", ctx.openSettings);
-      GM_registerMenuCommand("撤销本页自动连接", () => {
+      GM_registerMenuCommand(t("menu.connect"), () => conn.connect());
+      GM_registerMenuCommand(t("menu.disconnect"), () => conn.disconnect());
+      GM_registerMenuCommand(t("menu.settings"), ctx.openSettings);
+      GM_registerMenuCommand(t("menu.revokeAuto"), () => {
         conn.revokeAutoLink();
-        ui.toast("已撤销 " + location.origin + " 的自动连接授权");
+        ui.toast(t("toast.autoRevoked", { origin: location.origin }));
       });
-      GM_registerMenuCommand("打开标注面板 (⇧⌥L)", ctx.togglePanel);
-      GM_registerMenuCommand("开始拾取 (⇧⌥P)", () => ctx.setActive(true));
-      GM_registerMenuCommand("开始/停止录制 (⇧⌥R)", () => ctx.toggleRecord());
-      GM_registerMenuCommand("重新注入 trigger", () => {
-        ui.toast(ui.reinjectTrigger() ? "trigger 已重新注入" : "trigger 仍在页面上");
+      GM_registerMenuCommand(t("menu.openPanel"), ctx.togglePanel);
+      GM_registerMenuCommand(t("menu.startPick"), () => ctx.setActive(true));
+      GM_registerMenuCommand(t("menu.toggleRecord"), () => ctx.toggleRecord());
+      GM_registerMenuCommand(t("menu.reinject"), () => {
+        ui.toast(ui.reinjectTrigger() ? t("toast.reinjected") : t("toast.reinjectStuck"));
+      });
+      GM_registerMenuCommand(t("menu.lang"), () => {
+        const lang2 = toggleLang();
+        ui.toast(t("toast.langSwitched"));
+        debugLog("language set to", lang2);
       });
     } catch (e) {
     }

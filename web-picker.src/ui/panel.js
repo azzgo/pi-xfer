@@ -7,6 +7,7 @@
 
 import { loadBatch, saveBatch } from '../storage.js';
 import { escapeHtml } from '../dom-utils.js';
+import { t } from '../i18n.js';
 
 export function initPanel(ctx) {
   const { els, toast } = ctx;
@@ -30,7 +31,7 @@ export function initPanel(ctx) {
     const b = loadBatch();
     b.push(rec);
     saveBatch(b);
-    toast('已选中 ' + rec.selector);
+    toast(t('pick.added', { sel: rec.selector }));
     refreshCount();
   }
   ctx.addPick = addPick;
@@ -40,17 +41,17 @@ export function initPanel(ctx) {
   function renderPanel() {
     const b = loadBatch();
     const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : '';
-    elPcount.textContent = (b.length || recHtml) ? (b.length + (recHtml ? 1 : 0)) + ' 条' : '';
-    if (!b.length && !recHtml) { elPlist.innerHTML = '<div class="empty">还没有选中任何元素</div>'; return; }
+    elPcount.textContent = (b.length || recHtml) ? t('count.items', { n: b.length + (recHtml ? 1 : 0) }) : '';
+    if (!b.length && !recHtml) { elPlist.innerHTML = `<div class="empty">${t('panel.empty')}</div>`; return; }
     elPlist.innerHTML = recHtml + b.map((r, i) =>
       '<div class="item" data-i="' + i + '">' +
         '<div class="psel">' + escapeHtml(r.selector) + '</div>' +
-        (r.group ? '<div class="pgroup">⧉ 组 ' + escapeHtml(r.group) + '</div>' : '') +
+        (r.group ? `<div class="pgroup">${t('group.label', { g: escapeHtml(r.group) })}</div>` : '') +
         (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + ' · ' + r.source.file + ':' + r.source.line) + '</div>' : '') +
         (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + '</div>' : '') +
-        '<textarea placeholder="备注…（失焦自动保存）">' + escapeHtml(r.note || '') + '</textarea>' +
+        `<textarea placeholder="${t('note.placeholder')}">` + escapeHtml(r.note || '') + '</textarea>' +
         '<div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + '</span>' +
-        '<button class="del">删除</button></div>' +
+        `<button class="del">${t('btn.delete')}</button></div>` +
       '</div>'
     ).join('');
   }
@@ -88,14 +89,14 @@ export function initPanel(ctx) {
       }
     }
     saveBatch(b);
-    toast('备注已保存' + (synced ? '（已同步组内 ' + synced + ' 项）' : ''));
+    toast(t('note.saved') + (synced ? t('note.synced', { n: synced }) : ''));
   });
   elPlist.addEventListener('click', (e) => {
     const recDel = e.target && e.target.closest ? e.target.closest('[data-rec-del]') : null;
     if (recDel) {                                   // record 摘要卡的删除
       if (ctx.clearRecord) ctx.clearRecord();
       renderPanel();
-      toast('已删除操作记录');
+      toast(t('record.deleted'));
       return;
     }
     const del = e.target && e.target.closest ? e.target.closest('.del') : null;
@@ -110,6 +111,6 @@ export function initPanel(ctx) {
     saveBatch(b);
     refreshCount();
     renderPanel();
-    toast('已删除 ' + sel);
+    toast(t('pick.deleted', { sel }));
   });
 }
