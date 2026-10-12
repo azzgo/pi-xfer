@@ -6,7 +6,7 @@
  * list/detail, and control buttons (gc, broker start/stop). Everything is
  * server-rendered multi-page HTML over node:http — zero npm dependencies,
  * zero bundle. Visual baseline: the settled "Ink" variant from
- * prototype/admin-ui (light default, dark toggle, viewport-width layout,
+ * prototype/admin-ui (light-only Ink variant, viewport-width layout,
  * pill buttons without shadows, solid-red danger).
  *
  * Write operations on board content are NEVER handled in-page — the pages
@@ -145,7 +145,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-// ---------- HTML rendering (Ink variant, light/dark) ----------
+// ---------- HTML rendering (Ink variant, light) ----------
 
 const KIND_COLORS: Record<AdminEvent["kind"], [string, string]> = {
   peer: ["#1a7f37", "#dafbe1"],
@@ -169,10 +169,8 @@ const md = (src: string): string => esc(src)
   .replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>")
   .replace(/\n{2,}/g, "<br><br>");
 
-const css = (dark: boolean): string => {
-  const c = dark
-    ? { bg: "#14110d", panel: "#1e1a15", line: "#3a3228", text: "#f4efe6", muted: "#b3a898", dim: "#7d7266", hover: "#2a241c", soft: "#332c23", nav: "#1e1a15", navText: "#b3a898", accent: "#7cb3ff" }
-    : { bg: "#f3efe6", panel: "#fffdf8", line: "#e4dccb", text: "#1c1917", muted: "#6b6256", dim: "#8a8174", hover: "#efe8da", soft: "#e7dfd0", nav: "#fffdf8", navText: "#6b6256", accent: "#1d4ed8" };
+const css = (): string => {
+  const c = { bg: "#f3efe6", panel: "#fffdf8", line: "#e4dccb", text: "#1c1917", muted: "#6b6256", dim: "#8a8174", hover: "#efe8da", soft: "#e7dfd0", nav: "#fffdf8", navText: "#6b6256", accent: "#1d4ed8" };
   return `
   :root { --soft:${c.soft}; --hover:${c.hover}; }
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -209,7 +207,6 @@ const css = (dark: boolean): string => {
   nav a:hover { background:${c.hover}; color:${c.accent}; }
   nav a.on { color:#fff; background:${c.accent}; }
   nav .brand { font-weight:700; color:${c.text}; margin-right:14px; font-size:14.5px; }
-  .theme-btn { margin-left:auto; }
   .wrap { margin:0 auto; width:100%; padding:28px 36px 88px; }
   .grid { display:grid; gap:16px; }
   .stats { grid-template-columns:repeat(4,1fr); margin-bottom:16px; }
@@ -239,26 +236,23 @@ const css = (dark: boolean): string => {
 
 const now = (): string => new Date().toTimeString().slice(0, 8);
 
-const themeQuery = (dark: boolean): string => `theme=${dark ? "dark" : "light"}`;
-
-const shell = (dark: boolean, active: string, title: string, lede: string, body: string): string => `
+const shell = (active: string, title: string, lede: string, body: string): string => `
   <nav>
     <span class="brand mono">xfer admin</span>
     ${[["/", "dashboard"], ["/events", "events"], ["/board", "board"], ["/control", "control"]]
-      .map(([href, label]) => `<a href="${href}?${themeQuery(dark)}" class="${label === active ? "on" : ""}">${label}</a>`).join("")}
-    <a class="btn sm theme-btn" href="?${dark ? "light" : "dark"}">${dark ? "☀ light" : "☾ dark"}</a>
+      .map(([href, label]) => `<a href="${href}" class="${label === active ? "on" : ""}">${label}</a>`).join("")}
   </nav>
   <div class="wrap">
     <h1>${esc(title)}</h1>${lede ? `<p class="lede">${esc(lede)}</p>` : ""}${body}
   </div>`;
 
-const page = (dark: boolean, fit: boolean, body: string): string =>
+const page = (fit: boolean, body: string): string =>
   `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
-  `<title>xfer admin</title><style>${css(dark)}</style></head>` +
+  `<title>xfer admin</title><style>${css()}</style></head>` +
   `<body class="${fit ? "fit" : ""}">${body}${CLIENT_SCRIPT}</body></html>`;
 
-const statCard = (tone: string, label: string, num: string, sub: string, href: string, dark: boolean): string =>
-  `<a class="panel stat" href="${href}?${themeQuery(dark)}" style="border-top-color:${TONES[tone]}"><h2>${esc(label)}</h2>` +
+const statCard = (tone: string, label: string, num: string, sub: string, href: string): string =>
+  `<a class="panel stat" href="${href}" style="border-top-color:${TONES[tone]}"><h2>${esc(label)}</h2>` +
   `<b style="color:${TONES[tone]}">${esc(num)}</b><div class="muted">${esc(sub)}</div></a>`;
 
 const CLIENT_SCRIPT = `<script>
@@ -338,7 +332,6 @@ const CLIENT_SCRIPT = `<script>
 // ---------- page bodies ----------
 
 interface RenderContext {
-  dark: boolean;
   xferDir: string;
   boardDir: string;
   port: number;
@@ -360,7 +353,7 @@ const boardList = (ctx: RenderContext): string => {
   const cards = new Board(ctx.boardDir).list();
   if (cards.length === 0) return `<div class="empty">board is empty</div>`;
   return cards.map((c) => `<div class="card-row"><div class="row">
-    <a href="/board/${encodeURIComponent(c.id)}?${themeQuery(ctx.dark)}"><b class="mono" style="border-bottom:1px dotted #0969da">${esc(c.title)}</b></a>
+    <a href="/board/${encodeURIComponent(c.id)}"><b class="mono" style="border-bottom:1px dotted #0969da">${esc(c.title)}</b></a>
     <span class="dim mono">${esc(c.id)}</span><span class="dim">by ${esc(c.createdBy)}</span>
     <span style="flex:1"></span>
     <form method="post" action="/board/open"><input type="hidden" name="card" value=""><button class="btn sm">open folder</button></form>
@@ -372,10 +365,10 @@ const boardDetail = (ctx: RenderContext, idOrTitle: string): string => {
   const cards = board.list();
   const header = cards.find((c) => c.id === idOrTitle) ?? cards.find((c) => c.title === idOrTitle);
   const card = header ? board.read(header.id) : null;
-  if (!card) return shell(ctx.dark, "board", "Board", "", `<div class="empty">card not found: ${esc(idOrTitle)}</div>`);
-  return shell(ctx.dark, "board", card.title, "", `
+  if (!card) return shell("board", "Board", "", `<div class="empty">card not found: ${esc(idOrTitle)}</div>`);
+  return shell("board", card.title, "", `
     <div class="row" style="margin-bottom:14px">
-      <a class="muted" href="/board?${themeQuery(ctx.dark)}">← board</a>
+      <a class="muted" href="/board">← board</a>
       <span class="pill" style="color:#0969da;background:#ddf4ff">${esc(card.id)}</span>
       <span class="dim">by ${esc(card.createdBy)} · ${card.entries.length} entr${card.entries.length === 1 ? "y" : "ies"}</span>
       <span style="flex:1"></span>
@@ -397,7 +390,7 @@ const controlPage = (ctx: RenderContext, peers: PeerRow[], mesh: MeshView, broke
     : mesh.error !== null
       ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span><b class="mono">mesh</b><span class="muted">${esc(mesh.error)}</span></div>`
       : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8250df"></span><b class="mono">mesh</b><span class="muted">${mesh.nodes.length} node(s): ${mesh.nodes.map((n) => esc(n.name)).join(", ") || "—"}</span></div>`;
-  return shell(ctx.dark, "control", "Control",
+  return shell("control", "Control",
     "Presence and the few actions this console is allowed to take.", `
     <div class="grid" style="grid-template-columns:1fr 1fr">
       <div class="panel"><h2>presence</h2>${presenceRows(peers)}</div>
@@ -444,9 +437,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
   };
 
   async function render(pathname: string, query: URLSearchParams): Promise<string> {
-    const dark = query.get("theme") === "dark";
     const ctx: RenderContext = {
-      dark,
       xferDir,
       boardDir,
       port,
@@ -465,15 +456,15 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       const meshLine = mesh.configured ? (mesh.error ? "engine error" : `${mesh.nodes.length} node(s)`) : "not configured";
       const body = `
       <div class="grid stats">
-        ${statCard("peers", "peers", String(peers.length), `${online} online · ${peers.length - online} zombie`, "/control", dark)}
-        ${statCard("mesh", "mesh", String(mesh.nodes.length), meshLine, "/control", dark)}
-        ${statCard("board", "board", String(cards.length), `${cards.length} card(s)`, "/board", dark)}
-        ${statCard("broker", "broker", broker ? "▲" : "▽", broker ? `running · :${broker.port}` : "stopped", "/control", dark)}
+        ${statCard("peers", "peers", String(peers.length), `${online} online · ${peers.length - online} zombie`, "/control")}
+        ${statCard("mesh", "mesh", String(mesh.nodes.length), meshLine, "/control")}
+        ${statCard("board", "board", String(cards.length), `${cards.length} card(s)`, "/board")}
+        ${statCard("broker", "broker", broker ? "▲" : "▽", broker ? `running · :${broker.port}` : "stopped", "/control")}
       </div>
       <div class="panel feed" style="min-height:260px"><div class="row" style="margin-bottom:4px"><h2 style="margin:0">live activity</h2>
-        <span style="flex:1"></span><a class="muted" href="/events?${themeQuery(dark)}">events →</a></div>
+        <span style="flex:1"></span><a class="muted" href="/events">events →</a></div>
         <div id="feed" style="max-height:420px;overflow:auto"><div class="empty">listening since page open — events appear here as they happen</div></div></div>`;
-      return page(dark, false, shell(dark, "dashboard", "Overview",
+      return page(false, shell("dashboard", "Overview",
         "Local presence, mesh, and the board — what is happening on this machine.", body));
     }
 
@@ -485,15 +476,15 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
         <span class="hint" data-tip="Since this page opened. Events are not persisted.">i</span>
       </div>
       <div class="panel feed"><div id="feed"><div class="empty">listening — events appear here as they happen</div></div></div>`;
-      return page(dark, true, shell(dark, "events", "Event stream", "Fire-and-forget. Nothing here is stored.", body));
+      return page(true, shell("events", "Event stream", "Fire-and-forget. Nothing here is stored.", body));
     }
 
     if (pathname === "/board") {
-      return page(dark, false, shell(dark, "board", "Board", "machine-local · append-only, human-cleaned", boardList(ctx)));
+      return page(false, shell("board", "Board", "machine-local · append-only, human-cleaned", boardList(ctx)));
     }
 
     if (pathname.startsWith("/board/")) {
-      return page(dark, false, boardDetail(ctx, decodeURIComponent(pathname.slice("/board/".length))));
+      return page(false, boardDetail(ctx, decodeURIComponent(pathname.slice("/board/".length))));
     }
 
     if (pathname === "/control") {
@@ -503,10 +494,10 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
         mesh = await withTimeout(meshView(xferDir), 2_500);
       } catch { /* engine unreachable */ }
       const broker = await brokerManager.probe();
-      return page(dark, false, controlPage(ctx, peers, mesh, broker, query.get("selfcheck") === "1" ? selfCheckReport(peers, mesh, broker) : null));
+      return page(false, controlPage(ctx, peers, mesh, broker, query.get("selfcheck") === "1" ? selfCheckReport(peers, mesh, broker) : null));
     }
 
-    return page(dark, false, shell(dark, "dashboard", "Not found", "", `<div class="empty">no such page: ${esc(pathname)}</div>`));
+    return page(false, shell("dashboard", "Not found", "", `<div class="empty">no such page: ${esc(pathname)}</div>`));
   }
 
   function selfCheckReport(peers: PeerRow[], mesh: MeshView, broker: { port: number } | null): string {

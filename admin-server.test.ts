@@ -131,14 +131,12 @@ describe("admin server pages", () => {
     const dash = await get(port, "/");
     assert.equal(dash.status, 200);
     assert.match(dash.body, /Overview/);
-    for (const p of ["/", "/events", "/board", "/control", "/board/c-0001-x", "/nope?theme=dark"]) {
+    for (const p of ["/", "/events", "/board", "/control", "/board/c-0001-x", "/nope"]) {
       const res = await get(port, p);
       assert.equal(res.status, 200, p);
       assert.match(res.body, /<!doctype html>/, `${p} must be a full document`);
       assert.match(res.body, /<style>/, `${p} must embed the Ink stylesheet`);
     }
-    const dark = await get(port, "/?theme=dark");
-    assert.match(dark.body, /#14110d/, "dark theme background");
   });
 
   it("unknown pages 404 in-band", async () => {
@@ -167,6 +165,14 @@ describe("admin SSE endpoint", () => {
     h.admin.publish({ ...event, text: "nobody listening" });
     await waitFor(() => h.admin.hubSize() === 0, "the disconnected client to be reaped");
     assert.equal(h.admin.hubSize(), 0, "client removed after disconnect");
+  });
+
+  it("theme toggle is gone: no theme links, ?theme ignored", async () => {
+    const h = makeHarness();
+    const port = await listen(h);
+    const res = await get(port, "/");
+    assert.doesNotMatch(res.body, /theme-btn|[?&]theme=/);
+    assert.match(res.body, /#f3efe6/, "light palette is the only one");
   });
 
   it("responds with text/event-stream headers", async () => {
