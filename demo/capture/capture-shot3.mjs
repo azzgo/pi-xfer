@@ -38,6 +38,12 @@ const SENDER = "demo-alpha";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (msg) => console.log(`[shot3] ${new Date().toTimeString().slice(0, 8)} ${msg}`);
 
+/**
+ * Admin console frame geometry. 16:9 at 2x pixel density: the whole console —
+ * nav, stat cards, live event stream and control buttons — fits the viewport
+ * without scrolling, and stays sharp when the composition scales it up.
+ */
+const VIEWPORT = { width: 1280, height: 720 };
 function pkill(pattern) {
   try { execSync(`pkill -f ${JSON.stringify(pattern)}`, { stdio: "ignore" }); } catch {}
 }
@@ -107,8 +113,9 @@ async function main() {
   fs.rmSync(videoDir, { recursive: true, force: true });
   fs.mkdirSync(videoDir, { recursive: true });
   const context = await browser.newContext({
-    viewport: { width: 1280, height: 720 },
-    recordVideo: { dir: videoDir, size: { width: 1280, height: 720 } },
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    recordVideo: { dir: videoDir, size: VIEWPORT },
   });
   const page = await context.newPage();
 
@@ -117,6 +124,15 @@ async function main() {
     await page.waitForSelector(`form[action="/control/${action}"] button`);
     await page.click(`form[action="/control/${action}"] button`);
     await page.waitForLoadState("load");
+  };
+
+  /** A real board card on disk; the admin's watcher turns it into a live event. */
+  const writeBoardCard = () => {
+    const id = `shot3-${Date.now().toString(36)}`;
+    fs.writeFileSync(path.join(BOARD_DIR, `${id}-shot3-capture.md`),
+      `---\nid: ${id}\ntitle: Shot3 capture\ncreated_by: demo-capture\ncreated_at: ${new Date().toISOString()}\n---\n` +
+      `Card written by the Shot 3 capture script during the recording.\n`, "utf-8");
+    log(`board card written: ${id}`);
   };
 
   try {
@@ -157,30 +173,37 @@ async function main() {
     await clickControl("broker/start");
     await sleep(1500);
 
-    // ---- event 4: real board activity (card file write, watcher fires) ----
-    const cardId = `shot3-${Date.now().toString(36)}`;
-    const cardFile = path.join(BOARD_DIR, `${cardId}-shot3-capture.md`);
-    fs.writeFileSync(cardFile,
-      `---\nid: ${cardId}\ntitle: Shot3 capture\ncreated_by: demo-capture\ncreated_at: ${new Date().toISOString()}\n---\n` +
-      `Card written by the Shot 3 capture script during the recording.\n`, "utf-8");
-    log(`board card written: ${cardFile}`);
+// ---- event 4: real board activity (card file write, watcher fires) ----
+    await writeBoardCard();
+    await sleep(1200);
+
+    // ---- back to the dashboard: stats are current, and we now drive real
+    //      events while it is open so the live feed visibly fills ----
+    log("reloading dashboard — stat cards + live event stream on camera");
+    await page.goto(`${BASE}/`);
     await sleep(1500);
 
-    // ---- wait for the real handoff to land ----
-    log("waiting for sender to finish (real model call)…");
-    await waitUntil(() => sender.exitCode !== null, 300_000, "sender completion");
-    if (sender.exitCode !== 0) log(`warning: sender exited with code ${sender.exitCode}`);
-    await waitUntil(() => {
+    log("driving real events against the open dashboard (live feed)");
+    await fetch(`${BASE}/control/broker/stop`, { method: "POST" }).catch(() => {});
+    await sleep(1200);
+    await fetch(`${BASE}/control/broker/start`, { method: "POST" }).catch(() => {});
+    await sleep(1200);
+    await writeBoardCard();
+    await sleep(1500);
+
+    // ---- let the real handoff land too, if it makes the cut ----
+    if (sender.exitCode === null) {
+      log("waiting for the real handoff to land (bounded by the shot length)…");
+      await waitUntil(() => sender.exitCode !== null, 12_000, "sender completion").catch(() => {});
+    }
+    await sleep(1500);
+    log("handoff delivered — beta.log shows 📨 [Xfer from");
+await waitUntil(() => {
       try { return fs.readFileSync(path.join(OUT, "beta.log"), "utf-8").includes("📨 [Xfer from"); }
       catch { return false; }
-    }, 30_000, "delivery in beta.log");
-    log("handoff delivered — beta.log shows 📨 [Xfer from");
-    await sleep(2000);
-
-    // ---- back to dashboard: stat cards now reflect peers/board/broker ----
-    log("reloading dashboard for final stats");
-    await page.goto(`${BASE}/`);
-    await sleep(3500);
+    }, 20_000, "delivery in beta.log").catch(() => {});
+// ---- hold the populated dashboard to the end of the clip ----
+    await sleep(3000);
   } finally {
     const video = page.video();
     await context.close();

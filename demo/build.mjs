@@ -26,6 +26,33 @@ const MOVE_MAP = [
   ["shot3/admin.webm", "shot3-admin.mp4"],
 ];
 
+/* [asset, seconds the composition plays it for]. A capture shorter than its
+ * slot freezes on its last frame, which reads as a bug in the cut — fail the
+ * build instead of shipping it. */
+const SLOT_SECONDS = {
+  "shot1-alpha.mp4": 10,
+  "shot1-beta.mp4": 10,
+  "shot2-page.mp4": 16,
+  "shot2-terminal.mp4": 16,
+  "shot3-admin.mp4": 22,
+};
+
+function assertCoversSlots() {
+  const short = [];
+  for (const [asset, seconds] of Object.entries(SLOT_SECONDS)) {
+    const file = path.join(ASSETS, asset);
+    if (!fs.existsSync(file)) continue;
+    const out = execFileSync("ffprobe", [
+      "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file,
+    ], { encoding: "utf8" });
+    const have = parseFloat(out.trim());
+    if (have + 0.05 < seconds) short.push(`${asset}: ${have.toFixed(2)}s < ${seconds}s slot`);
+  }
+  if (short.length) {
+    console.error("Captures too short for their composition slots:\n  " + short.join("\n  "));
+    process.exit(1);
+  }
+}
 function sh(cmd, args, opts = {}) {
   execFileSync(cmd, args, { stdio: "inherit", cwd: COMP, ...opts });
 }
@@ -89,6 +116,7 @@ function main() {
     }
   }
   collect();
+  assertCoversSlots();
   renderComposition();
   const rendered = findRendered();
   compress(rendered);

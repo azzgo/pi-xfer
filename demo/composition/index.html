@@ -26,15 +26,36 @@
       }
 
       /* shot1 split */
-      .pane { position: absolute; top: 150px; bottom: 170px; width: 880px; border-radius: 18px; overflow: hidden; border: 1px solid #26262f; }
-      .pane video { width: 100%; height: 100%; object-fit: cover; }
-      .pane-label { position: absolute; top: 0; left: 0; right: 0; padding: 14px 24px; font-size: 24px; font-weight: 600; color: #cfcfda; background: rgba(16,16,20,.9); }
-      .pane-label .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 12px; }
+/* ---- screen slots ------------------------------------------------------
+   Every slot carries its footage's true aspect ratio and fills with
+   `object-fit: contain`, so a recording is never cropped. If an asset ever
+   changes shape the only consequence is a little background, never a cut edge.
+   Each slot's background equals the footage's own background, so that gap is
+   invisible rather than a black bar. */
+      .pane, .frame {
+        position: absolute; border-radius: 18px;
+        border: 1px solid #26262f; background: var(--slot-bg, #101014);
+      }
+      .pane video, .frame video {
+        width: 100%; height: 100%; object-fit: contain; display: block;
+        border-radius: 18px;
+      }
 
-      /* generic video frame */
-      .frame { position: absolute; border-radius: 18px; overflow: hidden; border: 1px solid #26262f; background: #101014; }
-      .frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
+      /* shot 1 — two VHS terminals, captured 880x700 */
+      .pane-a { left: 40px; top: 188px; width: 908px; aspect-ratio: 880 / 700; }
+      .pane-b { right: 40px; top: 188px; width: 908px; aspect-ratio: 880 / 700; }
 
+      /* shot 2 — the picked page (16:9) beside its own terminal (800x840) */
+      .frame-page { left: 40px; top: 188px; width: 1183px; aspect-ratio: 16 / 9; }
+      .frame-term { left: 1247px; top: 188px; height: 665px; aspect-ratio: 800 / 840; }
+
+      /* shot 3 — the whole admin console: nav, stat cards, event stream, buttons */
+      .frame-admin { --slot-bg: #f3efe6; left: 216px; top: 118px; width: 1488px; aspect-ratio: 16 / 9; }
+
+      /* Sits above the pane so it never covers the first line of terminal output —
+       that line is the `pi --xfer …` command the shot opens on. */
+      .pane-label { position: absolute; left: 6px; top: -46px; font-size: 26px; font-weight: 600; color: #cfcfda; }
+      .pane-label .dot { display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin-right: 12px; vertical-align: middle; }
       /* shot4 diagram */
       .node rect, .node path { fill: #17171e; stroke-width: 2; }
       .node text { fill: #e6e6eb; font-size: 24px; font-weight: 600; }
@@ -59,11 +80,11 @@
       <!-- ============ Shot 1 · hook: real handoff, split screen (0–10) ============ -->
       <div id="shot1" class="scene clip" data-start="0" data-duration="10" data-track-index="1">
         <div class="kicker">1 · One-way structured handoffs</div>
-        <div class="pane" style="left:56px">
+        <div class="pane pane-a">
           <video id="v1a" src="assets/shot1-alpha.mp4" data-start="0" data-duration="10" muted playsinline preload="auto"></video>
           <div class="pane-label"><span class="dot" style="background:#7ee787"></span>alpha · sender</div>
         </div>
-        <div class="pane" style="right:56px">
+        <div class="pane pane-b">
           <video id="v1b" src="assets/shot1-beta.mp4" data-start="0" data-duration="10" muted playsinline preload="auto"></video>
           <div class="pane-label"><span class="dot" style="background:#a78bfa"></span>beta · receiver</div>
         </div>
@@ -73,20 +94,20 @@
       <!-- ============ Shot 2 · web picker (10–26) ============ -->
       <div id="shot2" class="scene clip" data-start="10" data-duration="16" data-track-index="1">
         <div class="kicker">2 · Web picker — browser → handoff</div>
-        <div class="frame" style="left:56px; top:150px; width:1180px; height:800px">
+        <div class="frame frame-page">
           <video id="v2a" src="assets/shot2-page.mp4" data-start="10" data-duration="16" muted playsinline preload="auto"></video>
         </div>
-        <div class="frame" style="right:56px; top:150px; width:600px; height:800px">
+        <div class="frame frame-term">
           <video id="v2b" src="assets/shot2-terminal.mp4" data-start="10" data-duration="16" muted playsinline preload="auto"></video>
         </div>
-        <div id="cap2a" class="caption clip" data-start="10.8" data-duration="6">pick elements on any page, add notes</div>
-        <div id="cap2b" class="caption clip" data-start="17.5" data-duration="7.6">submit → real handoff delivered to your <b>pi</b> session</div>
+        <div id="cap2a" class="caption clip" data-start="10.6" data-duration="11">pick elements on any page, add notes</div>
+        <div id="cap2b" class="caption clip" data-start="21.9" data-duration="3.9">submit → real handoff delivered to your <b>pi</b> session</div>
       </div>
 
       <!-- ============ Shot 3 · admin console (26–48) ============ -->
       <div id="shot3" class="scene clip" data-start="26" data-duration="22" data-track-index="1">
         <div class="kicker">3 · Admin — the live console</div>
-        <div class="frame" style="left:140px; top:140px; width:1640px; height:830px">
+        <div class="frame frame-admin">
           <video id="v3" src="assets/shot3-admin.mp4" data-start="26" data-duration="22" muted playsinline preload="auto"></video>
         </div>
         <div id="cap3a" class="caption clip" data-start="26.8" data-duration="9">one command: <b>/xfer admin</b> — live event stream, peers, board</div>

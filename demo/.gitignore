@@ -2,5 +2,6 @@ out/
 composition/assets/
 composition/out/
 composition/render/
+composition/renders/
 node_modules/
 *.log

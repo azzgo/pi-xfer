@@ -65,8 +65,18 @@ interface Daemon extends RawSpawn {
 const liveChildren: ChildProcess[] = [];
 const tmpDirs: string[] = [];
 const socketServers: net.Server[] = [];
-/** Handoff docs written by daemons into os.tmpdir(); afterEach unlinks them. */
+/** Handoff docs written by daemons; afterEach unlinks them. */
 const docFiles: string[] = [];
+/**
+ * Each daemon gets a private TMPDIR, so the handoff docs it writes cannot be
+ * confused with docs another process — a real pi session sending a handoff,
+ * the demo capture — writes into the shared os.tmpdir().
+ */
+function docDir(xferDir: string): string {
+  const dir = `${xferDir}/docs`;
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 function freshXferDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-broker-delivery-"));
@@ -83,7 +93,7 @@ function spawnRaw(xferDir: string, port: number): RawSpawn {
     String(port),
     "--xfer-dir",
     xferDir,
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  ], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, TMPDIR: docDir(xferDir) } });
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk: Buffer) => {
@@ -359,16 +369,17 @@ async function fakeSession(xferDir: string, name: string): Promise<FakeSession> 
 
 // ---------- handoff doc helpers ----------
 
-function handoffDocsInTmpdir(): string[] {
+function handoffDocsInTmpdir(xferDir: string): string[] {
+  const dir = docDir(xferDir);
   return fs
-    .readdirSync(os.tmpdir())
+    .readdirSync(dir)
     .filter((file) => /^pi-xfer-.*\.md$/.test(file))
-    .map((file) => path.join(os.tmpdir(), file));
+    .map((file) => path.join(dir, file));
 }
 
-/** Docs that appeared in os.tmpdir() since the `before` snapshot. */
-function newHandoffDocs(before: Set<string>): string[] {
-  return handoffDocsInTmpdir().filter((file) => !before.has(file));
+/** Docs that appeared in the daemon's private doc dir since the `before` snapshot. */
+function newHandoffDocs(before: Set<string>, xferDir: string): string[] {
+  return handoffDocsInTmpdir(xferDir).filter((file) => !before.has(file));
 }
 
 /** Parse a text frame's JSON payload into a plain record. */
@@ -389,7 +400,8 @@ async function welcome(ws: RawWs): Promise<void> {
 
 describe("broker delivery (integration)", () => {
   it("annotation.submit round trip: pushes xfer-notify, acks {handoff_id, doc}, doc mode 0600", async () => {
-    const daemon = await spawnDaemon(freshXferDir());
+    const xferDir = freshXferDir();
+    const daemon = await spawnDaemon(xferDir);
     const session = await fakeSession(daemon.xferDir, "alpha");
     const ws = await RawWs.connect(daemon.port);
     await welcome(ws);
@@ -425,7 +437,7 @@ describe("broker delivery (integration)", () => {
     assert.match(result.handoff_id as string, /^m[0-9a-z]+$/);
     assert.equal(typeof result.doc, "string");
     const doc = result.doc as string;
-    assert.equal(doc, path.join(os.tmpdir(), `pi-xfer-${result.handoff_id}.md`));
+    assert.equal(doc, path.join(docDir(xferDir), `pi-xfer-${result.handoff_id}.md`));
     docFiles.push(doc);
 
     // The fake session saw exactly one xfer-notify, matching the ack's id.
@@ -452,11 +464,12 @@ describe("broker delivery (integration)", () => {
   });
 
   it("annotation.submit with a missing target socket → error{target_not_found}, doc kept on disk", async () => {
-    const daemon = await spawnDaemon(freshXferDir());
+    const xferDir = freshXferDir();
+    const daemon = await spawnDaemon(xferDir);
     const ws = await RawWs.connect(daemon.port);
     await welcome(ws);
 
-    const before = new Set(handoffDocsInTmpdir());
+    const before = new Set(handoffDocsInTmpdir(xferDir));
     ws.sendText(
       JSON.stringify({
         v: 0,
@@ -474,7 +487,7 @@ describe("broker delivery (integration)", () => {
     assert.equal(reply.code, "target_not_found");
 
     // The doc stays on disk even though delivery failed.
-    const created = newHandoffDocs(before);
+    const created = newHandoffDocs(before, xferDir);
     assert.equal(created.length, 1, "the handoff doc was still written");
     docFiles.push(created[0]!);
     ws.destroy();
