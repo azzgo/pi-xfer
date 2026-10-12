@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "pi-xfer — how a handoff travels",
+    "subtitle": "Peer transport by default; web picker and mesh are opt-in layers on top",
+    "output": "xfer-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/azzgo/pi-xfer",
+      "provider": "github",
+      "revision": "04692363ff7f72e6d77399afc748f6f89d7f1833"
+    }
+  },
+  "components": [
+    { "id": "browser", "type": "external", "label": "Browser + userscript", "sublabel": "web picker · picks + records", "pos": [40, 60], "size": [200, 64] },
+    { "id": "broker", "type": "backend", "label": "Broker daemon", "sublabel": "/xfer broker start", "tag": "localhost :4719", "pos": [380, 60], "size": [220, 64], "sources": [{ "path": "broker-manager.ts", "line": 49, "label": "DEFAULT_BROKER_PORT" }] },
+    { "id": "alpha", "type": "backend", "label": "pi session “alpha”", "sublabel": "xfer listener · /xfer name", "pos": [320, 230], "size": [220, 64], "sources": [{ "path": "server.ts", "line": 12, "label": "inbound socket server" }] },
+    { "id": "sock", "type": "database", "label": "Peer socket", "sublabel": "~/.pi/xfer/<name>.sock", "pos": [660, 230], "size": [200, 64], "sources": [{ "path": "utils.ts", "line": 26, "label": "socket path" }, { "path": "constants.ts", "line": 5, "label": "XFER_DIR" }] },
+    { "id": "beta", "type": "backend", "label": "pi session “beta”", "sublabel": "receives the handoff", "pos": [940, 230], "size": [190, 64] },
+    { "id": "engine", "type": "cloud", "label": "Engine / control plane", "sublabel": "RivetKit · discovery · durable queue", "pos": [660, 400], "size": [220, 64], "sources": [{ "path": "mesh-engine.ts", "line": 26, "label": "actor + engine connection" }] },
+    { "id": "nodeb", "type": "backend", "label": "Node — machine 2", "sublabel": "joined via /xfer mesh up", "pos": [940, 400], "size": [200, 64], "sources": [{ "path": "mesh-engine.ts", "line": 30, "label": "live engine query" }] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Machine 1 — local transport (default)", "wraps": ["browser", "broker", "alpha", "sock", "beta"] },
+    { "kind": "region", "label": "Machine 2", "wraps": ["nodeb"] }
+  ],
+  "connections": [
+    { "id": "browser-to-broker", "from": "browser", "to": "broker", "label": "picks · records" },
+    { "id": "broker-to-alpha", "from": "broker", "to": "alpha", "label": "submit", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "id": "alpha-to-sock", "from": "alpha", "to": "sock", "label": "write handoff" },
+    { "id": "sock-to-beta", "from": "sock", "to": "beta", "label": "deliver" },
+    { "id": "alpha-to-engine", "from": "alpha", "to": "engine", "label": "join: /xfer mesh up", "variant": "dashed", "fromSide": "bottom", "toSide": "left", "via": [[430, 432]], "labelAt": [545, 420] },
+    { "id": "engine-to-nodeb", "from": "engine", "to": "nodeb", "label": "handoff" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Local transport", "items": ["Handoffs between sessions on one machine ride Unix sockets — no daemon, no setup", "Socket path and peer metadata live under ~/.pi/xfer/"] },
+    { "dot": "amber", "title": "Web picker", "items": ["The Tampermonkey userscript sends picks and records to the broker", "The broker (localhost :4719) turns them into a handoff for a peer"] },
+    { "dot": "violet", "title": "Mesh (opt-in)", "items": ["/xfer mesh up joins the instance as a Node in the RivetKit actor network", "Engine-side discovery and a durable queue reach Nodes on other machines"] }
+  ]
+}

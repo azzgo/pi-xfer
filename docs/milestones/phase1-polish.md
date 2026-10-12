@@ -105,7 +105,7 @@
 
 ## 其余功能设计要点(design 节点定稿,2026-10-11)
 
-**P0-2 Quickstart** — `docs/guides/quickstart.md`:是什么(3 行)→ `pi install` → 30 秒跑通第一个 handoff(最短可复现命令序列);README 顶部放 3 行复制即用代码块 + 链接。收尾不是链接堆砌,而是一张 **Excalidraw 交互式架构图**(可逐层展开:peer → broker → mesh → control-plane),作为理解入口。验收:新人 5 分钟内发出第一个 handoff,不读 ADR。
+**P0-2 Quickstart** — `docs/guides/quickstart.md`:是什么(3 行)→ `pi install` → 30 秒跑通第一个 handoff(最短可复现命令序列);README 顶部放 3 行复制即用代码块 + 链接。收尾不是链接堆砌,而是一张 **Archify 交互式架构图**(static 导出图内嵌 + 链接打开交互版;分层:peer → broker → mesh → control-plane),作为理解入口。验收:新人 5 分钟内发出第一个 handoff,不读 ADR。
 
 **P1-4 web-picker i18n** — `web-picker.src/i18n.js` 扁平 `{key:{en,zh}}` + `t(key)`;默认跟随 `navigator.language`(zh* → zh,否则 en),油猴菜单手动切换(`GM_getValue` 持久);仅 UI 字符串;`npm run build` 重出产物。
 
@@ -113,7 +113,7 @@
 
 **P1-6 `/xfer doctor`** — 逐项检查(peers socket、broker 进程/端口、mesh 配置与 engine、admin 状态)输出 ✓/✗ + 修复提示(指向具体命令);复用现有状态查询,不新造探测;输出遵循 P1-5 规范。
 
-**P1-7 Mesh 部署指南** — `docs/guides/mesh-setup.md`:两条路线(官方托管 / 自托管 VPS,链 rivet.dev)→ `mesh.json` 逐字段说明 → 端到端验证 → 常见故障。配一张**交互式架构图**,与 Quickstart 架构图同源,关键节点可复用演示 MP4 的关键帧截图。写完由未接触过项目的子代理冷读验证"照抄能跑通"。
+**P1-7 Mesh 部署指南** — `docs/guides/mesh-setup.md`:两条路线(官方托管 / 自托管 VPS,链 rivet.dev)→ `mesh.json` 逐字段说明 → 端到端验证 → 常见故障。配一张 **Archify 交互式架构图**(与 Quickstart 同源),关键节点可复用演示 MP4 的关键帧截图。写完由未接触过项目的子代理冷读验证"照抄能跑通"。
 
 **P2-8 README 英文叙事重写** — what/why(3 行)→ demo MP4 → quickstart 3 行 → capabilities 表 → Docs 小节;**仅英文,不做中文文档**;在 Admin 实现并产出 demo MP4 之后做。
 
