@@ -23,13 +23,13 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Board } from "./board.js";
-import { BrokerManager } from "./broker-manager.js";
-import { XFER_DIR } from "./constants.js";
-import { collectGarbage } from "./gc.js";
-import { listMeshNodes } from "./mesh-engine.js";
-import { loadMeshConfig } from "./mesh-config.js";
-import { listPeers } from "./utils.js";
+import { Board } from "./board.ts";
+import { BrokerManager } from "./broker-manager.ts";
+import { XFER_DIR } from "./constants.ts";
+import { collectGarbage } from "./gc.ts";
+import { listMeshNodes } from "./mesh-engine.ts";
+import { loadMeshConfig } from "./mesh-config.ts";
+import { listPeers } from "./utils.ts";
 
 /** Default admin TCP port (mirrors admin-manager.ts DEFAULT_ADMIN_PORT). */
 export const DEFAULT_ADMIN_PORT = 7788;
@@ -503,7 +503,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
         mesh = await withTimeout(meshView(xferDir), 2_500);
       } catch { /* engine unreachable */ }
       const broker = await brokerManager.probe();
-      return controlPage(ctx, peers, mesh, broker, query.get("selfcheck") === "1" ? selfCheckReport(peers, mesh, broker) : null);
+      return page(dark, false, controlPage(ctx, peers, mesh, broker, query.get("selfcheck") === "1" ? selfCheckReport(peers, mesh, broker) : null));
     }
 
     return page(dark, false, shell(dark, "dashboard", "Not found", "", `<div class="empty">no such page: ${esc(pathname)}</div>`));

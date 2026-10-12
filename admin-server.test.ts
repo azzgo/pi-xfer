@@ -131,9 +131,11 @@ describe("admin server pages", () => {
     const dash = await get(port, "/");
     assert.equal(dash.status, 200);
     assert.match(dash.body, /Overview/);
-    for (const p of ["/events", "/board", "/control"]) {
+    for (const p of ["/", "/events", "/board", "/control", "/board/c-0001-x", "/nope?theme=dark"]) {
       const res = await get(port, p);
       assert.equal(res.status, 200, p);
+      assert.match(res.body, /<!doctype html>/, `${p} must be a full document`);
+      assert.match(res.body, /<style>/, `${p} must embed the Ink stylesheet`);
     }
     const dark = await get(port, "/?theme=dark");
     assert.match(dark.body, /#14110d/, "dark theme background");
