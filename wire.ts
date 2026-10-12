@@ -9,7 +9,7 @@
  *     esbuild bundles it into web-picker.user.js at build time.
  *
  * Adding an op or frame type here is by construction enough — the two ends
- * can no longer drift. Wire frame shapes stay documented in docs/web-picker.md.
+ * can no longer drift. Wire frame shapes stay documented in docs/dev/web-picker.md.
  */
 
 /** Envelope version carried on every frame (v0 protocol). */

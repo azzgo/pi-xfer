@@ -12,7 +12,7 @@ documents it points to.
    - mesh transport (bundle + on-demand native runtime, engine-side discovery)
    - board scope (append-only, human-cleaned)
    - web-picker record philosophy
-4. **`docs/web-picker.md`** — userscript + broker workflow details
+4. **`docs/dev/web-picker.md`** — userscript + broker workflow details
 5. **`docs/release.md`** — how to cut a release: bump version, tag, push; the publish workflow does the rest
 
 ## Working agreements
