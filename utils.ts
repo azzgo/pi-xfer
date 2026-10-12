@@ -79,15 +79,16 @@ export function deriveName(pi: ExtensionAPI): string {
 
 /** Reject with `timed out after Nms` when `promise` outlives `ms`; the timer never holds the loop open. */
 export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return await Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
-      timer.unref?.();
-    }),
-  ]);
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
-
 /** All reachable peers (sockets present in xferDir, defaulting to XFER_DIR, excluding myself). */
 export function listPeers(myName: string, xferDir: string = XFER_DIR): PeerInfo[] {
   try {
