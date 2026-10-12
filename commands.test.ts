@@ -521,21 +521,21 @@ describe("xfer command: doctor", () => {
       });
       await h.handler("doctor");
       assert.equal(h.notifications.length, 1);
-      assert.equal(h.notifications[0].type, "info");
       const message = h.notifications[0].message;
       assert.match(message, /^🩺 \/xfer doctor\n/);
       assert.match(message, /✓ Socket dir/);
       assert.match(message, /✓ Broker/);
       assert.match(message, /✓ Admin/);
       assert.match(message, /! Mesh/);
-      assert.match(message, /! Mesh.*see the mesh setup guide/);
+      assert.equal(h.notifications[0].type, "warning", "one ! is enough to warn, never error");
+      assert.match(message, /! Mesh.*\n {4}→ see the mesh setup guide/);
       assert.match(message, /\d+ checks? passed.*1 warning$/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("points a stopped broker at /xfer broker start and notifies as an error", async () => {
+  it("points a stopped broker at /xfer broker start and notifies as a warning", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-doctor-"));
     try {
       const h = harness({
@@ -544,8 +544,8 @@ describe("xfer command: doctor", () => {
         adminManager: stubAdminManager(),
       });
       await h.handler("doctor");
-      assert.equal(h.notifications[0].type, "error");
-      assert.match(h.notifications[0].message, /✗ Broker.*→ \/xfer broker start/);
+      assert.equal(h.notifications[0].type, "warning", "a failing check is a diagnosis, not a plugin error");
+      assert.match(h.notifications[0].message, /✗ Broker.*\n {4}→ \/xfer broker start/);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

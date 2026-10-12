@@ -73,16 +73,29 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   };
 }
 
-/** Render the report as one line per check plus a summary. */
+/**
+ * Render the report as one line per check plus a summary. A fix hint gets its own
+ * indented line rather than a trailing `→ …`: a long peer list wraps in the terminal,
+ * and a hint appended to it lands flush left like a stray error.
+ */
 export function formatDoctorReport(report: DoctorReport): string {
   const width = Math.max(...report.checks.map((c) => c.name.length));
   const lines = ["🩺 /xfer doctor"];
   for (const check of report.checks) {
-    const line = `  ${MARK[check.status]} ${check.name.padEnd(width)}  ${check.detail}`;
-    lines.push(check.fix && check.status !== "pass" ? `${line} → ${check.fix}` : line);
+    lines.push(`  ${MARK[check.status]} ${check.name.padEnd(width)}  ${check.detail}`);
+    if (check.fix && check.status !== "pass") lines.push(`    → ${check.fix}`);
   }
   lines.push("", summaryLine(report));
   return lines.join("\n");
+}
+
+/**
+ * Notification severity for the whole report: `info` only when every check passed,
+ * `warning` otherwise. Doctor never reports `error` — it diagnoses, and the repair is
+ * the user's to run, so a red block would misread as "the extension is broken".
+ */
+export function doctorSeverity(report: DoctorReport): "info" | "warning" {
+  return report.passed === report.checks.length ? "info" : "warning";
 }
 
 function summaryLine(report: DoctorReport): string {

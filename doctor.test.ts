@@ -14,7 +14,7 @@ import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { AdminManager } from "./admin-manager.js";
 import type { BrokerManager } from "./broker-manager.js";
-import { formatDoctorReport, runDoctor, type DoctorDeps } from "./doctor.js";
+import { doctorSeverity, formatDoctorReport, runDoctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { MeshConfig } from "./mesh-config.js";
 
 const tmpDirs: string[] = [];
@@ -240,11 +240,39 @@ describe("doctor: rendering", () => {
 
     assert.match(text, /^🩺 \/xfer doctor\n/);
     assert.match(text, /\n {2}✓ Socket dir {2}.*exists and is writable/);
-    assert.match(text, /\n {2}! Peers {4}.*ghost → \/xfer gc/);
-    assert.match(text, /\n {2}✗ Broker {5}.*→ \/xfer broker start/);
+    assert.match(text, /\n {2}! Peers {4}.*ghost\n {4}→ \/xfer gc/);
+    assert.match(text, /\n {2}✗ Broker {6}not running[^\n]*\n {4}→ \/xfer broker start/);
     assert.match(text, /\n {2}✓ Admin {6}.*http:\/\/localhost:7788/);
-    assert.match(text, /\n {2}! Mesh {5}.*→ see the mesh setup guide/);
+    assert.match(text, /\n {2}! Mesh {5}.*\n {4}→ see the mesh setup guide/);
     assert.match(text, /\n\n2 checks passed, 2 warnings, 1 failed$/);
+  });
+
+  it("never inlines a fix hint into the check line", () => {
+    const text = formatDoctorReport({
+      checks: [
+        { name: "Peers", status: "warn", detail: "a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s", fix: "/xfer gc" },
+        { name: "Broker", status: "pass", detail: "running on port 4719", fix: "/xfer broker start" },
+      ],
+      passed: 1,
+      warned: 1,
+      failed: 0,
+    });
+    const lines = text.split("\n");
+    assert.equal(lines.filter((l) => l.includes("→")).length, 1);
+    assert.equal(lines[1], "  ! Peers   a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s");
+    assert.equal(lines[2], "    → /xfer gc");
+  });
+
+  it("reports info only when every check passed, warning otherwise, never error", () => {
+    const report = (status: "pass" | "warn" | "fail"): DoctorReport => ({
+      checks: [{ name: "Broker", status, detail: "x" }],
+      passed: status === "pass" ? 1 : 0,
+      warned: status === "warn" ? 1 : 0,
+      failed: status === "fail" ? 1 : 0,
+    });
+    assert.equal(doctorSeverity(report("pass")), "info");
+    assert.equal(doctorSeverity(report("warn")), "warning");
+    assert.equal(doctorSeverity(report("fail")), "warning");
   });
 
   it("omits warning and failure counts when there are none", () => {

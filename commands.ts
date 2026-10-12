@@ -7,7 +7,7 @@ import { AdminManager, DEFAULT_ADMIN_PORT } from "./admin-manager.ts";
 import { registerBoard, renderCard } from "./board.ts";
 import type { XferController } from "./controller.ts";
 import { BrokerManager } from "./broker-manager.ts";
-import { formatDoctorReport, runDoctor } from "./doctor.ts";
+import { doctorSeverity, formatDoctorReport, runDoctor } from "./doctor.ts";
 import { collectGarbage } from "./gc.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
 import type { MeshNode } from "./mesh.ts";
@@ -547,7 +547,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           adminManager,
           meshConfigPath,
         });
-        ctx.ui.notify(formatDoctorReport(report), report.failed > 0 ? "error" : "info");
+        ctx.ui.notify(formatDoctorReport(report), doctorSeverity(report));
         return;
       }
 
