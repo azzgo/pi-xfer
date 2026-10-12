@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
-import { METADATA_POLL_MS } from "./constants.js";
-import type { Identity } from "./types.js";
+import { METADATA_POLL_MS } from "./constants.ts";
+import type { Identity } from "./types.ts";
 
 /** Runtime identity + status for this agent; owns the `<name>.json` metadata file. */
 export class XferState {

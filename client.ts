@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
-import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES } from "./constants.js";
-import { endpointForName } from "./utils.js";
+import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES } from "./constants.ts";
+import { endpointForName } from "./utils.ts";
 
 /** JSON-lines payload with a `msg_id` used to match the ack. */
 export interface XferOutboundMessage {

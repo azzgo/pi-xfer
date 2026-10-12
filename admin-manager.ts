@@ -20,7 +20,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { XFER_DIR } from "./constants.js";
+import { XFER_DIR } from "./constants.ts";
 
 /** Default admin TCP port (mirrors admin-main.ts DEFAULT_ADMIN_PORT). */
 export const DEFAULT_ADMIN_PORT = 7788;

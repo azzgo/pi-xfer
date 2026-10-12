@@ -11,13 +11,13 @@ import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { sendNotify } from "./client.js";
-import { registerXferCommand } from "./commands.js";
-import { XferController } from "./controller.js";
-import { MESH_CONFIG_PATH } from "./constants.js";
-import { MeshNode } from "./mesh.js";
-import { XferState } from "./state.js";
-import { listPeers, msgId } from "./utils.js";
+import { sendNotify } from "./client.ts";
+import { registerXferCommand } from "./commands.ts";
+import { XferController } from "./controller.ts";
+import { MESH_CONFIG_PATH } from "./constants.ts";
+import { MeshNode } from "./mesh.ts";
+import { XferState } from "./state.ts";
+import { listPeers, msgId } from "./utils.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag("xfer", {

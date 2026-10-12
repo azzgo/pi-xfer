@@ -3,15 +3,15 @@ import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { AdminManager, DEFAULT_ADMIN_PORT } from "./admin-manager.js";
-import { registerBoard, renderCard } from "./board.js";
-import type { XferController } from "./controller.js";
-import { BrokerManager } from "./broker-manager.js";
-import { collectGarbage } from "./gc.js";
-import { MESH_CONFIG_PATH } from "./constants.js";
-import type { MeshNode } from "./mesh.js";
-import { XFER_DIR } from "./constants.js";
-import { endpointForName, listPeers, peerDescription } from "./utils.js";
+import { AdminManager, DEFAULT_ADMIN_PORT } from "./admin-manager.ts";
+import { registerBoard, renderCard } from "./board.ts";
+import type { XferController } from "./controller.ts";
+import { BrokerManager } from "./broker-manager.ts";
+import { collectGarbage } from "./gc.ts";
+import { MESH_CONFIG_PATH } from "./constants.ts";
+import type { MeshNode } from "./mesh.ts";
+import { XFER_DIR } from "./constants.ts";
+import { endpointForName, listPeers, peerDescription } from "./utils.ts";
 
 /** Options for `registerXferCommand`. */
 export interface XferCommandOptions {

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
-import { MAX_FRAME_BYTES } from "./constants.js";
-import type { XferNotifyMessage } from "./types.js";
+import { MAX_FRAME_BYTES } from "./constants.ts";
+import type { XferNotifyMessage } from "./types.ts";
 
 /** Routes an incoming handoff into the user's session (ack is sent after). */
 export interface InboundDelivery {

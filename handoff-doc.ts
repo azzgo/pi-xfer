@@ -11,7 +11,7 @@
  * rendered on the members that carry it and stays absent on solo picks.
  */
 
-import { FROM_WEB_PICKER } from "./wire.js";
+import { FROM_WEB_PICKER } from "./wire.ts";
 /** `page` block of the `annotation.submit` payload. */
 export interface HandoffPageInfo {
   url: string;

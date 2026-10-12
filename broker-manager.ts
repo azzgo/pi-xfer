@@ -42,8 +42,8 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { pidAlive } from "./broker-main.js";
-import { XFER_DIR } from "./constants.js";
+import { pidAlive } from "./broker-main.ts";
+import { XFER_DIR } from "./constants.ts";
 
 /** Default broker TCP port (mirrors broker-main.ts DEFAULT_PORT). */
 export const DEFAULT_BROKER_PORT = 4719;

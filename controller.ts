@@ -2,12 +2,12 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import * as fs from "node:fs";
 import type * as net from "node:net";
 import * as path from "node:path";
-import { XFER_DIR } from "./constants.js";
-import { createServer, listenServer } from "./server.js";
-import { XferState } from "./state.js";
-import type { XferNotifyMessage } from "./types.js";
-import { deriveName, endpointForName, metadataForName } from "./utils.js";
-import { FROM_WEB_PICKER } from "./wire.js";
+import { XFER_DIR } from "./constants.ts";
+import { createServer, listenServer } from "./server.ts";
+import { XferState } from "./state.ts";
+import type { XferNotifyMessage } from "./types.ts";
+import { deriveName, endpointForName, metadataForName } from "./utils.ts";
+import { FROM_WEB_PICKER } from "./wire.ts";
 
 /**
  * Orchestrates the xfer listener lifecycle: session start, rename,
