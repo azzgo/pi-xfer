@@ -204,7 +204,7 @@ describe("renderHandoffDoc record section (v1.13)", () => {
     url1: "https://example.com/dashboard",
     events: [
       { seq: 1, t: 12, kind: "input", sel: "input[name=\"email\"]", value: "ison@example.com" },
-      { seq: 2, t: 140, kind: "click", sel: "#login-btn", text: "登录" },
+      { seq: 2, t: 140, kind: "click", sel: "#login-btn", text: "login" },
       { seq: 3, t: 800, kind: "nav", from: "https://example.com/login", to: "https://example.com/dashboard" },
       { seq: 4, t: 820, kind: "click", sel: "#login-btn", ref: 2 },
     ],
@@ -223,7 +223,7 @@ describe("renderHandoffDoc record section (v1.13)", () => {
     assert.ok(doc.includes("- record: r1"));
     assert.ok(doc.includes("- url: https://example.com/login → https://example.com/dashboard"));
     assert.ok(doc.includes("+`12ms` `input` `input[name=\"email\"]` value=`ison@example.com`"));
-    assert.ok(doc.includes("+`140ms` `click` `#login-btn` — \"登录\""));
+    assert.ok(doc.includes("+`140ms` `click` `#login-btn` — \"login\""));
     assert.ok(doc.includes("+`800ms` `nav` → https://example.com/dashboard"));
     assert.ok(doc.includes("(pick #2)"), "missing pick cross-reference");
     assert.ok(doc.includes("- POST /api/login → 200 640ms"));

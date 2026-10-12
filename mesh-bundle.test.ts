@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 
 /**
- * 漏提交防线: `npm run build` writes mesh-runtime.cjs.sha256 alongside the
+ * leak guard: `npm run build` writes mesh-runtime.cjs.sha256 alongside the
  * bundle. The committed bundle must always match that checksum, so anyone who
  * rebuilds but forgets to commit the bundle (or the checksum) turns the suite
  * red — on every machine, no build-time deps needed.
