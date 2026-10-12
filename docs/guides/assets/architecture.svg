@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="770" viewBox="0 0 1200 770" font-family="ui-sans-serif, -apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="770" fill="#ffffff"/>
+  <text x="470" y="44" font-size="24" font-weight="600" fill="#1e1e1e">pi-xfer — how a handoff travels</text>
+
+  <!-- Layer 1: peer transport -->
+  <rect x="40" y="90" width="1120" height="190" rx="12" fill="#f3f9ff" stroke="#1971c2" stroke-width="2"/>
+  <text x="60" y="118" font-size="16" font-weight="600" fill="#1971c2">1 · Peer transport — default path (same machine, no setup)</text>
+  <rect x="90" y="170" width="180" height="80" rx="8" fill="#d0ebff" stroke="#1971c2" stroke-width="2"/>
+  <text x="105" y="216" font-size="16" fill="#1e1e1e">pi session “alpha”</text>
+  <rect x="460" y="170" width="280" height="80" rx="8" fill="#e9ecef" stroke="#495057" stroke-width="2"/>
+  <text x="490" y="204" font-size="14" fill="#1e1e1e" text-anchor="middle">~/.pi/xfer/&lt;name&gt;.sock</text>
+  <text x="490" y="224" font-size="14" fill="#1e1e1e" text-anchor="middle">Unix-socket peer listener</text>
+  <rect x="930" y="170" width="180" height="80" rx="8" fill="#d3f9d8" stroke="#2f9e44" stroke-width="2"/>
+  <text x="945" y="216" font-size="16" fill="#1e1e1e">pi session “beta”</text>
+  <line x1="270" y1="210" x2="448" y2="210" stroke="#1971c2" stroke-width="2"/>
+  <polygon points="460,210 448,204 448,216" fill="#1971c2"/>
+  <text x="315" y="200" font-size="13" fill="#1971c2">handoff</text>
+  <line x1="740" y1="210" x2="918" y2="210" stroke="#1971c2" stroke-width="2"/>
+  <polygon points="930,210 918,204 918,216" fill="#1971c2"/>
+  <text x="785" y="200" font-size="13" fill="#1971c2">handoff</text>
+
+  <!-- Layer 2: broker -->
+  <rect x="40" y="320" width="1120" height="180" rx="12" fill="#fff9db" stroke="#e8590c" stroke-width="2"/>
+  <text x="60" y="348" font-size="16" font-weight="600" fill="#e8590c">2 · Broker — web picker (optional)</text>
+  <rect x="90" y="390" width="220" height="80" rx="8" fill="#ffec99" stroke="#e8590c" stroke-width="2"/>
+  <text x="110" y="436" font-size="16" fill="#1e1e1e">Browser + userscript</text>
+  <rect x="460" y="390" width="280" height="80" rx="8" fill="#fff3bf" stroke="#e8590c" stroke-width="2"/>
+  <text x="500" y="424" font-size="14" fill="#1e1e1e" text-anchor="middle">Broker daemon</text>
+  <text x="500" y="444" font-size="14" fill="#1e1e1e" text-anchor="middle">/xfer broker start</text>
+  <line x1="310" y1="430" x2="448" y2="430" stroke="#e8590c" stroke-width="2"/>
+  <polygon points="460,430 448,424 448,436" fill="#e8590c"/>
+  <text x="325" y="420" font-size="13" fill="#e8590c">picks · records</text>
+  <line x1="460" y1="390" x2="205" y2="258" stroke="#e8590c" stroke-width="2" stroke-dasharray="6 4"/>
+  <polygon points="196,253 208,252 202,262" fill="#e8590c"/>
+  <text x="300" y="330" font-size="13" fill="#e8590c">submit handoff</text>
+
+  <!-- Layer 3: mesh -->
+  <rect x="40" y="540" width="1120" height="200" rx="12" fill="#f8f0fc" stroke="#9c36b5" stroke-width="2"/>
+  <text x="60" y="568" font-size="16" font-weight="600" fill="#9c36b5">3 · Mesh — opt-in cross-machine (RivetKit actor network)</text>
+  <rect x="90" y="620" width="200" height="80" rx="8" fill="#eebefa" stroke="#9c36b5" stroke-width="2"/>
+  <text x="105" y="666" font-size="16" fill="#1e1e1e">Node (machine 1)</text>
+  <rect x="460" y="620" width="280" height="80" rx="8" fill="#f3d9fa" stroke="#9c36b5" stroke-width="2"/>
+  <text x="500" y="654" font-size="14" fill="#1e1e1e" text-anchor="middle">Engine / control plane</text>
+  <text x="500" y="674" font-size="14" fill="#1e1e1e" text-anchor="middle">discovery · durable queue</text>
+  <rect x="910" y="620" width="200" height="80" rx="8" fill="#eebefa" stroke="#9c36b5" stroke-width="2"/>
+  <text x="925" y="666" font-size="16" fill="#1e1e1e">Node (machine 2)</text>
+  <line x1="290" y1="660" x2="448" y2="660" stroke="#9c36b5" stroke-width="2"/>
+  <polygon points="460,660 448,654 448,666" fill="#9c36b5"/>
+  <line x1="740" y1="660" x2="898" y2="660" stroke="#9c36b5" stroke-width="2"/>
+  <polygon points="910,660 898,654 898,666" fill="#9c36b5"/>
+  <text x="775" y="650" font-size="13" fill="#9c36b5">handoff</text>
+  <line x1="190" y1="540" x2="190" y2="262" stroke="#9c36b5" stroke-width="2" stroke-dasharray="6 4"/>
+  <polygon points="190,250 184,262 196,262" fill="#9c36b5"/>
+  <text x="200" y="330" font-size="13" fill="#9c36b5">join: /xfer mesh up</text>
+</svg>
