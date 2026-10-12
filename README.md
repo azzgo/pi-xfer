@@ -3,40 +3,31 @@
 [![npm version](https://img.shields.io/npm/v/pi-xfer.svg?style=flat-square)](https://www.npmjs.com/package/pi-xfer)
 [![license](https://img.shields.io/npm/l/pi-xfer.svg?style=flat-square)](./LICENSE)
 
-Cross-context handoff for [pi](https://github.com/nicobailon/pi) coding agents — from `📨 [Xfer from **peer**]` messages to structured handoff documents. Agents exchange markdown handoffs (Context / Problem / Requirements / Return address), not chat fragments.
+Structured markdown handoff between [pi](https://github.com/nicobailon/pi) coding agents. Instead of chat fragments, agents exchange a document — Context / Problem / Requirements / a return address — that the receiving agent can actually act on. Local Unix-socket delivery works out of the box; the **Mesh** adds opt-in cross-machine transport; the **web picker** pulls structured context straight from the browser.
+
+## Demo
+
+~76s of two real pi sessions exchanging handoffs (the footage is fully scripted and automated — see [`demo/`](demo/README.md)):
+
+[![pi-xfer demo](demo/pi-xfer-demo-poster.png)](demo/pi-xfer-demo.mp4)
+
+> GitHub READMEs can't autoplay `<video>` from a repo-relative path, so this links to the MP4 — click through to play it on github.com.
 
 ## Quickstart
 
 ```bash
 pi install npm:pi-xfer
+pi --xfer alpha   # terminal 1
+pi --xfer beta    # terminal 2
 ```
 
-Then run `pi` in two terminals and tell one agent: *"Send a handoff to the other session asking it to summarize this repo."* That's the whole loop — full walkthrough in [`docs/guides/quickstart.md`](docs/guides/quickstart.md).
+Then tell `alpha`:
 
-Formerly maintained inside [azzgo/dotfiles](https://github.com/azzgo/dotfiles) (`pi/agent/extensions/xfer/`); history preserved from the initial commit.
-
-## Install
-
-```bash
-pi install npm:pi-xfer
+```
+/xfer beta Summarize this repo and send it back as a handoff
 ```
 
-Or from GitHub:
-
-```bash
-pi install git+https://github.com/azzgo/pi-xfer
-```
-
-## Web picker userscript
-
-Install the Tampermonkey userscript straight from the raw URL (the `.user.js`
-suffix triggers Tampermonkey's install prompt):
-
-<https://raw.githubusercontent.com/azzgo/pi-xfer/main/web-picker.user.js>
-
-## Positioning
-
-pi-xfer covers **heavy-context handoff**: structured documents, cross-machine transport, and browser capture. For lightweight same-machine notes ("check this file", quick questions), [pi-intercom](https://github.com/nicobailon/pi-intercom) is the better fit — the two coexist naturally.
+Full walkthrough in [`docs/guides/quickstart.md`](docs/guides/quickstart.md) · cross-machine setup in [`docs/guides/mesh-setup.md`](docs/guides/mesh-setup.md).
 
 ## Capabilities
 
@@ -47,6 +38,25 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 | **Board** | Machine-local async collaboration cards (`/xfer board`); append-only entries, human-cleaned (see `docs/adr/0014`) |
 | **Web picker** | Tampermonkey userscript + local broker: pick page elements, record interaction spans, submit as handoff (see `docs/dev/web-picker.md`) |
 
+Install the userscript straight from the raw URL (the `.user.js` suffix triggers Tampermonkey's install prompt): <https://raw.githubusercontent.com/azzgo/pi-xfer/main/web-picker.user.js>
+
+## Positioning
+
+pi-xfer covers **heavy-context handoff**: structured documents, cross-machine transport, and browser capture. For lightweight same-machine notes ("check this file", quick questions), [pi-intercom](https://github.com/nicobailon/pi-intercom) is the better fit — the two coexist naturally.
+
+## Docs
+
+**User guides**
+
+- [Quickstart](docs/guides/quickstart.md) — your first handoff in five minutes
+- [Mesh setup](docs/guides/mesh-setup.md) — cross-machine transport with RivetKit
+
+**Development**
+
+- [Web picker](docs/dev/web-picker.md) — userscript + broker workflow
+- [Architecture decision records](docs/adr/) — mesh transport, board scope, web-picker record philosophy
+- [CONTEXT.md](CONTEXT.md) — glossary and mental model (Mesh, Node, Board, Card, Marker, …)
+
 ## Layout
 
 - `docs/guides/` — user guides ([quickstart](docs/guides/quickstart.md), [mesh setup](docs/guides/mesh-setup.md))
@@ -54,6 +64,8 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
 - `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product
 - `web-picker.src/` + `web-picker.user.js` — userscript source and committed build product
+
+pi-xfer was formerly maintained inside [azzgo/dotfiles](https://github.com/azzgo/dotfiles) (`pi/agent/extensions/xfer/`); history preserved from the initial commit.
 
 ## Development
 
