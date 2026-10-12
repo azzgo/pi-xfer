@@ -51,7 +51,7 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2",
+    "esbuild": "0.28.2",
     "husky": "^9.1.7"
   }
 }

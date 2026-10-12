@@ -75,17 +75,26 @@ export async function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs'))
     .match(/RIVETKIT_VERSION = "([^"]+)"/)?.[1];
   if (!versionPin) throw new Error('cannot read RIVETKIT_VERSION from mesh-native.ts');
 
-  const rivetkitPkg = join(here, 'node_modules/rivetkit/package.json');
-  if (!existsSync(rivetkitPkg)) {
-    console.log(`rivetkit not installed — installing --no-save for the bundle build (not a runtime dep)...`);
-    const result = spawnSync('npm', ['install', '--no-save', `rivetkit@${versionPin}`], { cwd: here, stdio: 'inherit' });
-    if (result.status !== 0) throw new Error(`failed to install rivetkit@${versionPin} for the bundle build`);
+  // rivetkit is not a runtime dep (downloaded on first `mesh up`). Its
+  // floating transitives (zod ^4.1.0, p-retry ^6.2.1) silently change the
+  // bundle — new exports, version stamps, even hoisting layout — so they are
+  // pinned at top level too. npm prunes previously --no-save packages on every
+  // install, so all specs always go into a single install call.
+  const pins = { rivetkit: versionPin, zod: '4.6.5', 'p-retry': '6.2.1' };
+  const pkgVersion = (name) => {
+    const pkg = join(here, `node_modules/${name}/package.json`);
+    return existsSync(pkg) ? JSON.parse(readFileSync(pkg, 'utf8')).version : null;
+  };
+  const specs = Object.entries(pins).map(([name, pin]) => `${name}@${pin}`);
+  if (Object.entries(pins).some(([name, pin]) => pkgVersion(name) !== pin)) {
+    console.log(`installing ${specs.join(' ')} --no-save for the bundle build (not runtime deps)...`);
+    const result = spawnSync('npm', ['install', '--no-save', ...specs], { cwd: here, stdio: 'inherit' });
+    if (result.status !== 0) throw new Error(`failed to install ${specs.join(' ')} for the bundle build`);
   }
-  const rivetkitVersion = JSON.parse(readFileSync(rivetkitPkg, 'utf8')).version;
-  if (rivetkitVersion !== versionPin) {
-    throw new Error(`rivetkit ${rivetkitVersion} in node_modules != pinned ${versionPin} (mesh-native.ts) — align them before building`);
+  for (const [name, pin] of Object.entries(pins)) {
+    const version = pkgVersion(name);
+    if (version !== pin) throw new Error(`${name} ${version} in node_modules != pinned ${pin} — align before building`);
   }
-
   await build({
     entryPoints: [join(here, 'mesh-runtime.src/index.ts')],
     bundle: true,
@@ -104,20 +113,25 @@ export async function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs'))
   writeFileSync(`${outfile}.sha256`, `${createHash('sha256').update(bundle).digest('hex')}\n`);
 }
 
-async function main() {
+/** Rebuild web-picker.user.js (or any outfile) exactly as `npm run build` does. */
+export async function buildWebPicker(outfile = join(here, 'web-picker.user.js')) {
   const banner = readFileSync(join(here, 'web-picker.src/banner.js'), 'utf8');
   await build({
     entryPoints: [join(here, 'web-picker.src/main.js')],
     bundle: true,
     format: 'iife',
-    outfile: join(here, 'web-picker.user.js'),
+    outfile,
     banner: { js: banner },
     charset: 'utf8',
     target: 'es2020',
     sourcemap: false,
     legalComments: 'none',
-    logLevel: 'info',
+    logLevel: 'silent',
   });
+}
+
+async function main() {
+  await buildWebPicker();
   await buildMeshRuntime();
   console.log('mesh-runtime.cjs built');
 }
