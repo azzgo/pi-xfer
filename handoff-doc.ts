@@ -164,7 +164,7 @@ function pickSection(pick: HandoffPick): string[] {
   return lines;
 }
 
-/** One timeline event line: `+140ms click #login-btn — "登录"` (+ value / ref). */
+/** One timeline event line: `+140ms click #login-btn — "login"` (+ value / ref). */
 function recordEventLine(ev: HandoffRecordEvent): string {
   const parts = [`+\`${ev.t}ms\``, `\`${ev.kind}\``];
   if (ev.sel) parts.push(`\`${ev.sel}\``);
