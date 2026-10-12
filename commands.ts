@@ -208,7 +208,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       if (cmd === "broker") {
         const sub = parts[1];
         if (sub !== "start" && sub !== "status" && sub !== "stop" && sub !== "logs") {
-          ctx.ui.notify("Usage: /xfer broker <start|status|stop|logs> — start 可带 --port N (0 = 临时端口)", "error");
+          ctx.ui.notify("Usage: /xfer broker <start|status|stop|logs> — start accepts --port N (0 = ephemeral port)", "error");
           return;
         }
         if (sub === "start") {
