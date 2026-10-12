@@ -102,6 +102,68 @@ export function buildTape({ output, width, height, fontSize, binDir, command, co
   return lines.join("\n");
 return lines.join("\n");
 }
+/**
+ * A tape that drives a real interactive `pi` session: it types the launch
+ * command into a clean shell and lets the real TUI own the terminal from there.
+ *
+ * Returns the tape plus the tape-schedule timestamps the caller needs to line
+ * real wall-clock events up with the recording:
+ *  - `inkAtMs` when the first character of the launch command is typed, which
+ *    is the first thing visible in the video (everything before it is hidden
+ *    and the screen is cleared), so it doubles as the origin anchor;
+ *  - `typeAtMs` when a follow-up keystroke is submitted.
+ */
+export function buildTuiTape({
+  output, width, height, fontSize, cwd, marker, alias, launch, launchAtMs = 900, submit, submitAtMs, holdMs,
+}) {
+  const typeMsPerChar = 10;
+  const lines = tapeHeader({ output, width, height, fontSize, typingSpeed: `${typeMsPerChar}ms` });
+
+  /* One setup line that ends in `clear`: VHS's Hide does not reliably suppress
+   * echoed input, but a cleared screen does, so nothing of the harness shows.
+   *
+   * The `touch` in the middle is the capture's wall-clock reading from inside
+   * the very recording it is about to cut, which pins real events to the
+   * timeline without guessing how long VHS took to boot. `touch` keeps that
+   * instant free of interpreter start-up; the caller reads it back as mtimeMs. */
+  const setup =
+    `cd ${cwd} && export PS1='$ '` +
+    (alias ? ` && alias pi='${alias}'` : "") +
+    ` && touch ${marker} && clear`;
+  lines.push("Hide");
+  lines.push(`Type@1ms ${q(setup)}`);
+  lines.push("Enter");
+  const markerTapeMs = setup.length + 1;
+  lines.push("Show");
+  lines.push("Sleep 700ms");
+
+  let cursor = 700;
+  const sleepTo = (target) => {
+    lines.push(`Sleep ${target - cursor}ms`);
+    cursor = target;
+  };
+
+  sleepTo(launchAtMs);
+  const inkAtMs = cursor;
+  lines.push(`Type@${typeMsPerChar}ms ${q(launch)}`);
+  cursor += launch.length * typeMsPerChar;
+  lines.push("Enter");
+  cursor += 120;
+
+  let typeAtMs = null;
+  if (submit) {
+    sleepTo(submitAtMs);
+    typeAtMs = cursor;
+    lines.push(`Type@${typeMsPerChar}ms ${q(submit)}`);
+    cursor += submit.length * typeMsPerChar;
+    lines.push("Enter");
+    cursor += 120;
+  }
+
+  lines.push(`Sleep ${Math.max(1000, holdMs - cursor)}ms`);
+  lines.push("");
+  return { tape: lines.join("\n"), inkAtMs, typeAtMs, markerTapeMs };
+}
 
 /**
  * The parts of a real inbound handoff doc worth putting on screen: who sent it,
