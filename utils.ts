@@ -77,6 +77,17 @@ export function deriveName(pi: ExtensionAPI): string {
   return `${base}_${suffix}`;
 }
 
+/** Reject with `timed out after Nms` when `promise` outlives `ms`; the timer never holds the loop open. */
+export async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+      timer.unref?.();
+    }),
+  ]);
+}
+
 /** All reachable peers (sockets present in xferDir, defaulting to XFER_DIR, excluding myself). */
 export function listPeers(myName: string, xferDir: string = XFER_DIR): PeerInfo[] {
   try {

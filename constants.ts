@@ -14,3 +14,6 @@ export const CONNECT_TIMEOUT_MS = 5_000;
 export const ACK_TIMEOUT_MS = 5_000;
 export const METADATA_POLL_MS = 1_000;
 export const MAX_FRAME_BYTES = 1024 * 1024;
+
+/** Deadline for a mesh engine query (node listing) before the engine counts as unreachable. */
+export const MESH_PROBE_TIMEOUT_MS = 2_500;

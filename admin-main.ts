@@ -25,11 +25,11 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Board } from "./board.ts";
 import { BrokerManager } from "./broker-manager.ts";
-import { XFER_DIR } from "./constants.ts";
+import { MESH_PROBE_TIMEOUT_MS, XFER_DIR } from "./constants.ts";
 import { collectGarbage } from "./gc.ts";
 import { listMeshNodes } from "./mesh-engine.ts";
 import { loadMeshConfig } from "./mesh-config.ts";
-import { listPeers } from "./utils.ts";
+import { listPeers, withTimeout } from "./utils.ts";
 
 /** Default admin TCP port (mirrors admin-manager.ts DEFAULT_ADMIN_PORT). */
 export const DEFAULT_ADMIN_PORT = 7788;
@@ -133,16 +133,6 @@ async function meshView(xferDir: string): Promise<MeshView> {
       nodes: [],
     };
   }
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return await Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      const timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
-      timer.unref();
-    }),
-  ]);
 }
 
 // ---------- HTML rendering (Ink variant, light) ----------
@@ -451,7 +441,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       const broker = await brokerManager.probe();
       let mesh: MeshView = { configured: false, error: null, nodes: [] };
       try {
-        mesh = await withTimeout(meshView(xferDir), 2_500);
+        mesh = await withTimeout(meshView(xferDir), MESH_PROBE_TIMEOUT_MS);
       } catch { /* engine unreachable — render as-is below */ }
       const meshLine = mesh.configured ? (mesh.error ? "engine error" : `${mesh.nodes.length} node(s)`) : "not configured";
       const body = `
@@ -491,7 +481,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       const peers = peerRows(xferDir);
       let mesh: MeshView = { configured: false, error: null, nodes: [] };
       try {
-        mesh = await withTimeout(meshView(xferDir), 2_500);
+        mesh = await withTimeout(meshView(xferDir), MESH_PROBE_TIMEOUT_MS);
       } catch { /* engine unreachable */ }
       const broker = await brokerManager.probe();
       return page(false, controlPage(ctx, peers, mesh, broker, query.get("selfcheck") === "1" ? selfCheckReport(peers, mesh, broker) : null));
