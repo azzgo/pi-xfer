@@ -21,7 +21,8 @@ import { spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { XferController } from "./controller.js";
-import { BrokerManager } from "./broker-manager.js";
+import type { AdminManager } from "./admin-manager.js";
+import { BrokerManager, type BrokerInfo } from "./broker-manager.js";
 import { XferState } from "./state.js";
 import type { Identity } from "./types.js";
 
@@ -76,7 +77,15 @@ function makeIdentity(): Identity {
 }
 
 /** Register against stubs; return the captured definition plus invoke helpers. */
-function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: string; xferDir?: string; boardDir?: string; mesh?: any } = {}): {
+function harness(options: {
+  brokerManager?: BrokerManager;
+  brokerXferDir?: string;
+  xferDir?: string;
+  boardDir?: string;
+  adminManager?: AdminManager;
+  meshConfigPath?: string;
+  mesh?: any;
+} = {}): {
   description: string | undefined;
   handler: (args: string) => Promise<void>;
   completions: (prefix: string) => AutocompleteItem[] | null;
@@ -95,7 +104,15 @@ function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: strin
     state: { identity: makeIdentity(), sessionName: () => undefined },
   } as unknown as XferController;
 
-  registerXferCommand(pi, controller, { brokerManager: options.brokerManager, brokerXferDir: options.brokerXferDir, xferDir: options.xferDir ?? tmpDir, boardDir: options.boardDir, mesh: options.mesh });
+  registerXferCommand(pi, controller, {
+    brokerManager: options.brokerManager,
+    brokerXferDir: options.brokerXferDir,
+    xferDir: options.xferDir ?? tmpDir,
+    boardDir: options.boardDir,
+    adminManager: options.adminManager ?? stubAdminManager(),
+    meshConfigPath: options.meshConfigPath ?? path.join(tmpDir, "mesh.config.json"),
+    mesh: options.mesh,
+  });
   assert.ok(def, "registerCommand was not captured");
   const ctx = {
     ui: { notify: (message: string, type?: string) => notifications.push({ message, type }) },
@@ -111,7 +128,9 @@ function harness(options: { brokerManager?: BrokerManager; brokerXferDir?: strin
 
 /** BrokerManager stub for command smoke tests — records calls, returns canned strings. */
 function stubBrokerManager(
-  overrides: Partial<Record<"start" | "stop" | "status", () => Promise<string>>> = {},
+  overrides: Partial<Record<"start" | "stop" | "status", () => Promise<string>>> & {
+    probe?: () => Promise<BrokerInfo | null>;
+  } = {},
 ): BrokerManager & { calls: string[] } {
   const calls: string[] = [];
   const make = (name: "start" | "stop" | "status", fallback: string) =>
@@ -126,8 +145,14 @@ function stubBrokerManager(
     start: make("start", "broker started (pid 4242, port 4719)"),
     stop: make("stop", "broker stopped (pid 4242)"),
     status: make("status", "broker: alive\n  port: 4719\n  pid: 4242"),
+    probe: overrides.probe ?? (async () => { calls.push("probe"); return { port: 4719, pid: 4242, startedAt: "", version: "test" }; }),
     calls,
   } as unknown as BrokerManager & { calls: string[] };
+}
+
+/** AdminManager stub whose probe() never sees the developer's real ~/.pi/xfer. */
+function stubAdminManager(info: { port: number; pid: number } | null = null): AdminManager {
+  return { probe: async () => (info === null ? null : { startedAt: "", version: "test", ...info }) } as unknown as AdminManager;
 }
 
 describe("xfer command: list", () => {
@@ -482,5 +507,56 @@ describe("xfer command: mesh subcommand", () => {
     const h = harness({ mesh });
     assert.deepEqual((h.completions("mesh") ?? []).map((i) => i.value), ["mesh"]);
     assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "up"]);
+  });
+});
+
+describe("xfer command: doctor", () => {
+  it("reports every check with a ✓/✗/! marker and a summary line", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-doctor-"));
+    try {
+      const h = harness({
+        xferDir: dir,
+        brokerManager: stubBrokerManager(),
+        adminManager: stubAdminManager({ port: 7788, pid: process.pid }),
+      });
+      await h.handler("doctor");
+      assert.equal(h.notifications.length, 1);
+      assert.equal(h.notifications[0].type, "info");
+      const message = h.notifications[0].message;
+      assert.match(message, /^🩺 \/xfer doctor\n/);
+      assert.match(message, /✓ Socket dir/);
+      assert.match(message, /✓ Broker/);
+      assert.match(message, /✓ Admin/);
+      assert.match(message, /! Mesh/);
+      assert.match(message, /! Mesh.*see the mesh setup guide/);
+      assert.match(message, /\d+ checks? passed.*1 warning$/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("points a stopped broker at /xfer broker start and notifies as an error", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-doctor-"));
+    try {
+      const h = harness({
+        xferDir: dir,
+        brokerManager: stubBrokerManager({ probe: async () => null }),
+        adminManager: stubAdminManager(),
+      });
+      await h.handler("doctor");
+      assert.equal(h.notifications[0].type, "error");
+      assert.match(h.notifications[0].message, /✗ Broker.*→ \/xfer broker start/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("mentions doctor in the description, help and top-level completions", async () => {
+    const h = harness();
+    assert.match(h.description ?? "", /\/xfer doctor/);
+    await h.handler("help");
+    assert.match(h.notifications[0].message, /\/xfer doctor/);
+    assert.ok((h.completions("") ?? []).map((i) => i.value).includes("doctor"));
+    assert.deepEqual((h.completions("doc") ?? []).map((i) => i.value), ["doctor"]);
   });
 });

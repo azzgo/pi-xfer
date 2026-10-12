@@ -7,6 +7,7 @@ import { AdminManager, DEFAULT_ADMIN_PORT } from "./admin-manager.ts";
 import { registerBoard, renderCard } from "./board.ts";
 import type { XferController } from "./controller.ts";
 import { BrokerManager } from "./broker-manager.ts";
+import { formatDoctorReport, runDoctor } from "./doctor.ts";
 import { collectGarbage } from "./gc.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
 import type { MeshNode } from "./mesh.ts";
@@ -25,6 +26,8 @@ export interface XferCommandOptions {
   boardDir?: string;
   /** Admin daemon lifecycle manager; defaults to a real AdminManager (tests inject a stub). */
   adminManager?: AdminManager;
+  /** Mesh engine config read by `/xfer doctor`; defaults to <xferDir>/mesh.config.json via MESH_CONFIG_PATH. */
+  meshConfigPath?: string;
   /** Mesh transport node; when absent the `/xfer mesh` command group is unavailable. */
   mesh?: MeshNode;
 }
@@ -69,6 +72,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
   const adminManager = options.adminManager ?? new AdminManager();
   const brokerXferDir = options.brokerXferDir ?? XFER_DIR;
   const xferDir = options.xferDir ?? XFER_DIR;
+  const meshConfigPath = options.meshConfigPath ?? MESH_CONFIG_PATH;
   const board = registerBoard(pi, { boardDir: options.boardDir, getAuthor: () => controller.state.identity?.name ?? "unknown" });
 
   pi.registerCommand("xfer", {
@@ -80,7 +84,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer board <list|new|read|write|del|clean|open> — async collaboration board\n" +
       "  /xfer gc                 — reap zombie peer sockets (dead pid / no listener)\n" +
       "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle\n" +
-      "  /xfer admin [stop]       — local web console (idempotent start + open URL)",
+      "  /xfer admin [stop]       — local web console (idempotent start + open URL)\n" +
+      "  /xfer doctor             — self-check the install (sockets / peers / broker / admin / mesh)",
 
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
       // `/xfer board <TAB>` completes board subcommands, then card ids.
@@ -128,6 +133,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "admin", label: "admin", description: "Local web console: open (idempotent start) / stop" },
         { value: "board", label: "board", description: "Async collaboration board: list / new / read / write / del / clean / open" },
         { value: "gc", label: "gc", description: "Reap zombie peer sockets (dead pid / no listener)" },
+        { value: "doctor", label: "doctor", description: "Self-check the install: socket dir / peers / broker / admin / mesh" },
         { value: "status", label: "status", description: "Show listener status" },
         { value: "mesh", label: "mesh", description: "Mesh transport: status / up / down / list / <name> <request>" },
         ...peers.map(peer => ({
@@ -157,6 +163,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
           "   /xfer mesh [<up|down|list|name> <request>] — mesh transport\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
+          "   /xfer doctor             — self-check the install and print fix hints\n" +
 
           "\n" +
           "💡 One-way, no wait. Reply via /xfer.",
@@ -528,6 +535,19 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           `kept ${report.alive.length} live peer(s)`,
           "info",
         );
+        return;
+      }
+
+      // ── /xfer doctor (read-only self-check) ──
+      if (cmd === "doctor") {
+        const report = await runDoctor({
+          xferDir,
+          myName: state.identity?.name ?? "",
+          brokerManager,
+          adminManager,
+          meshConfigPath,
+        });
+        ctx.ui.notify(formatDoctorReport(report), report.failed > 0 ? "error" : "info");
         return;
       }
 
