@@ -5,3 +5,17 @@ composition/render/
 composition/renders/
 node_modules/
 *.log
+
+# This repository tracks no binary media. Both products below are local build
+# outputs: the MP4 is published on YouTube (see the Demo section of the README),
+# and the music bed is synthesized on demand by capture/lib/bgm.mjs.
+pi-xfer-demo.mp4
+*.mp4
+*.webm
+*.mp3
+*.m4a
+*.wav
+
+# Exception: pi-xfer-demo-poster.png is the README's demo thumbnail, so it has
+# to be in the repository for the README to render. Kept at 854px/~170 KB.
+!pi-xfer-demo-poster.png

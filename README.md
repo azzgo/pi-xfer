@@ -7,11 +7,16 @@ Structured markdown handoff between [pi](https://github.com/nicobailon/pi) codin
 
 ## Demo
 
-~76s of two real pi sessions exchanging handoffs (the footage is fully scripted and automated — see [`demo/`](demo/README.md)):
+~76s of two real pi sessions exchanging handoffs (the footage is fully scripted and automated — see [`demo/`](demo/README.md)).
 
-[![pi-xfer demo](demo/pi-xfer-demo-poster.png)](demo/pi-xfer-demo.mp4)
+<!-- TODO(author): replace with the published YouTube URL once it is uploaded. -->
+[![pi-xfer demo](demo/pi-xfer-demo-poster.png)](https://youtu.be/TODO-REPLACE-WITH-YOUTUBE-ID)
 
-> GitHub READMEs can't autoplay `<video>` from a repo-relative path, so this links to the MP4 — click through to play it on github.com.
+> **Watch on YouTube →** https://youtu.be/TODO-REPLACE-WITH-YOUTUBE-ID
+>
+> The demo is not tracked in this repository: it is a local build product, and
+> this repository keeps no binary media. Rebuild it with `node demo/build.mjs`,
+> or just watch it above — the poster links to the published video.
 
 ## Quickstart
 

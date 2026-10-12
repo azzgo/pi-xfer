@@ -12,7 +12,7 @@ admin daemon. VHS/Playwright/HyperFrames are presentation only.
 | [VHS](https://github.com/charmbracelet/vhs) (brew, incl. ttyd) | terminal footage from `.tape` files | `vhs x.tape` |
 | Playwright (chromium) | browser footage (web picker, admin console) | `npx playwright@1.55` (installed under `demo/capture/`) |
 | [HyperFrames](https://github.com/heygen-com/hyperframes) | shot-4 animation, timeline composite, captions, final MP4 | `npx hyperframes@0.8.149` |
-| ffmpeg | final <10MB 720p compress | system |
+| ffmpeg | audio encode, BGM synthesis, final 720p compress | system |
 
 None of these are runtime dependencies of the extension.
 
@@ -24,7 +24,27 @@ node demo/build.mjs            # capture everything, render, compress
 node demo/build.mjs --compose  # reuse demo/out captures, re-render only
 ```
 
-Output: `demo/pi-xfer-demo.mp4` (~76s, silent, 1280x720, GitHub-friendly).
+Output: `demo/pi-xfer-demo.mp4` — 76s, 1280x720, under 2 MB, with a music bed.
+
+## Nothing binary is tracked
+
+This repository tracks no binary media. Both media products here are local
+build outputs:
+
+- **`demo/pi-xfer-demo.mp4`** — the cut itself. Not tracked; published on
+  YouTube, and the top-level README links there.
+- **`composition/assets/bgm.m4a`** — the music bed. Not tracked, and nothing is
+  downloaded: `capture/lib/bgm.mjs` synthesizes it on demand, so a fresh clone
+  runs `node demo/build.mjs` and gets an identical track. It is written by this
+  repository, so there is no third-party licence to carry or attribute.
+
+The one deliberate exception is `demo/pi-xfer-demo-poster.png` (854px, ~170 KB):
+it is the README's demo thumbnail, so it has to be in the repository for the
+README to render.
+
+HyperFrames render intermediates (`composition/renders/`) and Playwright/VHS
+capture output (`out/`) are ignored as well — `composition/renders/final.mp4`
+alone was 9 MB of throwaway render.
 
 ## Shots
 
@@ -110,6 +130,7 @@ demo/
   capture/
     lib/vhs.mjs          tape builder: real-TUI tapes + stub replay
     lib/retime.mjs       cut a long real-time take into the finished shot
+    lib/bgm.mjs          synthesize the music bed (no third-party audio)
     capture-shot{1,2,3}.mjs
   page/index.html        local demo page the web picker operates on
   composition/           HyperFrames project (timeline, captions, animation)
