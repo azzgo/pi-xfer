@@ -12,6 +12,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -26,5 +28,16 @@ jobs:
             exit 1
           }
       - run: npm publish --provenance
+      - run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Create draft release with generated notes
+        if: success()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous_tag=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || echo "")
+          body=$(mktemp)
+          gh api repos/${GITHUB_REPOSITORY}/releases/generate-notes -f tag_name="${GITHUB_REF_NAME}" ${previous_tag:+-f previous_tag_name="${previous_tag}"} --jq .body > "$body"
+          gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" --notes-file "$body"
