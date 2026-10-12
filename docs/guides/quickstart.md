@@ -63,9 +63,8 @@ That's the whole loop: one-way, structured markdown handoffs between peers.
 | Local web console | `/xfer admin` | — |
 
 ## How the pieces fit together
-## How the pieces fit together
 
-![Architecture](assets/architecture.png)
+![Architecture](assets/architecture.svg)
 
 The static image above is an export of the full interactive diagram — **[Open the interactive diagram](assets/xfer-architecture.html)** for pan/zoom, per-node source references, and a dark theme.
 
