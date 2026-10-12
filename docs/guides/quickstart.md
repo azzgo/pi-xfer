@@ -33,11 +33,17 @@ flowchart LR
 
 ### Terminal 1 — `alpha` sends
 
-You never run a send command yourself; you ask the agent in plain language:
+The precise form is the slash command `/xfer <target> <request>` — the agent expands your request into a structured markdown document (Context / Problem / Requirements / Return address) and delivers it to the target:
+
+```
+/xfer beta Review the error handling in src/server.ts
+```
+
+Or, equivalently, just talk to the agent in plain language:
 
 > Send a handoff to beta asking it to review the error handling in src/server.ts.
 
-The agent composes a structured markdown document (Context / Problem / Requirements / Return address) and delivers it to `beta` over the local peer socket — one-way, no waiting for a reply.
+The handoff is delivered to `beta` over the local peer socket — one-way, no waiting for a reply.
 
 To confirm `beta` is reachable first, run `/xfer list` — it shows every running session on this machine.
 
