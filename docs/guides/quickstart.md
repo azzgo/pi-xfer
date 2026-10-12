@@ -66,6 +66,7 @@ That's the whole loop: one-way, structured markdown handoffs between peers.
 
 | Capability | Command | Guide |
 |---|---|---|
+| Install self-check (nothing works?) | `/xfer doctor` | — |
 | Async collaboration cards | `/xfer board list` | README → Board |
 | Web picker (browser → handoff) | `/xfer broker start` + userscript | [`docs/dev/web-picker.md`](../dev/web-picker.md) |
 | Cross-machine delivery | `/xfer mesh up` | Mesh setup guide (coming) |
