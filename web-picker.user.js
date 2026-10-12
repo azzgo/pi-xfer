@@ -1560,12 +1560,13 @@
       #fab:hover svg { transform: translate(-50%, -50%) rotate(45deg) scale(1.08); }
       #fab.large { width: 46px; height: 46px; border-radius: 14px; }
       #fab.large svg { width: 20px; height: 20px; }
+      #fab.large #dot { top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px; }
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
         box-shadow: 0 0 0 2px #161a21; cursor: pointer; transition: background .2s, color .2s, filter .15s; }
       #cnt.zero { background: #232a36; color: #7c8aa0; }
       #cnt:hover { filter: brightness(1.18); }
-      #dot { position: absolute; top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px;
+      #dot { position: absolute; top: -3px; left: -3px; width: 9px; height: 9px; border-radius: 5px;
         background: #94a3b8; box-shadow: 0 0 0 2px #161a21; transition: background .2s; }
       #dot.connecting { background: var(--wp-amber); }
       #dot.on { background: var(--wp-green); box-shadow: 0 0 0 2px #161a21, 0 0 8px rgba(34,197,94,.8); }
