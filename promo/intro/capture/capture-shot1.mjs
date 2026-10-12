@@ -14,11 +14,11 @@
  * anchored to beta's arrival, and the wait between them is compressed into a
  * quick spin rather than cut away.
  *
- * Usage: node capture-shot1.mjs   (from demo/capture; writes demo/out/shot1)
+ * Usage: node capture-shot1.mjs   (from promo/intro/capture; writes ../out/shot1)
  * Env:   SHOT1_HOLD_MS   how long each tape stays open (default 210s)
  *        SHOT1_RECUT     re-cut from the saved raw takes, no model calls
  *
- * The raw takes stay in demo/out/shot1 so the cut can be re-tuned in seconds
+ * The raw takes stay in out/shot1 so the cut can be re-tuned in seconds
  * instead of paying for another pair of live model calls.
  */
 import { spawn } from "node:child_process";

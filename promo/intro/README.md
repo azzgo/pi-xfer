@@ -1,16 +1,21 @@
-# Demo — fully automated production pipeline
+# Intro: pi-xfer
 
-Every frame of `pi-xfer-demo.mp4` is produced by code in this directory. No
-manual screen recording. All data visible in the video is **real**: real headless
-pi sessions, real handoff deliveries through real sockets, a real broker, a real
-admin daemon. VHS/Playwright/HyperFrames are presentation only.
+The 76-second overview cut, published on YouTube:
+<https://youtu.be/0mm2CirJMUo>.
+
+Every frame is produced by code in this directory. No manual screen recording.
+All data visible in the video is **real**: real pi sessions, real handoff
+deliveries over real sockets, a real broker, a real admin daemon. VHS,
+Playwright and HyperFrames are presentation only.
+
+See [`../README.md`](../README.md) for how this directory fits into `promo/`.
 
 ## Toolchain
 
 | Tool | Role | Invoke |
 |---|---|---|
 | [VHS](https://github.com/charmbracelet/vhs) (brew, incl. ttyd) | terminal footage from `.tape` files | `vhs x.tape` |
-| Playwright (chromium) | browser footage (web picker, admin console) | `npx playwright@1.55` (installed under `demo/capture/`) |
+| Playwright (chromium) | browser footage (web picker, admin console) | installed under `capture/` |
 | [HyperFrames](https://github.com/heygen-com/hyperframes) | shot-4 animation, timeline composite, captions, final MP4 | `npx hyperframes@0.8.149` |
 | ffmpeg | audio encode, BGM synthesis, final 720p compress | system |
 
@@ -20,31 +25,32 @@ None of these are runtime dependencies of the extension.
 
 ```sh
 brew install vhs ffmpeg        # once
-node demo/build.mjs            # capture everything, render, compress
-node demo/build.mjs --compose  # reuse demo/out captures, re-render only
+node promo/intro/build.mjs      # capture everything, render, compress
+node promo/intro/build.mjs --compose   # reuse out/ captures, re-render only
 ```
 
-Output: `demo/pi-xfer-demo.mp4` — 76s, 1280x720, under 2 MB, with a music bed.
+Products, both gitignored:
+
+- `pi-xfer-intro.mp4` — 76s, 1280x720, under 2 MB, with a music bed.
+- `pi-xfer-intro-poster.png` — a frame of it, for the README.
 
 ## Nothing binary is tracked
 
-This repository tracks no binary media. Both media products here are local
-build outputs:
+This repository tracks no binary media, stills included. Everything this
+directory produces is a local build output:
 
-- **`demo/pi-xfer-demo.mp4`** — the cut itself. Not tracked; published on
-  YouTube, and the top-level README links there.
+- **`pi-xfer-intro.mp4`** — the cut itself. Not tracked; published on YouTube,
+  and the top-level README links there.
 - **`composition/assets/bgm.m4a`** — the music bed. Not tracked, and nothing is
   downloaded: `capture/lib/bgm.mjs` synthesizes it on demand, so a fresh clone
-  runs `node demo/build.mjs` and gets an identical track. It is written by this
-  repository, so there is no third-party licence to carry or attribute.
+  runs the build and gets an identical track. It is written by this repository,
+  so there is no third-party licence to carry or attribute.
 
-The one deliberate exception is `demo/pi-xfer-demo-poster.png` (854px, ~170 KB):
-it is the README's demo thumbnail, so it has to be in the repository for the
-README to render.
+Poster frames are not tracked either — the README links straight to YouTube, so
+the poster is purely a local convenience.
 
 HyperFrames render intermediates (`composition/renders/`) and Playwright/VHS
-capture output (`out/`) are ignored as well — `composition/renders/final.mp4`
-alone was 9 MB of throwaway render.
+capture output (`out/`) are ignored as well.
 
 ## Shots
 
@@ -88,17 +94,17 @@ in-session. Ask either for something and the shot picks up a failed file
 lookup, or beta hands the answer back over xfer and a one-way shot becomes a
 two-way exchange.
 
-The raw takes stay in `demo/out/shot1`, so `node capture-shot1.mjs --recut`
-re-cuts both clips from the last recording without paying for model calls again.
+The raw takes stay in `out/shot1`, so `node capture-shot1.mjs --recut` re-cuts
+both clips from the last recording without paying for model calls again.
 
 Both sessions run under an isolated `HOME` that carries only credentials,
 models and `quietStartup: "header"`. That keeps the startup package-update
 notice and the model-scope list out of frame, and gives the two peers their own
-`~/.pi/xfer` instead of registering on the real machine.
+`~/.pi/xfer` instead of registering alpha/beta on the real machine.
 
 ## Shot 2's terminal is a replay
 
-`capture/lib/vhs.mjs` also builds a stub `pi`/`tail` executable, puts the stub
+`capture/lib/vhs.mjs` builds a stub `pi`/`tail` executable, puts the stub
 directory first on `PATH` and has VHS type the real command and press Enter.
 Shot 2's terminal shows real broker and peer log lines that the stub prints on a
 schedule, so nothing can appear before the event it belongs to.
@@ -119,13 +125,13 @@ The browser recording starts when Playwright starts recording, which is not the
 same instant the capture script begins pacing. After the video is written,
 `capture-shot2.mjs` re-derives its origin from the file's real duration and
 re-expresses the submit / broker-ack / peer-receipt timestamps in video time
-(`demo/out/shot2/timing.json`). The terminal tape is built against those, so the
+(`out/shot2/timing.json`). The terminal tape is built against those, so the
 right pane cannot show a delivery before the left pane submitted.
 
 ## Layout
 
 ```
-demo/
+promo/intro/
   build.mjs              orchestrator: capture → collect → verify → render → compress
   capture/
     lib/vhs.mjs          tape builder: real-TUI tapes + stub replay
@@ -135,8 +141,7 @@ demo/
   page/index.html        local demo page the web picker operates on
   composition/           HyperFrames project (timeline, captions, animation)
   out/                   capture artifacts (gitignored)
-  pi-xfer-demo.mp4       final product (committed)
 ```
 
 Pacing, captions and shot order live in `composition/index.html` — edit one
-line, run `node demo/build.mjs --compose`, get a new cut.
+line, run `node promo/intro/build.mjs --compose`, get a new cut.

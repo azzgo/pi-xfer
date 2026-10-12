@@ -1,0 +1,26 @@
+# Every media and build product under promo/ is local-only. Directory names are
+# written without a slash so they match at any depth (a pattern like
+# `composition/assets/` would anchor here and miss `intro/composition/assets/`).
+out/
+renders/
+render/
+assets/
+node_modules/
+*.log
+
+# This repository tracks no binary media, stills included. Everything below is a
+# build output: MP4s are published on YouTube (see the Demo section of the
+# README), poster frames are regenerated alongside them, and the music bed is
+# synthesized on demand by intro/capture/lib/bgm.mjs.
+*.mp4
+*.webm
+*.mov
+*.mp3
+*.m4a
+*.aac
+*.wav
+*.flac
+*.png
+*.jpg
+*.jpeg
+*.gif

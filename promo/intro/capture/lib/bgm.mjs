@@ -3,7 +3,7 @@
  *
  * The demo ships no third-party audio: this writes the bed itself, so there is
  * no licence to attribute, no download step, and the file is byte-identical on
- * every machine. `demo/build.mjs` calls this when the track is missing.
+ * every machine. `promo/intro/build.mjs` calls this when the track is missing.
  *
  * What it makes: a slow, light pad in A minor with a sparse arpeggio over it —
  * Am – F – C – G, one chord every 6.4s — low-passed to stay soft and mixed low

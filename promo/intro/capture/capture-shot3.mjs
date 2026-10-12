@@ -11,9 +11,9 @@
  *   3. admin control buttons clicked for real: run gc, broker stop, broker start
  *   4. a real board card file is written (board watcher fires)
  *
- * Output: demo/out/shot3/admin.webm + admin.log / beta.log / alpha.log
+ * Output: ../out/shot3/admin.webm + admin.log / beta.log / alpha.log
  *
- * Usage: node demo/capture/capture-shot3.mjs
+ * Usage: node promo/intro/capture/capture-shot3.mjs
  * Requires: playwright (resolvable from PW_ROOT, default: this directory),
  *           `pi` on PATH, ffmpeg not required (Playwright writes webm directly).
  */
@@ -25,8 +25,11 @@ import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const OUT = path.join(REPO, "demo", "out", "shot3");
+/** This video's directory, and the repository root above it. */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const VIDEO = path.resolve(HERE, "..");
+const REPO = path.resolve(VIDEO, "../..");
+const OUT = path.join(VIDEO, "out", "shot3");
 const XFER_DIR = path.join(os.homedir(), ".pi", "xfer");
 const BOARD_DIR = path.join(XFER_DIR, "board");
 const ADMIN_MAIN = path.join(REPO, "admin-main.ts");

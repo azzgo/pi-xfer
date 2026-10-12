@@ -1,0 +1,12 @@
+# Archify tool receipts: machine-specific run output. Nothing links to them,
+# they embed absolute paths (home directory, toolchain install prefixes), and
+# they are regenerated on the next diagram build. What we track is the diagram
+# source (.archify/*/candidate.json) and the rendered .html/.svg.
+*.finalize.json
+*.finalize-summary.json
+*.delivery.json
+*.browser-check.json
+*.visual-check.json
+
+# Scratch renders the archify tool produces while checking a diagram.
+.archify/**/visual-check/

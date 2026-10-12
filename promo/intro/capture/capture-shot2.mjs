@@ -15,7 +15,7 @@
 // is then built so that nothing it prints can appear before the submit — the
 // shot reads left-to-right as cause then effect.
 //
-// Outputs: demo/out/shot2/{page.webm, terminal.mp4, timing.json, logs/}
+// Outputs: ../out/shot2/{page.webm, terminal.mp4, timing.json, logs/}
 
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -25,9 +25,12 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { buildTape, inboundHighlights, runVhs, writeStub } from "./lib/vhs.mjs";
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const PAGE_DIR = path.join(REPO, "demo/page");
-const OUT = path.join(REPO, "demo/out/shot2");
+/** This video's directory, and the repository root above it. */
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const VIDEO = path.resolve(HERE, "..");
+const REPO = path.resolve(VIDEO, "../..");
+const PAGE_DIR = path.join(VIDEO, "page");
+const OUT = path.join(VIDEO, "out", "shot2");
 const LOGS = path.join(OUT, "logs");
 const USERSCRIPT = fs.readFileSync(path.join(REPO, "web-picker.user.js"), "utf8");
 const TARGET_NAME = "pickerdemo";
@@ -248,7 +251,7 @@ await waitFor(() => fs.readFileSync(brokerLogPath, "utf8").includes("[xfer] deli
     // 5. Terminal visual: replay the REAL broker + peer log lines via VHS,
     //    on a clock aligned to the browser video's submit event.
     await renderTerminalTape(timing);
-    console.log(`[shot2] done in ${since() / 1000}s → demo/out/shot2/`);
+    console.log(`[shot2] done in ${since() / 1000}s → out/shot2/`);
   } catch (err) {
     console.error("[shot2] FAILED:", err);
     cleanup();

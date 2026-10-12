@@ -1,10 +1,14 @@
 /**
- * build.mjs — one-command demo build: capture everything, render, compress.
+ * build.mjs — build the "Intro: pi-xfer" cut: capture, render, compress.
  *
  *   node build.mjs            full pipeline (real captures + render)
- *   node build.mjs --compose  reuse existing demo/out captures, render only
+ *   node build.mjs --compose  reuse existing out/ captures, render only
  *
- * Output: demo/pi-xfer-demo.mp4 (GitHub-friendly, <10MB target)
+ * Products, both local and gitignored:
+ *   pi-xfer-intro.mp4         the cut (published on YouTube)
+ *   pi-xfer-intro-poster.png a frame of it, for the README
+ *
+ * Only the sources under this directory are tracked.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -12,12 +16,16 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBgm } from "./capture/lib/bgm.mjs";
 
-const DEMO = path.dirname(fileURLToPath(import.meta.url));
-const CAPTURE = path.join(DEMO, "capture");
-const OUT = path.join(DEMO, "out");
-const COMP = path.join(DEMO, "composition");
+/** Slug of this cut; it names the two build products below. */
+const SLUG = "pi-xfer-intro";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const CAPTURE = path.join(HERE, "capture");
+const OUT = path.join(HERE, "out");
+const COMP = path.join(HERE, "composition");
 const ASSETS = path.join(COMP, "assets");
-const FINAL = path.join(DEMO, "pi-xfer-demo.mp4");
+const FINAL = path.join(HERE, `${SLUG}.mp4`);
+const POSTER = path.join(HERE, `${SLUG}-poster.png`);
 /** Composition length; the music bed is rendered to match it. */
 const DURATION_SECONDS = 76;
 
@@ -65,7 +73,7 @@ function collect() {
   /* No third-party audio ships in this repo: the bed is synthesized on demand,
    * so a fresh clone can build without any download step. */
   if (ensureBgm(path.join(ASSETS, "bgm.m4a"), DURATION_SECONDS)) {
-    console.log("bgm: synthesized demo/capture/lib/bgm.mjs (public domain, this repo)");
+    console.log("bgm: synthesized capture/lib/bgm.mjs (public domain, this repo)");
   }
   const missing = [];
   for (const [from, to] of MOVE_MAP) {
@@ -137,8 +145,15 @@ function main() {
     "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name",
     "-of", "csv=p=0", FINAL,
   ], { encoding: "utf8" }).trim();
+  /* The poster frame is a local convenience for the README, not a tracked
+   * artifact; the cut itself lives on YouTube. */
+  sh("ffmpeg", ["-y", "-v", "error", "-ss", "5", "-i", FINAL,
+    "-vf", "scale=854:-2:flags=lanczos", "-compression_level", "100",
+    "-frames:v", "1", POSTER]);
+
   const mb = fs.statSync(FINAL).size / 1024 / 1024;
   console.log(`done: ${FINAL} (${mb.toFixed(2)} MB, audio: ${audio || "none"})`);
+  console.log(`poster: ${POSTER}`);
 }
 
 main();

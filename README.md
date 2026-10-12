@@ -7,15 +7,16 @@ Structured markdown handoff between [pi](https://github.com/nicobailon/pi) codin
 
 ## Demo
 
-~76s of two real pi sessions exchanging handoffs (the footage is fully scripted and automated — see [`demo/`](demo/README.md)).
+**Chat Logs Are Not a Handoff — pi-xfer Sends Documents**
 
-[![pi-xfer demo](demo/pi-xfer-demo-poster.png)](https://youtu.be/0mm2CirJMUo)
+~76s of two real pi sessions exchanging handoffs.
 
-> **Watch on YouTube →** https://youtu.be/0mm2CirJMUo
->
-> The video itself is not tracked in this repository — it is a local build
-> product, and this repository keeps no binary media. Rebuild it with
-> `node demo/build.mjs`; the poster above links to the published cut.
+**[▶ Watch on YouTube →](https://youtu.be/0mm2CirJMUo)**
+
+> The video is not tracked here — it is a local build product, and this
+> repository keeps no binary media. It is produced end-to-end by
+> [`promo/intro/`](promo/intro/) (real sessions, real deliveries, every frame
+> scripted); rebuild it with `node promo/intro/build.mjs`.
 
 ## Quickstart
 
