@@ -1,5 +1,8 @@
 # pi-xfer
 
+[![npm version](https://img.shields.io/npm/v/pi-xfer.svg?style=flat-square)](https://www.npmjs.com/package/pi-xfer)
+[![license](https://img.shields.io/npm/l/pi-xfer.svg?style=flat-square)](./LICENSE)
+
 Cross-context handoff for [pi](https://github.com/nicobailon/pi) coding agents — from `📨 [Xfer from **peer**]` messages to structured handoff documents. Agents exchange markdown handoffs (Context / Problem / Requirements / Return address), not chat fragments.
 
 ## Quickstart
@@ -59,6 +62,11 @@ npm install
 npm test
 npm run build
 ```
+
+## Acknowledgements
+
+- Design inspiration: [the video that started it](https://www.youtube.com/watch?v=PIdETjcXNIk)
+- First version based on [disler/pi-vs-claude-code](https://github.com/disler/pi-vs-claude-code)
 
 ## License
 
