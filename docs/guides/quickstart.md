@@ -16,40 +16,43 @@ Then start (or restart) pi so the extension loads.
 
 ## Your first handoff (30 seconds)
 
-You need **two pi sessions running on the same machine** — open a second terminal and run `pi` in each.
+Open **two terminals in any project directory** and start two named pi sessions:
 
-**1. Find each session's xfer name.** In each session, type:
-
-```
-/xfer name
-```
-
-Each session has an xfer name (shown in the output, and copied to your clipboard). Call them `alpha` and `beta` — you can rename with `/xfer name <new-name>` if you like.
-
-**2. Confirm they can see each other.** In `alpha`:
-
-```
-/xfer list
+```bash
+pi --xfer alpha   # terminal 1 — the sender
+pi --xfer beta    # terminal 2 — the receiver
 ```
 
-You should see `beta` (and every other running session) listed. If not, check both sessions are running and retry after a few seconds.
+`--xfer` sets the session's **xfer name** — how other sessions address it. Without it, a name is derived automatically: the `name` in `.pi/settings.json` if set, otherwise `<dirname>_<random>` (see `deriveName` in the source). Naming explicitly keeps this guide unambiguous.
 
-**3. Send a handoff.** In `alpha`, just ask the agent in plain language:
+```mermaid
+flowchart LR
+    A["pi session alpha"] -->|"asks agent to send a handoff"| S["peer socket<br/>~/.pi/xfer/beta.sock"]
+    S -->|"📨 one-way delivery"| B["pi session beta"]
+```
+
+### Terminal 1 — `alpha` sends
+
+You never run a send command yourself; you ask the agent in plain language:
 
 > Send a handoff to beta asking it to review the error handling in src/server.ts.
 
-The agent composes a structured document (Context / Problem / Requirements / Return address) and delivers it one-way — `alpha` does not wait for a reply.
+The agent composes a structured markdown document (Context / Problem / Requirements / Return address) and delivers it to `beta` over the local peer socket — one-way, no waiting for a reply.
 
-**4. Read it in `beta`.** The handoff arrives in `beta` as a message:
+To confirm `beta` is reachable first, run `/xfer list` — it shows every running session on this machine.
+
+### Terminal 2 — `beta` receives
+
+The handoff arrives as a message in `beta`'s conversation:
 
 ```
 📨 [Xfer from **alpha**]
 
-**Request**: ...
+**Request**: Review the error handling in src/server.ts
 **Doc**: /var/folders/.../pi-xfer-....md
 ```
 
-Read the doc, do the work, and reply the same way — in `beta`, ask the agent to `/xfer` a handoff back to `alpha`.
+Ask `beta` to read the doc and do the work — then reply the same way: *"Send alpha a handoff with your findings."*
 
 That's the whole loop: one-way, structured markdown handoffs between peers.
 
