@@ -13,11 +13,6 @@ Structured markdown handoff between [pi](https://github.com/nicobailon/pi) codin
 
 **[▶ Watch on YouTube →](https://youtu.be/0mm2CirJMUo)**
 
-> The video is not tracked here — it is a local build product, and this
-> repository keeps no binary media. It is produced end-to-end by
-> [`promo/intro/`](promo/intro/) (real sessions, real deliveries, every frame
-> scripted); rebuild it with `node promo/intro/build.mjs`.
-
 ## Quickstart
 
 ```bash
