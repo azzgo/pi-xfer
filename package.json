@@ -39,6 +39,8 @@
     "admin.cjs.sha256",
     "mesh-runtime.cjs",
     "mesh-runtime.cjs.sha256",
+    "xfer-adapterd.cjs",
+    "xfer-adapterd.cjs.sha256",
     "web-picker.user.js",
     "CONTEXT.md",
     "README.md",

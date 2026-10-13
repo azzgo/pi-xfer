@@ -220,8 +220,8 @@ function decodeAgentName(name) {
     return name;
   }
 }
-function endpointForName(name) {
-  return path3.join(XFER_DIR, `${encodeAgentName(name)}.sock`);
+function endpointForName(name, xferDir = XFER_DIR) {
+  return path3.join(xferDir, `${encodeAgentName(name)}.sock`);
 }
 function isEntryPoint(names) {
   const invoked = process.argv[1];

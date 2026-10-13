@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { buildAdminDaemon, buildBrokerDaemon, buildMeshRuntime, buildWebPicker } from "./build.mjs";
+import { buildAdapterd, buildAdminDaemon, buildBrokerDaemon, buildMeshRuntime, buildWebPicker } from "./build.mjs";
 
 /**
  * freshness guard: rebuilds every committed artifact to temp files and
@@ -19,6 +19,20 @@ describe("committed artifact freshness", () => {
         fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "mesh-runtime.cjs"))),
         true,
         "mesh-runtime.cjs is stale — run `npm run build` and commit both the bundle and its .sha256",
+      );
+    } finally {
+      fs.rmSync(rebuilt, { force: true });
+      fs.rmSync(`${rebuilt}.sha256`, { force: true });
+    }
+  });
+  it("xfer-adapterd.cjs rebuilds byte-identical from adapterd.src/", async () => {
+    const rebuilt = path.join(import.meta.dirname, "xfer-adapterd.cjs.fresh.test.tmp");
+    try {
+      await buildAdapterd(rebuilt);
+      assert.equal(
+        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "xfer-adapterd.cjs"))),
+        true,
+        "xfer-adapterd.cjs is stale — run `npm run build` and commit both the bundle and its .sha256",
       );
     } finally {
       fs.rmSync(rebuilt, { force: true });

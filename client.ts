@@ -10,9 +10,9 @@ export interface XferOutboundMessage {
 }
 
 /** Connect to target socket, send, wait matching ack, close. */
-export function sendNotify(target: string, msg: XferOutboundMessage): Promise<void> {
+export function sendNotify(target: string, msg: XferOutboundMessage, xferDir?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const endpoint = endpointForName(target);
+    const endpoint = endpointForName(target, xferDir);
     if (!fs.existsSync(endpoint)) {
       reject(new Error(`peer "${target}" not found`));
       return;

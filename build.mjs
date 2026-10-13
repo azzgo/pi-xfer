@@ -72,17 +72,20 @@ globalThis.__meshLoadEngineCli = async () => {
 };
 `;
 
-/** Rebuild mesh-runtime.cjs (or any outfile) exactly as `npm run build` does. */
-export async function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs')) {
+/**
+ * Install + pin-verify rivetkit and its floating transitives for a bundle build.
+ *
+ * rivetkit is not a runtime dep (downloaded on first `mesh up`). Its floating
+ * transitives (zod ^4.1.0, p-retry ^6.2.1) silently change the bundle — new
+ * exports, version stamps, even hoisting layout — so they are pinned at top
+ * level too. npm prunes previously --no-save packages on every install, so all
+ * specs always go into a single install call.
+ */
+function ensureRivetkitDeps() {
   const versionPin = readFileSync(join(here, 'mesh-native.ts'), 'utf8')
     .match(/RIVETKIT_VERSION = "([^"]+)"/)?.[1];
   if (!versionPin) throw new Error('cannot read RIVETKIT_VERSION from mesh-native.ts');
 
-  // rivetkit is not a runtime dep (downloaded on first `mesh up`). Its
-  // floating transitives (zod ^4.1.0, p-retry ^6.2.1) silently change the
-  // bundle — new exports, version stamps, even hoisting layout — so they are
-  // pinned at top level too. npm prunes previously --no-save packages on every
-  // install, so all specs always go into a single install call.
   const pins = { rivetkit: versionPin, zod: '4.6.5', 'p-retry': '6.2.1' };
   const pkgVersion = (name) => {
     const pkg = join(here, `node_modules/${name}/package.json`);
@@ -98,8 +101,13 @@ export async function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs'))
     const version = pkgVersion(name);
     if (version !== pin) throw new Error(`${name} ${version} in node_modules != pinned ${pin} — align before building`);
   }
+}
+
+/** esbuild a rivetkit-bearing CJS bundle (mesh runtime / adapter daemon). */
+async function buildRivetBundle(entry, outfile) {
+  ensureRivetkitDeps();
   await build({
-    entryPoints: [join(here, 'mesh-runtime.src/index.ts')],
+    entryPoints: [join(here, entry)],
     bundle: true,
     platform: 'node',
     format: 'cjs',
@@ -114,6 +122,16 @@ export async function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs'))
   });
   const bundle = readFileSync(outfile);
   writeFileSync(`${outfile}.sha256`, `${createHash('sha256').update(bundle).digest('hex')}\n`);
+}
+
+/** Rebuild mesh-runtime.cjs (or any outfile) exactly as `npm run build` does. */
+export function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs')) {
+  return buildRivetBundle('mesh-runtime.src/index.ts', outfile);
+}
+
+/** Rebuild xfer-adapterd.cjs (or any outfile) from adapterd.src/main.ts. */
+export function buildAdapterd(outfile = join(here, 'xfer-adapterd.cjs')) {
+  return buildRivetBundle('adapterd.src/main.ts', outfile);
 }
 
 /** Rebuild web-picker.user.js (or any outfile) exactly as `npm run build` does. */
@@ -187,9 +205,10 @@ export function buildAdminDaemon(outfile = join(here, 'admin.cjs')) {
 async function main() {
   await buildWebPicker();
   await buildMeshRuntime();
+  await buildAdapterd();
   await buildBrokerDaemon();
   await buildAdminDaemon();
-  console.log('mesh-runtime.cjs, broker.cjs, admin.cjs built');
+  console.log('mesh-runtime.cjs, xfer-adapterd.cjs, broker.cjs, admin.cjs built');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === (isAbsolute(process.argv[1]) ? process.argv[1] : join(process.cwd(), process.argv[1]))) {

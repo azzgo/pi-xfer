@@ -22,12 +22,12 @@ export function decodeAgentName(name: string): string {
   }
 }
 
-export function endpointForName(name: string): string {
-  return path.join(XFER_DIR, `${encodeAgentName(name)}.sock`);
+export function endpointForName(name: string, xferDir: string = XFER_DIR): string {
+  return path.join(xferDir, `${encodeAgentName(name)}.sock`);
 }
 
-export function metadataForName(name: string): string {
-  return path.join(XFER_DIR, `${encodeAgentName(name)}.json`);
+export function metadataForName(name: string, xferDir: string = XFER_DIR): string {
+  return path.join(xferDir, `${encodeAgentName(name)}.json`);
 }
 
 export function displayPath(value: string | undefined): string | undefined {
