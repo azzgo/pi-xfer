@@ -48261,6 +48261,12 @@ function parseMeshConfig(raw) {
   const config3 = { endpoint: obj.endpoint.trim() };
   if (typeof obj.namespace === "string" && obj.namespace !== "") config3.namespace = obj.namespace;
   if (typeof obj.token === "string" && obj.token !== "") config3.token = obj.token;
+  if (obj.pool !== void 0) {
+    if (typeof obj.pool !== "string" || obj.pool.trim() === "") {
+      throw new Error('mesh config "pool" must be a non-empty string');
+    }
+    config3.pool = obj.pool.trim();
+  }
   return withUrlAuth(config3);
 }
 function withUrlAuth(config3) {
@@ -48282,7 +48288,7 @@ function loadMeshConfig(configPath) {
   try {
     text = fs.readFileSync(configPath, "utf-8");
   } catch {
-    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token? })`);
+    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
   }
   let raw;
   try {
@@ -48535,14 +48541,14 @@ function deriveActorStatus(actor2) {
   return "Pending";
 }
 var QUEUE_SEND_TIMEOUT_MS = 3e4;
-function createRivetEngine(config3, onHandoff) {
+function createRivetEngine(config3, onHandoff, deps = {}) {
   let registry2 = null;
   let client = null;
   let selfHandle = null;
   const engine = {
     async ensureNode(name) {
-      await ensureNativeRuntimeReady();
-      const { actor: actor2, queue: queue2, setup: setup2 } = await Promise.resolve().then(() => (init_mod2(), mod_exports));
+      await (deps.ensureRuntimeReady ?? ensureNativeRuntimeReady)();
+      const { actor: actor2, queue: queue2, setup: setup2 } = await (deps.importRivetkit ?? (() => Promise.resolve().then(() => (init_mod2(), mod_exports))))();
       const xferInstance = actor2({
         // Written through the state proxy, so the note lives with the actor on
         // the engine: it survives node restart/reconnect and stays readable
@@ -48567,14 +48573,15 @@ function createRivetEngine(config3, onHandoff) {
         endpoint: config3.endpoint,
         namespace: config3.namespace,
         token: config3.token,
-        runtime: "native"
+        runtime: "native",
+        ...config3.pool ? { envoy: { poolName: config3.pool } } : {}
       });
       const regAny = reg;
       await regAny.startAndWait();
       registry2 = regAny;
-      const { createClient: createClient2 } = await Promise.resolve().then(() => (init_mod3(), mod_exports2));
+      const { createClient: createClient2 } = await (deps.importClient ?? (() => Promise.resolve().then(() => (init_mod3(), mod_exports2))))();
       client = createClient2({ endpoint: config3.endpoint, namespace: config3.namespace, token: config3.token });
-      selfHandle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      selfHandle = config3.pool ? client.getOrCreate(XFER_INSTANCE_ACTOR, [name], { poolName: config3.pool }) : client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
       await selfHandle.resolve();
     },
     async stop() {

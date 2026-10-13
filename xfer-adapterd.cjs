@@ -86,6 +86,12 @@ function parseMeshConfig(raw) {
   const config3 = { endpoint: obj.endpoint.trim() };
   if (typeof obj.namespace === "string" && obj.namespace !== "") config3.namespace = obj.namespace;
   if (typeof obj.token === "string" && obj.token !== "") config3.token = obj.token;
+  if (obj.pool !== void 0) {
+    if (typeof obj.pool !== "string" || obj.pool.trim() === "") {
+      throw new Error('mesh config "pool" must be a non-empty string');
+    }
+    config3.pool = obj.pool.trim();
+  }
   return withUrlAuth(config3);
 }
 function withUrlAuth(config3) {
@@ -107,7 +113,7 @@ function loadMeshConfig(configPath) {
   try {
     text = fs2.readFileSync(configPath, "utf-8");
   } catch {
-    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token? })`);
+    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
   }
   let raw;
   try {
@@ -48542,14 +48548,14 @@ function deriveActorStatus(actor2) {
   if (actor2.connectable_ts !== void 0 && actor2.connectable_ts !== null) return "Running";
   return "Pending";
 }
-function createRivetEngine(config3, onHandoff) {
+function createRivetEngine(config3, onHandoff, deps = {}) {
   let registry2 = null;
   let client = null;
   let selfHandle = null;
   const engine = {
     async ensureNode(name) {
-      await ensureNativeRuntimeReady();
-      const { actor: actor2, queue: queue2, setup: setup2 } = await Promise.resolve().then(() => (init_mod2(), mod_exports));
+      await (deps.ensureRuntimeReady ?? ensureNativeRuntimeReady)();
+      const { actor: actor2, queue: queue2, setup: setup2 } = await (deps.importRivetkit ?? (() => Promise.resolve().then(() => (init_mod2(), mod_exports))))();
       const xferInstance = actor2({
         // Written through the state proxy, so the note lives with the actor on
         // the engine: it survives node restart/reconnect and stays readable
@@ -48574,14 +48580,15 @@ function createRivetEngine(config3, onHandoff) {
         endpoint: config3.endpoint,
         namespace: config3.namespace,
         token: config3.token,
-        runtime: "native"
+        runtime: "native",
+        ...config3.pool ? { envoy: { poolName: config3.pool } } : {}
       });
       const regAny = reg;
       await regAny.startAndWait();
       registry2 = regAny;
-      const { createClient: createClient2 } = await Promise.resolve().then(() => (init_mod3(), mod_exports2));
+      const { createClient: createClient2 } = await (deps.importClient ?? (() => Promise.resolve().then(() => (init_mod3(), mod_exports2))))();
       client = createClient2({ endpoint: config3.endpoint, namespace: config3.namespace, token: config3.token });
-      selfHandle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      selfHandle = config3.pool ? client.getOrCreate(XFER_INSTANCE_ACTOR, [name], { poolName: config3.pool }) : client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
       await selfHandle.resolve();
     },
     async stop() {
@@ -49393,7 +49400,7 @@ async function runUp(argv, flags) {
     const configPath = str(flags["mesh-config"]) ?? MESH_CONFIG_PATH;
     const engine = str(flags.engine);
     try {
-      const config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token) }) : loadMeshConfig(configPath);
+      const config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) }) : loadMeshConfig(configPath);
       mesh = { configPath, config: config3 };
     } catch (err) {
       fail(`❌ --mesh requested but mesh is not configured — ${errorText2(err)}`);
@@ -49476,7 +49483,7 @@ async function runMeshSend(argv, flags) {
   const engine = str(flags.engine);
   let config3;
   try {
-    config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token) }) : loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH);
+    config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) }) : loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH);
   } catch (err) {
     fail(`❌ mesh is not configured — ${errorText2(err)}`);
     return;

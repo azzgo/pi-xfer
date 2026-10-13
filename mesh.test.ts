@@ -4,15 +4,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js";
-import { parseMeshConfig, serializeMeshKey, deserializeMeshKey } from "./mesh-config.js";
+import { parseMeshConfig, serializeMeshKey, deserializeMeshKey, XFER_INSTANCE_ACTOR } from "./mesh-config.js";
 import {
   applyDescriptionAction,
+  createRivetEngine,
   deriveActorStatus,
   normalizeNodeDescription,
   readDescriptionAction,
   type MeshEngine,
   type MeshHandoffMessage,
   type MeshNodeInfo,
+  type RivetEngineDeps,
   type XferInstanceState,
 } from "./mesh-engine.js";
 import type { XferNotifyMessage } from "./types.js";
@@ -100,11 +102,107 @@ describe("mesh config", () => {
     assert.throws(() => parseMeshConfig({ endpoint: "  " }), /endpoint/);
   });
 
+  it("passes a non-empty pool through, trimmed", () => {
+    const config = parseMeshConfig({ endpoint: "http://localhost:6420", pool: "  host-a  " });
+    assert.equal(config.pool, "host-a");
+    assert.deepEqual(config, { endpoint: "http://localhost:6420", pool: "host-a" });
+  });
+
+  it("rejects an empty or non-string pool", () => {
+    assert.throws(() => parseMeshConfig({ endpoint: "http://localhost:6420", pool: "" }), /"pool" must be a non-empty string/);
+    assert.throws(() => parseMeshConfig({ endpoint: "http://localhost:6420", pool: "   " }), /"pool" must be a non-empty string/);
+    assert.throws(() => parseMeshConfig({ endpoint: "http://localhost:6420", pool: 42 }), /"pool" must be a non-empty string/);
+  });
+
+  it("omits pool entirely when absent (backward-compatible parse)", () => {
+    const config = parseMeshConfig({ endpoint: "http://localhost:6420" });
+    assert.equal("pool" in config, false);
+  });
+
   it("round-trips actor keys", () => {
     assert.equal(serializeMeshKey(["web"]), "web");
     assert.deepEqual(deserializeMeshKey("web"), ["web"]);
     assert.deepEqual(deserializeMeshKey("/"), []);
     assert.deepEqual(deserializeMeshKey(serializeMeshKey(["a/b", "c\\d"])), ["a/b", "c\\d"]);
+  });
+});
+
+describe("rivet engine pool wiring", () => {
+  interface Recorded {
+    runtimeReady: number;
+    started: number;
+    stopped: number;
+    resolved: number;
+    setup?: Record<string, unknown>;
+    clientConfig?: Record<string, unknown>;
+    getOrCreate: unknown[][];
+    gets: unknown[][];
+  }
+  const fresh = (): Recorded => ({ runtimeReady: 0, started: 0, stopped: 0, resolved: 0, getOrCreate: [], gets: [] });
+
+  function fakeDeps(record: Recorded): RivetEngineDeps {
+    return {
+      ensureRuntimeReady: async () => { record.runtimeReady += 1; },
+      importRivetkit: async () => ({
+        actor: (definition: unknown) => ({ definition }),
+        queue: () => ({}),
+        setup: (config: Record<string, unknown>) => {
+          record.setup = config;
+          return {
+            startAndWait: async () => { record.started += 1; },
+            shutdown: async () => { record.stopped += 1; },
+          };
+        },
+      }),
+      importClient: async () => ({
+        createClient: (config: Record<string, unknown>) => {
+          record.clientConfig = config;
+          return {
+            getOrCreate: (...args: unknown[]) => {
+              record.getOrCreate.push(args);
+              return { resolve: async () => { record.resolved += 1; } };
+            },
+            get: (...args: unknown[]) => {
+              record.gets.push(args);
+              return { send: async () => {}, action: async () => "" };
+            },
+          };
+        },
+      }),
+    };
+  }
+
+  const handoff: MeshHandoffMessage = { id: "1", from: "web", to: "phone", summary: "s", document: "d" };
+
+  it("pins setup's envoy and the self-actor create to the configured pool", async () => {
+    const record = fresh();
+    const engine = createRivetEngine({ endpoint: "http://localhost:6420", pool: "host-a" }, () => {}, fakeDeps(record));
+    await engine.ensureNode("web");
+    assert.equal(record.runtimeReady, 1);
+    assert.deepEqual(record.setup?.envoy, { poolName: "host-a" });
+    assert.deepEqual(record.getOrCreate, [[XFER_INSTANCE_ACTOR, ["web"], { poolName: "host-a" }]]);
+    assert.equal(record.resolved, 1);
+    assert.equal(record.started, 1);
+  });
+
+  it("omits every pool field when no pool is configured (backward-compatible call shape)", async () => {
+    const record = fresh();
+    const engine = createRivetEngine({ endpoint: "http://localhost:6420" }, () => {}, fakeDeps(record));
+    await engine.ensureNode("web");
+    assert.equal("envoy" in (record.setup ?? {}), false, "setup carries no envoy block");
+    assert.deepEqual(record.getOrCreate, [[XFER_INSTANCE_ACTOR, ["web"]]], "getOrCreate takes name + key only");
+  });
+
+  it("keeps queueSend and describe un-pooled so remote pools stay addressable", async () => {
+    const record = fresh();
+    const engine = createRivetEngine({ endpoint: "http://localhost:6420", pool: "host-a" }, () => {}, fakeDeps(record));
+    await engine.ensureNode("web");
+    await engine.queueSend("phone", handoff);
+    await engine.getDescription("phone");
+    assert.deepEqual(record.gets, [
+      [XFER_INSTANCE_ACTOR, ["phone"]],
+      [XFER_INSTANCE_ACTOR, ["phone"]],
+    ]);
   });
 });
 

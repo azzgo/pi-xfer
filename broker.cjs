@@ -243,6 +243,12 @@ function parseMeshConfig(raw) {
   const config = { endpoint: obj.endpoint.trim() };
   if (typeof obj.namespace === "string" && obj.namespace !== "") config.namespace = obj.namespace;
   if (typeof obj.token === "string" && obj.token !== "") config.token = obj.token;
+  if (obj.pool !== void 0) {
+    if (typeof obj.pool !== "string" || obj.pool.trim() === "") {
+      throw new Error('mesh config "pool" must be a non-empty string');
+    }
+    config.pool = obj.pool.trim();
+  }
   return withUrlAuth(config);
 }
 function withUrlAuth(config) {
@@ -264,7 +270,7 @@ function loadMeshConfig(configPath) {
   try {
     text = fs.readFileSync(configPath, "utf-8");
   } catch {
-    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token? })`);
+    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
   }
   let raw;
   try {

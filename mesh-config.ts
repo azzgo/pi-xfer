@@ -5,6 +5,12 @@ export interface MeshConfig {
   endpoint: string;
   namespace?: string;
   token?: string;
+  /**
+   * Envoy/runner pool this host's runners join (RivetKit `envoy.poolName`).
+   * Pins this Node's actor to its own host instead of the engine's shared
+   * `default` pool. Absent = today's behavior (default pool).
+   */
+  pool?: string;
 }
 
 /** Single actor type hosting one mesh node per pi instance. */
@@ -29,6 +35,12 @@ export function parseMeshConfig(raw: unknown): MeshConfig {
   const config: MeshConfig = { endpoint: obj.endpoint.trim() };
   if (typeof obj.namespace === "string" && obj.namespace !== "") config.namespace = obj.namespace;
   if (typeof obj.token === "string" && obj.token !== "") config.token = obj.token;
+  if (obj.pool !== undefined) {
+    if (typeof obj.pool !== "string" || obj.pool.trim() === "") {
+      throw new Error('mesh config "pool" must be a non-empty string');
+    }
+    config.pool = obj.pool.trim();
+  }
   return withUrlAuth(config);
 }
 
@@ -53,7 +65,7 @@ export function loadMeshConfig(configPath: string): MeshConfig {
   try {
     text = fs.readFileSync(configPath, "utf-8");
   } catch {
-    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token? })`);
+    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
   }
   let raw: unknown;
   try {

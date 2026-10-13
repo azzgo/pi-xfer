@@ -119,7 +119,7 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
     const engine = str(flags.engine);
     try {
       const config = engine
-        ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token) })
+        ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) })
         : loadMeshConfig(configPath);
       mesh = { configPath, config };
     } catch (err) {
@@ -206,7 +206,7 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   let config;
   try {
     config = engine
-      ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token) })
+      ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) })
       : loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH);
   } catch (err) {
     fail(`❌ mesh is not configured — ${errorText(err)}`);

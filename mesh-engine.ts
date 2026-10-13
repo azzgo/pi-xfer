@@ -106,15 +106,30 @@ export interface MeshEngine {
 /** Bound on queue enqueue so a stuck/unreachable target errors instead of hanging. */
 const QUEUE_SEND_TIMEOUT_MS = 30_000;
 
-export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshHandoffMessage, selfKey: string) => void): MeshEngine {
+/**
+ * Injection seam for the RivetKit runtime, so pool wiring is unit-testable
+ * without the native addon. Production callers omit it; the default thunks keep
+ * the literal dynamic imports esbuild bundles.
+ */
+export interface RivetEngineDeps {
+  ensureRuntimeReady?: () => Promise<void>;
+  importRivetkit?: () => Promise<any>;
+  importClient?: () => Promise<any>;
+}
+
+export function createRivetEngine(
+  config: MeshConfig,
+  onHandoff: (message: MeshHandoffMessage, selfKey: string) => void,
+  deps: RivetEngineDeps = {},
+): MeshEngine {
   let registry: { shutdown(): Promise<void> } | null = null;
   let client: any = null;
   let selfHandle: any = null;
 
   const engine: MeshEngine = {
     async ensureNode(name: string) {
-      await ensureNativeRuntimeReady();
-      const { actor, queue, setup } = await import("rivetkit");
+      await (deps.ensureRuntimeReady ?? ensureNativeRuntimeReady)();
+      const { actor, queue, setup } = await (deps.importRivetkit ?? (() => import("rivetkit")))();
       const xferInstance = actor({
         // Written through the state proxy, so the note lives with the actor on
         // the engine: it survives node restart/reconnect and stays readable
@@ -140,13 +155,18 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
         namespace: config.namespace,
         token: config.token,
         runtime: "native",
+        ...(config.pool ? { envoy: { poolName: config.pool } } : {}),
       });
       const regAny = reg as unknown as { startAndWait(): Promise<void>; shutdown(): Promise<void> };
       await regAny.startAndWait();
       registry = regAny;
-      const { createClient } = await import("rivetkit/client");
+      const { createClient } = await (deps.importClient ?? (() => import("rivetkit/client")))();
       client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
-      selfHandle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      // Pin only OUR actor's creation to our pool. `get`/list stay un-pooled so
+      // queueSend and describe still address actors living in other pools.
+      selfHandle = config.pool
+        ? client.getOrCreate(XFER_INSTANCE_ACTOR, [name], { poolName: config.pool })
+        : client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
       await selfHandle.resolve();
     },
 
