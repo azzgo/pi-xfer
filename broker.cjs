@@ -506,7 +506,13 @@ Sec-WebSocket-Accept: ${acceptKey(key)}\r
 }
 
 // broker-main.ts
-var VERSION = "0.1.0";
+var VERSION = (() => {
+  try {
+    return JSON.parse(fs2.readFileSync(path4.join(__dirname, "package.json"), "utf-8")).version ?? "?";
+  } catch {
+    return "?";
+  }
+})();
 var PROTOCOL_VERSION = WIRE_VERSION;
 var {
   KIND_HELLO: WIRE_HELLO,

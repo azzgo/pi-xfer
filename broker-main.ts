@@ -57,8 +57,14 @@ import { encodeAgentName, isEntryPoint } from "./utils.ts";
 import { attachWsServer, type WsConnection } from "./ws-server.ts";
 import { WIRE_VERSION } from "./wire.ts";
 
-/** Broker software version (welcome + /status + broker.json). */
-export const VERSION = "0.1.0";
+/** Broker software version (welcome + /status + broker.json), from package.json. */
+export const VERSION: string = (() => {
+  try {
+    return (JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "package.json"), "utf-8")) as { version?: string }).version ?? "?";
+  } catch {
+    return "?";
+  }
+})();
 /** Protocol revision spoken on the wire (v0, per the mock protocol oracle). */
 const PROTOCOL_VERSION = WIRE_VERSION;
 
