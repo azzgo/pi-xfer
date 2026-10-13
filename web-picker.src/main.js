@@ -80,6 +80,10 @@ if (!window.__PI_WEBPICKER__) {
     // auto-link：本 origin 授权过（手动连上过一次）就静默重连——覆盖 HMR 整页
     // 刷新、broker 重启两类断链；从未连接过的页面保持完全静默。
     conn.maybeAutoConnect();
+  // 未授权过的 origin 也做一次静默探测：像 npmjs 这种用 CSP connect-src 拦截本地
+  // broker 的站点，光看状态行要用户点一下才知道——这一次探测让 blocked 徽标立刻
+  // 出现，且该判定按 origin 记住（policyBlockedKey），此后不再重复探测。
+  conn.maybeProbePolicyBlocked();
     debugLog('ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · ' + location.host);
 
     // ---------- programmatic API (DevTools console) ----------

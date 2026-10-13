@@ -221,7 +221,9 @@ export function buildUI() {
       #sendbox .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); letter-spacing: .02em; }
       #sendbox textarea { background: #fff; }
       #sendbox .trow { display: flex; gap: 6px; align-items: center; }
-      #sendbox .srow { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+      /* wrap + min-width:0 keeps every state inside the panel: the status label
+         truncates first, the action buttons wrap to a second line if needed */
+      #sendbox .srow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
       /* ---- split send button group（发送 + ▾ 更多下拉）---- */
       #sendgroup { position: relative; display: flex; flex: none; }
       #sendgroup #sendbtn { border-radius: 8px 0 0 8px; }
@@ -236,12 +238,14 @@ export function buildUI() {
       #sendmenu .mitem:hover { background: #eaf1ff; }
       #sendmenu .msub { font: 400 10px/1.5 var(--wp-font); color: var(--wp-muted); margin-top: 1px; }
       /* no broker link → copy-prompt takes the send button's place */
-      #sendoffline { flex: none; }
+      #sendoffline { flex: 0 1 auto; min-width: 0; }
       #sendoffline[hidden] { display: none; }
       #connstate { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500;
-        color: var(--wp-muted); flex: 1; cursor: pointer; user-select: none; white-space: nowrap; }
+        color: var(--wp-muted); flex: 1 1 90px; min-width: 0; cursor: pointer; user-select: none;
+        white-space: nowrap; }
       #connstate .dot { flex: none; width: 9px; height: 9px; border-radius: 50%;
         background: #94a3b8; transition: background .2s ease, box-shadow .2s ease; }
+      #conntext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
       #connstate.connecting .dot { background: var(--wp-amber); }
       /* CSP-blocked: not "broker down" — retrying cannot succeed on this page */
       #dot.blocked { background: #ef4444; }

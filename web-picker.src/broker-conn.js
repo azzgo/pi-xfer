@@ -38,6 +38,10 @@ export const DEFAULT_PROMPT = '请逐条回应本页标注：note 写了要求�
 
 export function autoLinkKey(origin) { return 'wp.autoLink.' + origin; }
 
+// CSP verdict remembered per origin: re-probing a page whose policy blocks the
+// socket can only fail, so once we know it we stop trying (and stop nagging).
+export function policyBlockedKey(origin) { return 'wp.policyBlocked.' + origin; }
+
 export function createBrokerConn(deps) {
   const gm = deps.gm;
   const debugLog = deps.debugLog || (() => {});
@@ -47,6 +51,7 @@ export function createBrokerConn(deps) {
   let ws = null;
   let wsState = 'off';                 // off | connecting | on | blocked
   let policyWarned = false;            // blocked toast already shown this page load
+  let probing = false;                 // one-shot silent probe (see maybeProbePolicyBlocked)
   let connectSettle = null;            // 在途 connect 的结算回调（welcome→true / 失败→false）
   let connectingUrl = '';              // 本次尝试的 ws URL，CSP 归因用
   const pending = new Map();           // request id → { kind:'submit'|'compose'|'targets', resolve }
@@ -108,10 +113,13 @@ export function createBrokerConn(deps) {
     if (wsState === 'on' || !connectingUrl || !matchesBroker(ev, connectingUrl)) return;
     debugLog('CSP blocked the broker connection:', ev.violatedDirective, ev.blockedURI);
     settleConnect(false);
-    silent = false;                     // a blocked link is terminal, never silent
     clearBackoff();                     // retrying cannot succeed on this page
+    gm.set(policyBlockedKey(location.origin), true);
     setState('blocked');
-    if (!policyWarned) { policyWarned = true; toast(t('toast.policyBlocked')); }
+    // The first blocked verdict of an origin explains itself; the silent probe
+    // path stays quiet — the red badge is the message on every later load.
+    if (!silent && !policyWarned) { policyWarned = true; toast(t('toast.policyBlocked')); }
+    silent = false;
   }
 
   // Settle the in-flight connect promise exactly once (welcome → true,
@@ -182,6 +190,7 @@ export function createBrokerConn(deps) {
         // 首次手动连接成功 = 用户已在本 origin 授权自动 link；此后 reload/HMR
         // 整页刷新都会静默自动重连（撤销走设置弹窗 / GM 菜单）。
         if (!silent) gm.set(autoLinkKey(location.origin), true);
+        gm.set(policyBlockedKey(location.origin), false);   // reachable again — forget the verdict
         clearBackoff();
         const wasSilent = silent; silent = false;
         if (!wasSilent) toast(t('conn.on'));
@@ -280,6 +289,25 @@ export function createBrokerConn(deps) {
     return true;
   }
 
+  /**
+   * One silent probe for origins that were never linked. The policy block is
+   * detectable without user action — before this, the badge only appeared after
+   * the user clicked connect. No backoff, no toast: a plain failure leaves the
+   * page exactly as it was, and a remembered block skips the socket entirely.
+   */
+  function maybeProbePolicyBlocked() {
+    if (probing || wsState !== 'off' || manualDown) return false;
+    if (autoLinkAllowed()) return false;          // auto-link owns this origin
+    if (gm.get(policyBlockedKey(location.origin), false) === true) {
+      setState('blocked');                         // known-dead policy: no network at all
+      return true;
+    }
+    probing = true;
+    silent = true;
+    connect();
+    return true;
+  }
+
   function revokeAutoLink() {
     gm.set(autoLinkKey(location.origin), false);
   }
@@ -354,6 +382,7 @@ export function createBrokerConn(deps) {
     autoLinkAllowed,
     revokeAutoLink,
     maybeAutoConnect,
+    maybeProbePolicyBlocked,
     submitToAgent,
     requestCompose,
     requestTargets,

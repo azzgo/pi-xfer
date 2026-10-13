@@ -4,7 +4,7 @@
 // created is what makes the userscript connection layer testable at all.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createBrokerConn, autoLinkKey } from './web-picker.src/broker-conn.js';
+import { createBrokerConn, autoLinkKey, policyBlockedKey } from './web-picker.src/broker-conn.js';
 
 // ---- node-env stubs (module expects browser globals) ----
 
@@ -189,4 +189,66 @@ test('a manual connect after a block retries and can succeed', async () => {
   lastSock().message({ type: 'welcome' });
   assert.equal(await retry, true);
   assert.equal(conn.getState(), 'on');
+});
+
+// ---- one-shot silent probe: blocked state without a click ----
+
+test('probe on an unlinked origin opens exactly one silent socket', async () => {
+  const { conn, calls } = makeConn();
+  assert.equal(conn.maybeProbePolicyBlocked(), true);
+  assert.equal(FakeWebSocket.instances.length, 1);
+  // Plain failure (broker simply down) stays invisible: no toast, no backoff.
+  lastSock().error();
+  lastSock().drop();
+  assert.equal(conn.getState(), 'off');
+  assert.deepEqual(calls.toasts, []);
+  await new Promise((r) => setTimeout(r, 1100));
+  assert.equal(FakeWebSocket.instances.length, 1, 'no backoff for an unauthorized origin');
+});
+
+test('probe surfaces a policy block quietly and remembers it for the origin', async () => {
+  const { conn, calls } = makeConn();
+  conn.maybeProbePolicyBlocked();
+  lastSock().error();
+  document.violation({ violatedDirective: 'connect-src', blockedURI: 'ws://127.0.0.1:4719/ws' });
+  assert.equal(conn.getState(), 'blocked');
+  assert.deepEqual(calls.toasts, [], 'the silent probe does not nag');
+  assert.equal(gmStore.get(policyBlockedKey('https://app.example')), true);
+});
+
+test('a remembered block is restored with no socket at all', () => {
+  gmStore.set(policyBlockedKey('https://app.example'), true);
+  const { conn, calls } = makeConn();
+  assert.equal(conn.maybeProbePolicyBlocked(), true);
+  assert.equal(conn.getState(), 'blocked');
+  assert.equal(FakeWebSocket.instances.length, 0);
+  assert.deepEqual(calls.toasts, []);
+});
+
+test('auto-linked origins are left to auto-link (probe is a no-op)', () => {
+  gmStore.set(ORIGIN_KEY, true);
+  const { conn } = makeConn();
+  conn.maybeAutoConnect();
+  assert.equal(conn.maybeProbePolicyBlocked(), false);
+  assert.equal(FakeWebSocket.instances.length, 1, 'only the auto-link attempt');
+});
+
+test('a successful manual connect clears a remembered block', async () => {
+  gmStore.set(policyBlockedKey('https://app.example'), true);
+  const { conn } = makeConn();
+  const attempt = conn.connect();
+  lastSock().open();
+  lastSock().message({ type: 'welcome' });
+  assert.equal(await attempt, true);
+  assert.equal(gmStore.get(policyBlockedKey('https://app.example')), false);
+});
+
+test('the blocked toast still fires on a manual attempt (not silent)', async () => {
+  const { conn, calls } = makeConn();
+  const attempt = conn.connect();
+  lastSock().error();
+  document.violation({ violatedDirective: 'connect-src', blockedURI: 'ws://127.0.0.1:4719/ws' });
+  await attempt;
+  assert.equal(conn.getState(), 'blocked');
+  assert.equal(calls.toasts.filter((m) => m.includes('策略') || m.includes('policy')).length, 1);
 });

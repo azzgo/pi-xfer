@@ -222,9 +222,17 @@ blocked URL is our broker socket, enters a terminal **blocked** state:
   ("blocked by site policy"), which is not the same as "broker not running";
 - auto-reconnect stops — retrying cannot succeed on that page — and the toast
   explains why instead of failing silently;
-- the **send button is hidden** and **copy handoff prompt** becomes the primary
-  button: it composes the same document locally in the tab (picks, recorded
-  timeline, console/network slices) and copies it, with no broker round-trip.
+- the **send button is hidden** and a short **⧉ Copy** button takes its place:
+  it composes the same document locally in the tab (picks, recorded timeline,
+  console/network slices) and copies it, with no broker round-trip.
+
+The verdict is detected **without any click**: on load, an origin that was never
+linked gets one silent probe socket. If the policy refuses it, the blocked badge
+appears immediately and the verdict is remembered per origin
+(`wp.policyBlocked.<origin>`) — later visits on that site open no socket at all.
+A successful connect clears the memory. The probe is silent by design: the badge
+is the message, and a plain "broker down" failure leaves the page exactly as it
+was (no toast, no backoff — that stays reserved for authorized origins).
 
 That offline document deliberately has **no "Follow-up channel" section** — the
 reverse query channel needs the broker connection that this page forbids. Save

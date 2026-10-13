@@ -1095,7 +1095,7 @@
     "conn.off": { en: "Not connected · click to connect", zh: "未连接 · 点击连接" },
     "conn.on": { en: "broker connected", zh: "broker 已连接" },
     "conn.connecting": { en: "Connecting…", zh: "连接中…" },
-    "conn.blocked": { en: "Blocked by site policy · copy prompt still works", zh: "被站点策略拦截 · 仍可复制 prompt" },
+    "conn.blocked": { en: "Blocked by site policy", zh: "被站点策略拦截" },
     "pill.disconnect.title": { en: "Click to disconnect broker", zh: "点击断开 broker" },
     "pill.off.title": { en: "Click to connect broker (opens settings on failure)", zh: "点击连接 broker（失败会打开连接设置）" },
     "pill.blocked.title": { en: "This site's Content Security Policy blocks the local broker (connect-src) — retrying cannot succeed here; copy the handoff prompt instead", zh: "本站 CSP（connect-src）拦截了本地 broker — 重试也不会成功；请改用复制 handoff prompt" },
@@ -1104,7 +1104,9 @@
     "sendmore.title": { en: "More actions", zh: "更多操作" },
     "copyprompt": { en: "⧉ Copy handoff prompt", zh: "⧉ 复制 handoff prompt" },
     "copyprompt.sub": { en: "broker composes the full handoff doc → clipboard (send to any agent with bash)", zh: "broker 拼好完整 handoff 文档 → 剪贴板（发给任意有 bash 的 agent）" },
-    "copyprompt.offline": { en: "⧉ Copy handoff prompt", zh: "⧉ 复制 handoff prompt" },
+    // degraded-state button: deliberately short — the status line already says what
+    // gets copied, and the full label overflowed the panel next to a long status.
+    "copyprompt.offline": { en: "⧉ Copy", zh: "⧉ 复制" },
     "settings.title": { en: "Connection settings", zh: "连接设置" },
     "settings.burl": { en: "BROKER URL (WS)", zh: "BROKER 地址（WS）" },
     "settings.sprops": { en: "framework.inspect includes component props/state (default off)", zh: "framework.inspect 附带组件 props/state（默认关）" },
@@ -1180,6 +1182,9 @@
   function autoLinkKey(origin) {
     return "wp.autoLink." + origin;
   }
+  function policyBlockedKey(origin) {
+    return "wp.policyBlocked." + origin;
+  }
   function createBrokerConn(deps) {
     const gm2 = deps.gm;
     const debugLog2 = deps.debugLog || (() => {
@@ -1191,6 +1196,7 @@
     let ws = null;
     let wsState = "off";
     let policyWarned = false;
+    let probing = false;
     let connectSettle = null;
     let connectingUrl = "";
     const pending = /* @__PURE__ */ new Map();
@@ -1248,13 +1254,14 @@
       if (wsState === "on" || !connectingUrl || !matchesBroker(ev, connectingUrl)) return;
       debugLog2("CSP blocked the broker connection:", ev.violatedDirective, ev.blockedURI);
       settleConnect(false);
-      silent = false;
       clearBackoff();
+      gm2.set(policyBlockedKey(location.origin), true);
       setState("blocked");
-      if (!policyWarned) {
+      if (!silent && !policyWarned) {
         policyWarned = true;
         toast(t("toast.policyBlocked"));
       }
+      silent = false;
     }
     function settleConnect(ok) {
       const settled = connectSettle;
@@ -1331,6 +1338,7 @@
         if (f.type === WIRE.KIND_WELCOME) {
           setState("on");
           if (!silent) gm2.set(autoLinkKey(location.origin), true);
+          gm2.set(policyBlockedKey(location.origin), false);
           clearBackoff();
           const wasSilent = silent;
           silent = false;
@@ -1431,6 +1439,18 @@
       connect();
       return true;
     }
+    function maybeProbePolicyBlocked() {
+      if (probing || wsState !== "off" || manualDown) return false;
+      if (autoLinkAllowed()) return false;
+      if (gm2.get(policyBlockedKey(location.origin), false) === true) {
+        setState("blocked");
+        return true;
+      }
+      probing = true;
+      silent = true;
+      connect();
+      return true;
+    }
     function revokeAutoLink() {
       gm2.set(autoLinkKey(location.origin), false);
     }
@@ -1509,6 +1529,7 @@
       autoLinkAllowed,
       revokeAutoLink,
       maybeAutoConnect,
+      maybeProbePolicyBlocked,
       submitToAgent,
       requestCompose,
       requestTargets
@@ -1766,7 +1787,9 @@
       #sendbox .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); letter-spacing: .02em; }
       #sendbox textarea { background: #fff; }
       #sendbox .trow { display: flex; gap: 6px; align-items: center; }
-      #sendbox .srow { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+      /* wrap + min-width:0 keeps every state inside the panel: the status label
+         truncates first, the action buttons wrap to a second line if needed */
+      #sendbox .srow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
       /* ---- split send button group（发送 + ▾ 更多下拉）---- */
       #sendgroup { position: relative; display: flex; flex: none; }
       #sendgroup #sendbtn { border-radius: 8px 0 0 8px; }
@@ -1781,12 +1804,14 @@
       #sendmenu .mitem:hover { background: #eaf1ff; }
       #sendmenu .msub { font: 400 10px/1.5 var(--wp-font); color: var(--wp-muted); margin-top: 1px; }
       /* no broker link → copy-prompt takes the send button's place */
-      #sendoffline { flex: none; }
+      #sendoffline { flex: 0 1 auto; min-width: 0; }
       #sendoffline[hidden] { display: none; }
       #connstate { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500;
-        color: var(--wp-muted); flex: 1; cursor: pointer; user-select: none; white-space: nowrap; }
+        color: var(--wp-muted); flex: 1 1 90px; min-width: 0; cursor: pointer; user-select: none;
+        white-space: nowrap; }
       #connstate .dot { flex: none; width: 9px; height: 9px; border-radius: 50%;
         background: #94a3b8; transition: background .2s ease, box-shadow .2s ease; }
+      #conntext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
       #connstate.connecting .dot { background: var(--wp-amber); }
       /* CSP-blocked: not "broker down" — retrying cannot succeed on this page */
       #dot.blocked { background: #ef4444; }
@@ -3611,6 +3636,7 @@
       ctx.renderTargetCombo();
       if (ctx.renderSendAffordance) ctx.renderSendAffordance(conn.getState());
       conn.maybeAutoConnect();
+      conn.maybeProbePolicyBlocked();
       debugLog("ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · " + location.host);
       window.__PI_WP_API__ = {
         start: () => {
