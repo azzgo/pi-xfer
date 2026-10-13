@@ -2,9 +2,11 @@
  * admin-manager.test.ts — integration tests for the xfer admin manager
  * (milestone1 P0-1), mirroring broker-manager.test.ts.
  *
- * Runs the REAL manager (admin-manager.ts) against the REAL daemon
- * (admin-main.ts) on ephemeral ports with an isolated os.tmpdir() xfer dir,
- * so tests never touch ~/.pi/xfer. Every manager is stopped in afterEach.
+ * Runs the REAL manager (admin-manager.ts) against the REAL committed daemon
+ * bundle (admin.cjs, built from admin-main.ts) on ephemeral ports with an
+ * isolated os.tmpdir() xfer dir, so the spawn path production uses is the one
+ * under test and nothing ever touches ~/.pi/xfer. Every manager is stopped in
+ * afterEach.
  */
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
@@ -131,6 +133,6 @@ describe("AdminManager error paths", () => {
       readinessTimeoutMs: 1_000,
     });
     managers.push(manager);
-    await assert.rejects(() => manager.start(), /spawn failed|not ready within/);
+    await assert.rejects(() => manager.start(), /spawn failed|not ready within|daemon bundle missing/);
   });
 });

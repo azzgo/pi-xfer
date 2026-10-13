@@ -8,19 +8,23 @@
  *
  * Lifecycle (same shape as BrokerManager):
  *   start()  — probe first (admin.json exists AND pid live AND TCP connect
- *              succeeds) → "already running"; otherwise spawn admin-main.ts
- *              detached with stdout/stderr → <xfer-dir>/admin.log and poll
- *              admin.json + TCP until ready.
+ *              succeeds) → "already running"; otherwise spawn the admin.cjs
+ *              bundle detached with stdout/stderr → <xfer-dir>/admin.log and
+ *              poll admin.json + TCP until ready.
  *   stop()   — SIGTERM the process group → poll ≤2s → SIGKILL → unlink
  *              admin.pid/admin.json.
  *   probe()  — the liveness check, returning AdminInfo | null.
+ *
+ * The daemon runs from the committed admin.cjs bundle (P0-B): no experimental
+ * type stripping, no node_modules needed next to the caller's project.
+ * `daemonPath` still overrides the entry (tests point it at a stub).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { XFER_DIR } from "./constants.ts";
+import { isEntryPoint } from "./utils.ts";
 
 /** Default admin TCP port (mirrors admin-main.ts DEFAULT_ADMIN_PORT). */
 export const DEFAULT_ADMIN_PORT = 7788;
@@ -94,6 +98,11 @@ export class AdminManager {
   async start(portOverride?: number): Promise<string> {
     const port = portOverride ?? this.port;
     if ((await this.probe()) !== null) return "already running";
+    if (!fs.existsSync(this.daemonPath)) {
+      throw new Error(
+        `admin: daemon bundle missing (${this.daemonPath}) — run \`npm run build\` in the xfer extension directory`,
+      );
+    }
 
     fs.mkdirSync(this.xferDir, { recursive: true, mode: 0o700 });
     const logPath = path.join(this.xferDir, "admin.log");
@@ -101,9 +110,6 @@ export class AdminManager {
     let child: ChildProcess;
     try {
       child = spawn(process.execPath, [
-        "--disable-warning=ExperimentalWarning",
-        "--import",
-        RESOLVE_HOOK,
         this.daemonPath,
         "--port",
         String(port),
@@ -191,18 +197,8 @@ export class AdminManager {
 
 // ---------- helpers (mirrors broker-manager.ts) ----------
 
-function resolveHook(): string {
-  const pkg: { scripts?: { test?: string } } = JSON.parse(
-    fs.readFileSync(path.join(import.meta.dirname, "package.json"), "utf-8"),
-  );
-  const match = /--import\s+'([^']+)'/.exec(pkg.scripts?.test ?? "");
-  if (!match) throw new Error("cannot find --import resolve hook in package.json test script");
-  const hook = match[1]!;
-  return hook.startsWith("data:") ? hook : pathToFileURL(path.resolve(import.meta.dirname, hook)).href;
-}
-
-const RESOLVE_HOOK = resolveHook();
-const ADMIN_MAIN = path.join(import.meta.dirname, "admin-main.ts");
+/** The committed daemon bundle (built from admin-main.ts by `npm run build`). */
+const ADMIN_MAIN = path.join(import.meta.dirname, "admin.cjs");
 
 function readAdminJson(xferDir: string): AdminInfo | null {
   try {
@@ -297,13 +293,9 @@ function errorMessage(error: unknown): string {
 
 // ---------- CLI ----------
 
+/** Run only when executed directly (not when imported by tests). */
 function isMainModule(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-  } catch {
-    return false;
-  }
+  return isEntryPoint(["admin-manager.ts"]);
 }
 
 async function runCli(): Promise<void> {

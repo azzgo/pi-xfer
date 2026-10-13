@@ -33,7 +33,10 @@
   "files": [
     "*.ts",
     "!*.test.ts",
-    "ts-resolve-hook.mjs",
+    "broker.cjs",
+    "broker.cjs.sha256",
+    "admin.cjs",
+    "admin.cjs.sha256",
     "mesh-runtime.cjs",
     "mesh-runtime.cjs.sha256",
     "web-picker.user.js",

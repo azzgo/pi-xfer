@@ -1,4 +1,4 @@
-// Build script, two committed artifacts (web-picker 双轨模式):
+// Build script, four committed artifacts (web-picker 双轨模式):
 //
 // 1. web-picker.user.js — esbuild IIFE bundle of web-picker.src/ with the
 //    userscript metadata banner. Tampermonkey installs it straight from the
@@ -9,10 +9,13 @@
 //    ~/.pi/xfer/cache). Building requires rivetkit in node_modules; when
 //    missing it is installed --no-save at the version pinned in
 //    mesh-native.ts (RIVETKIT_VERSION) so bundle and download pin never drift.
+// 3. broker.cjs / 4. admin.cjs — esbuild CJS bundles of the two daemons the
+//    managers spawn. Bundling them drops the daemon's dependency on node's
+//    experimental type stripping AND on a node_modules resolvable from the
+//    caller's project (see docs/milestones/phase2-design-p0b.md).
 //
-// buildMeshRuntime() is exported so mesh-bundle.test.ts can rebuild to a temp
-// file and assert the committed bundle is byte-identical (漏提交防线).
-
+// Every builder is exported so artifact-freshness.test.ts can rebuild to a
+// temp file and assert the committed artifact is byte-identical (漏提交防线).
 import { build } from 'esbuild';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -129,11 +132,64 @@ export async function buildWebPicker(outfile = join(here, 'web-picker.user.js'))
     logLevel: 'silent',
   });
 }
+/*
+ * `import.meta` shim for the CJS daemon bundles. esbuild rewrites `import.meta`
+ * in cjs output to an empty `var import_meta = {}`, which would leave every
+ * `import.meta.dirname` / `import.meta.url` use in the daemon sources undefined
+ * (broker's page-tool CLI hint + its isMainModule() check, admin's version read).
+ * The banner defines the values; `define` rewrites the two expressions onto them
+ * — define only accepts entity names or literals, hence the banner variable for
+ * the url rather than an inline call. Sources stay plain ESM and run unchanged
+ * under `node --import ts-resolve-hook.mjs broker-main.ts`.
+ */
+const importMetaBanner = `
+var __xferImportMetaUrl = require("node:url").pathToFileURL(__filename).href;
+`;
+
+/**
+ * Rebuild a daemon bundle (broker.cjs / admin.cjs) from its `.ts` entry exactly
+ * as `npm run build` does. Same esbuild settings as mesh-runtime (node platform,
+ * cjs, node20 target): node builtins only, no external deps. The sha256 sidecar
+ * is written next to the bundle like every other artifact.
+ */
+export async function buildDaemon(entry, outfile) {
+  await build({
+    entryPoints: [join(here, entry)],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node20',
+    outfile,
+    banner: { js: importMetaBanner },
+    define: {
+      'import.meta.url': '__xferImportMetaUrl',
+      'import.meta.dirname': '__dirname',
+      'import.meta.filename': '__filename',
+    },
+    charset: 'utf8',
+    sourcemap: false,
+    legalComments: 'none',
+    logLevel: 'silent',
+  });
+  writeFileSync(`${outfile}.sha256`, `${createHash('sha256').update(readFileSync(outfile)).digest('hex')}\n`);
+}
+
+/** Rebuild broker.cjs (or any outfile) from broker-main.ts. */
+export function buildBrokerDaemon(outfile = join(here, 'broker.cjs')) {
+  return buildDaemon('broker-main.ts', outfile);
+}
+
+/** Rebuild admin.cjs (or any outfile) from admin-main.ts. */
+export function buildAdminDaemon(outfile = join(here, 'admin.cjs')) {
+  return buildDaemon('admin-main.ts', outfile);
+}
 
 async function main() {
   await buildWebPicker();
   await buildMeshRuntime();
-  console.log('mesh-runtime.cjs built');
+  await buildBrokerDaemon();
+  await buildAdminDaemon();
+  console.log('mesh-runtime.cjs, broker.cjs, admin.cjs built');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === (isAbsolute(process.argv[1]) ? process.argv[1] : join(process.cwd(), process.argv[1]))) {

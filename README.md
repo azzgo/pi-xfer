@@ -64,6 +64,7 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
 - `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product
 - `web-picker.src/` + `web-picker.user.js` — userscript source and committed build product
+- `broker-main.ts` + `broker.cjs`, `admin-main.ts` + `admin.cjs` — the two daemons, source and committed build products (`npm run build` produces all four)
 
 pi-xfer was formerly maintained inside [azzgo/dotfiles](https://github.com/azzgo/dotfiles) (`pi/agent/extensions/xfer/`); history preserved from the initial commit.
 
@@ -74,6 +75,8 @@ npm install
 npm test
 npm run build
 ```
+
+The committed bundles (`broker.cjs`, `admin.cjs`, `mesh-runtime.cjs`, `web-picker.user.js`) are built with esbuild targeting **Node 20+**; the extension host runs on whatever Node pi requires (`engines: >=22`). `npm test` fails if a committed bundle is stale — run `npm run build` and commit the artifacts.
 
 ## Acknowledgements
 

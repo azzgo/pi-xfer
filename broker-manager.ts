@@ -14,11 +14,11 @@
  *   start()  — probe first: if a broker is already alive (broker.json exists
  *              AND its pid is live AND a TCP connect to its port succeeds)
  *              return "already running" without spawning. Otherwise spawn
- *              broker-main.ts
+ *              broker.cjs
  *              (port fallback: if the daemon reports it landed on a different
  *              port than requested — a foreign program held the configured
  *              one — the summary says so; the real port lives in broker.json).
- *              detached (`node broker-main.ts --port <port> --xfer-dir <dir>`)
+ *              detached (`node broker.cjs --port <port> --xfer-dir <dir>`)
  *              with stdout/stderr wired to <xfer-dir>/broker.log (append mode;
  *              the manager opens the fd, the daemon just writes), unref() the
  *              child, and poll broker.json + TCP connect until ready (the
@@ -33,18 +33,18 @@
  *              non-zero
  *              (chrome-devtools convention: read the output, not the code).
  *
- * The daemon resolves its `./x.js` imports through the same --import resolve
- * hook as `npm test` (read from package.json, exactly like broker.test.ts), so
- * a spawned daemon and the suite can never drift.
+ * The daemon runs from the committed broker.cjs bundle (P0-B), so spawning it
+ * needs neither the experimental type stripping nor a node_modules reachable
+ * from the caller's project. The bundle is byte-checked against broker-main.ts
+ * by artifact-freshness.test.ts.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { isEntryPoint } from "./utils.ts";
 import { pidAlive } from "./broker-main.ts";
 import { XFER_DIR } from "./constants.ts";
-
 /** Default broker TCP port (mirrors broker-main.ts DEFAULT_PORT). */
 export const DEFAULT_BROKER_PORT = 4719;
 /** Poll cadence for the readiness probe and the stop exit poll. */
@@ -124,6 +124,12 @@ export class BrokerManager {
     const port = portOverride ?? this.port;
     if ((await this.probe()) !== null) return "already running";
 
+    if (!fs.existsSync(BROKER_MAIN)) {
+      throw new Error(
+        `broker: daemon bundle missing (${BROKER_MAIN}) — run \`npm run build\` in the xfer extension directory`,
+      );
+    }
+
     fs.mkdirSync(this.xferDir, { recursive: true, mode: 0o700 });
     const logPath = path.join(this.xferDir, "broker.log");
     // The daemon just writes stdout/stderr; the manager sets up the fd.
@@ -133,9 +139,6 @@ export class BrokerManager {
     let child: ChildProcess;
     try {
       child = spawn(process.execPath, [
-        "--disable-warning=ExperimentalWarning",
-        "--import",
-        RESOLVE_HOOK,
         BROKER_MAIN,
         "--port",
         String(port),
@@ -262,22 +265,8 @@ export class BrokerManager {
 
 // ---------- helpers ----------
 
-/** The --import resolve hook from package.json's test script (see broker.test.ts). */
-function resolveHook(): string {
-  const pkg: { scripts?: { test?: string } } = JSON.parse(
-    fs.readFileSync(path.join(import.meta.dirname, "package.json"), "utf-8"),
-  );
-  const match = /--import\s+'([^']+)'/.exec(pkg.scripts?.test ?? "");
-  if (!match) throw new Error("cannot find --import resolve hook in package.json test script");
-  // Relative hook paths (e.g. ./ts-resolve-hook.mjs) must resolve against the
-  // EXTENSION dir, not the caller's cwd — the daemon is spawned from whatever
-  // project the agent happens to be in.
-  const hook = match[1]!;
-  return hook.startsWith("data:") ? hook : pathToFileURL(path.resolve(import.meta.dirname, hook)).href;
-}
-
-const RESOLVE_HOOK = resolveHook();
-const BROKER_MAIN = path.join(import.meta.dirname, "broker-main.ts");
+/** The committed daemon bundle (built from broker-main.ts by `npm run build`). */
+const BROKER_MAIN = path.join(import.meta.dirname, "broker.cjs");
 
 /** broker.json parsed + shape-checked, or null when missing/invalid. */
 function readBrokerJson(xferDir: string): BrokerInfo | null {
@@ -367,14 +356,9 @@ function errorMessage(error: unknown): string {
 
 // ---------- CLI ----------
 
-/** Run only when executed directly (not when imported by tests). */
+/** Run only when executed directly (not when imported by tests, not from admin.cjs). */
 function isMainModule(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-  } catch {
-    return false;
-  }
+  return isEntryPoint(["broker-manager.ts"]);
 }
 
 async function runCli(): Promise<void> {

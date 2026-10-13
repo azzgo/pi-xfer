@@ -49,12 +49,11 @@ import * as net from "node:net";
 import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
 import { ERR, FROM_WEB_PICKER, WIRE } from "./wire.ts";
 import { renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./handoff-doc.ts";
 import { listTargets } from "./targets.ts";
-import { encodeAgentName } from "./utils.ts";
+import { encodeAgentName, isEntryPoint } from "./utils.ts";
 import { attachWsServer, type WsConnection } from "./ws-server.ts";
 import { WIRE_VERSION } from "./wire.ts";
 
@@ -1088,14 +1087,10 @@ export async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
 }
 
-// Run as a daemon only when executed directly (not when imported by tests).
+// Run as a daemon only when executed directly (not when imported by tests, and
+// not from inside admin.cjs, which bundles this module).
 function isMainModule(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-  } catch {
-    return false;
-  }
+  return isEntryPoint(["broker-main.ts", "broker.cjs"]);
 }
 
 if (isMainModule()) {

@@ -43,6 +43,21 @@ export function peerDescription(peer: PeerInfo): string {
   return details.join(" · ");
 }
 
+/**
+ * True when this process was launched from one of `names` (basenames of
+ * `process.argv[1]`). Entrypoint detection by filename, not by comparing
+ * `import.meta.url`: the daemons ship as bundles, where every module esbuild
+ * inlined reports the bundle's own path as its URL — a path comparison would
+ * make broker-main, admin-main and both managers believe they were all run
+ * directly, and each CLI would fire (and exit) inside one another. A basename
+ * match survives bundling and is unchanged for `node file.ts` runs.
+ */
+export function isEntryPoint(names: string[]): boolean {
+  const invoked = process.argv[1];
+  if (!invoked) return false;
+  return names.includes(path.basename(invoked));
+}
+
 export function readPeerMetadata(xferName: string, xferDir: string = XFER_DIR): Partial<PeerInfo> {
   try {
     const raw: unknown = JSON.parse(fs.readFileSync(path.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));

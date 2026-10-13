@@ -18,7 +18,7 @@ documents it points to.
 ## Working agreements
 
 - **Trunk-based**: commit to `main` in small focused commits.
-- **Two committed build products** (`web-picker.user.js`, `mesh-runtime.cjs` + `.sha256`): after changing `web-picker.src/` or `mesh-runtime.src/` run `npm run build` and commit the artifacts; `npm test` enforces byte-identical freshness.
+- **Four committed build products** (`web-picker.user.js`, `mesh-runtime.cjs`, `broker.cjs`, `admin.cjs`; the `.cjs` ones ship a `.sha256`): after changing `web-picker.src/`, `mesh-runtime.src/`, `broker-main.ts` or `admin-main.ts` run `npm run build` and commit the artifacts; `npm test` enforces byte-identical freshness.
 - **Tests**: `npm test` must be green before every push. Tests must be hermetic — never depend on the developer's real `~/.pi/xfer` state.
 - **No runtime npm dependencies** for the extension itself; rivetkit stays out of the dependency list (see the ADR above).
 - **Verify visible changes**: `npm test` green is not verification for UI or interactive changes — after editing `admin-*.ts` pages or `commands.ts` flows, run the `.agents/skills/verify/` skill (chrome-devtools MCP for the admin page, tmux for command smoke). web-picker userscript stays out of scope (manual).
@@ -31,4 +31,5 @@ documents it points to.
 | `*.ts` (root) | extension source; `index.ts` is the entry point |
 | `mesh-runtime.src/` | mesh engine source (bundled to `mesh-runtime.cjs`) |
 | `web-picker.src/` | userscript source (bundled to `web-picker.user.js`) |
+| `broker-main.ts`, `admin-main.ts` | daemon sources (bundled to `broker.cjs`, `admin.cjs` — what the managers spawn) |
 | `docs/adr/`, `CONTEXT.md` | decisions and glossary — update only with cause, never casually |

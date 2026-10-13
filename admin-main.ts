@@ -22,14 +22,13 @@
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Board } from "./board.ts";
 import { BrokerManager } from "./broker-manager.ts";
 import { MESH_PROBE_TIMEOUT_MS, XFER_DIR } from "./constants.ts";
 import { collectGarbage } from "./gc.ts";
 import { listMeshNodes } from "./mesh-engine.ts";
 import { loadMeshConfig } from "./mesh-config.ts";
-import { listPeers, withTimeout } from "./utils.ts";
+import { isEntryPoint, listPeers, withTimeout } from "./utils.ts";
 
 /** Default admin TCP port (mirrors admin-manager.ts DEFAULT_ADMIN_PORT). */
 export const DEFAULT_ADMIN_PORT = 7788;
@@ -742,13 +741,9 @@ function parseArgs(args: string[]): { port: number; xferDir: string; boardDir: s
   return { port, xferDir, boardDir };
 }
 
+/** Direct-run guard: only the admin entry starts a daemon, never a bundled host. */
 function isMainModule(): boolean {
-  if (!process.argv[1]) return false;
-  try {
-    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-  } catch {
-    return false;
-  }
+  return isEntryPoint(["admin-main.ts", "admin.cjs"]);
 }
 
 export async function main(): Promise<void> {
