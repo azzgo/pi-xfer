@@ -31,10 +31,20 @@ describe("mesh runtime bundle consistency", () => {
  * `state` + `actions` config keys. Nothing else in the suite exercises the real
  * library (the engine only loads on `/xfer mesh up`), so a rivetkit bump that
  * drops or renames them would otherwise surface as a broken mesh at runtime —
- * this turns it into a red test on the machine that bumps the pin.
+ * this turns it into a red test on the machine that bumps the pin. The test
+ * skips where rivetkit is absent — it is deliberately not any kind of npm
+ * dependency (ADR 0013), so the guard only runs on machines that installed
+ * rivetkit, i.e. the one bumping the pin.
  */
+import { RIVETKIT_VERSION } from "./mesh-native.ts";
+
 describe("rivetkit actor API shape", () => {
   it("accepts state + actions on an actor definition", async () => {
+    const rivetkitInstalled = fs.existsSync(path.join(import.meta.dirname, "node_modules", "rivetkit"));
+    if (!rivetkitInstalled) {
+      console.log(`skipping: rivetkit not installed locally — run \`npm install --no-save rivetkit@${RIVETKIT_VERSION}\` to run this guard`);
+      return;
+    }
     const { actor, queue } = await import("rivetkit");
     const definition = actor({
       state: { description: "" },
