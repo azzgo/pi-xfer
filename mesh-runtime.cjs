@@ -14,6 +14,8 @@ globalThis.__meshLoadEngineCli = async () => {
   return require(entryPath);
 };
 
+var __xferImportMetaUrl = require("node:url").pathToFileURL(__filename).href;
+
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -27850,7 +27852,7 @@ var require_cbor_extract = __commonJS({
 });
 
 // node_modules/cbor-x/node-index.js
-var import_module, import_meta, nativeAccelerationDisabled;
+var import_module, nativeAccelerationDisabled;
 var init_node_index = __esm({
   "node_modules/cbor-x/node-index.js"() {
     init_encode();
@@ -27859,7 +27861,6 @@ var init_node_index = __esm({
     init_iterators();
     init_decode();
     import_module = require("module");
-    import_meta = {};
     nativeAccelerationDisabled = process.env.CBOR_NATIVE_ACCELERATION_DISABLED !== void 0 && process.env.CBOR_NATIVE_ACCELERATION_DISABLED.toLowerCase() === "true";
     if (!nativeAccelerationDisabled) {
       let extractor;
@@ -27867,7 +27868,7 @@ var init_node_index = __esm({
         if (typeof require == "function")
           extractor = require_cbor_extract();
         else
-          extractor = (0, import_module.createRequire)(import_meta.url)("cbor-extract");
+          extractor = (0, import_module.createRequire)(__xferImportMetaUrl)("cbor-extract");
         if (extractor)
           setExtractor(extractor.extractStrings);
       } catch (error62) {

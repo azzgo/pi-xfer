@@ -96,6 +96,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     runInbox(sub, flags);
     return;
   }
+  if (command === "install") {
+    const { installAgentSkill } = await import("./install.ts");
+    runInstall(flags, installAgentSkill);
+    return;
+  }
   fail(USAGE);
 }
 
@@ -273,6 +278,25 @@ function resolveInboxPath(dir: string, name: string | undefined): string {
   return found[0]!;
 }
 
+
+function runInstall(flags: Flags, install: typeof import("./install.ts").installAgentSkill): void {
+  const host = str(flags.host);
+  const into = str(flags.into);
+  if (!host || !into) {
+    fail(`Usage: xfer-adapterd install --host <cursor|generic> --into <dir> [--name N]`);
+    return;
+  }
+  const name = str(flags.name) ?? defaultAdapterName();
+  const bundle = process.argv[1] ? path.resolve(process.argv[1]) : "xfer-adapterd.cjs";
+  const launchCommand = `node "${bundle}" up --name "${name}"`;
+  try {
+    const result = install({ host, into, name, launchCommand });
+    log(`✅ installed ${host} skill into ${into}`);
+    for (const file of result.files) log(`   ${file}`);
+  } catch (err) {
+    fail(`❌ install failed: ${errorText(err)}`);
+  }
+}
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

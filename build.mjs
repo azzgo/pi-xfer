@@ -113,7 +113,12 @@ async function buildRivetBundle(entry, outfile) {
     format: 'cjs',
     target: 'node20',
     outfile,
-    banner: { js: meshRuntimeBanner },
+    banner: { js: meshRuntimeBanner + importMetaBanner },
+    define: {
+      'import.meta.url': '__xferImportMetaUrl',
+      'import.meta.dirname': '__dirname',
+      'import.meta.filename': '__filename',
+    },
     plugins: [napiRuntimeRewrite],
     charset: 'utf8',
     sourcemap: false,

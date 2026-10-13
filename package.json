@@ -45,7 +45,8 @@
     "CONTEXT.md",
     "README.md",
     "LICENSE",
-    "docs/"
+    "docs/",
+    "skills/"
   ],
   "scripts": {
     "build": "node build.mjs",
