@@ -5,7 +5,19 @@ on:
     tags: ["v*"]
 
 jobs:
+jobs:
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
   publish:
+    needs: secrets-scan
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:

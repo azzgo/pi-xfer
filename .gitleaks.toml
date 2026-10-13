@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "historical commits adding RFC_SAMPLE_KEY test fixtures"
+commits = [
+  "0488388b5453db0a3f42045dfdc3486b6ee581db",
+  "28642fe19e3fcd9248c89a522b9e560a958af666",
+  "3dbbc66419251ad72de915e36102327e27b2c487",
+  "6d0b70c074d8f3fd7d64c80fac864e85724ac904",
+  "6eeb6c501d1aafbd5dda642abb468fa0f91aea65",
+  "733ba5ae1ae9709ad8e25f006bbebb3f7fe4bec9",
+]
