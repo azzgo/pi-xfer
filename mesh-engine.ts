@@ -51,10 +51,34 @@ export async function readDescriptionAction(state: XferInstanceState): Promise<s
   return state.description ?? "";
 }
 
+/**
+ * Engine-visible lifecycle of one actor, derived from its timestamps.
+ * `Destroyed` actors are filtered out of listings, so callers see the four
+ * adoptable-or-busy states: Running / Sleeping / Crashed / Pending.
+ */
+export type MeshActorStatus = "Running" | "Sleeping" | "Crashed" | "Pending" | "Destroyed";
+
+/** Derive an actor's lifecycle status from the engine's raw timestamp fields. */
+export function deriveActorStatus(actor: {
+  destroy_ts?: number | null;
+  error?: unknown;
+  sleep_ts?: number | null;
+  start_ts?: number | null;
+  connectable_ts?: number | null;
+}): MeshActorStatus {
+  if (actor.destroy_ts !== undefined && actor.destroy_ts !== null) return "Destroyed";
+  if (actor.error !== undefined && actor.error !== null) return "Crashed";
+  if (actor.sleep_ts !== undefined && actor.sleep_ts !== null) return "Sleeping";
+  if (actor.connectable_ts !== undefined && actor.connectable_ts !== null) return "Running";
+  return "Pending";
+}
+
 /** One mesh node as seen by the engine. */
 export interface MeshNodeInfo {
   name: string;
   actorId: string;
+  /** Lifecycle state; drives status-aware adoption in `MeshNode.up()`. */
+  status: MeshActorStatus;
 }
 
 /**
@@ -139,7 +163,7 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
       const actors = await engineApi<{ actors: any[] }>(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
       return actors.actors
         .filter((a) => a.destroy_ts === undefined || a.destroy_ts === null)
-        .map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id }));
+        .map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }));
     },
 
     async destroyNode(actorId: string) {
@@ -176,6 +200,31 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
   return engine;
 }
 
+/**
+ * One-shot mesh send without joining: a transient client enqueues directly to
+ * the target actor. Used by send-only hosts (the adapter daemon's `mesh send`),
+ * which must not need a daemon or a registered node of their own.
+ */
+export async function sendMeshHandoff(
+  config: MeshConfig,
+  target: string,
+  message: MeshHandoffMessage,
+  timeoutMs: number = QUEUE_SEND_TIMEOUT_MS,
+): Promise<void> {
+  const { createClient } = await import("rivetkit/client");
+  const client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
+  const handle = client.get(XFER_INSTANCE_ACTOR, [target]);
+  try {
+    await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    throw new Error(
+      `mesh: enqueue to "${target}" failed — ${err instanceof Error ? err.message : String(err)} ` +
+      `(target may be offline or stuck; the durable queue buffers only after the actor is reachable)`,
+      { cause: err instanceof Error ? err : undefined },
+    );
+  }
+}
+
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
 async function engineApi<T>(config: MeshConfig, method: string, path: string): Promise<T> {
@@ -200,7 +249,7 @@ export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
     (actors) =>
       actors.actors
         .filter((a) => a.destroy_ts === undefined || a.destroy_ts === null)
-        .map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id })),
+        .map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) })),
   );
 }
 

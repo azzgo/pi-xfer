@@ -7,6 +7,7 @@ import { after, before, describe, it } from "node:test";
 import { defaultAdapterName, startAdapterd } from "./adapterd.src/daemon.js";
 import { appendInbox, inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./adapterd.src/inbox.js";
 import { sendNotify } from "./client.js";
+import type { MeshEngine, MeshNodeInfo } from "./mesh-engine.js";
 import { endpointForName, metadataForName, msgId } from "./utils.js";
 
 let tmpDir: string;
@@ -41,6 +42,38 @@ async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void
 
 function waitExit(child: ChildProcess): Promise<number | null> {
   return new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+}
+
+interface FakeMeshState {
+  nodes: MeshNodeInfo[];
+  destroyed: string[];
+  stopped: number;
+}
+
+function fakeMeshEngine(state: FakeMeshState): MeshEngine {
+  return {
+    async ensureNode(name) {
+      const existing = state.nodes.find((n) => n.name === name);
+      if (existing) {
+        state.nodes = state.nodes.map((n) => (n.name === name ? { ...n, status: "Running" } : n));
+      } else {
+        state.nodes.push({ name, actorId: `actor-${name}`, status: "Running" });
+      }
+    },
+    async stop() { state.stopped += 1; },
+    async listNodes() { return [...state.nodes]; },
+    async destroyNode(actorId) {
+      state.destroyed.push(actorId);
+      state.nodes = state.nodes.filter((n) => n.actorId !== actorId);
+    },
+    async queueSend() {},
+    async setDescription() { return ""; },
+    async getDescription() { return ""; },
+  };
+}
+
+function meshOptions(state: FakeMeshState, configPath: string) {
+  return { configPath, config: { endpoint: "http://localhost:6420" }, engineFactory: () => fakeMeshEngine(state) };
 }
 
 describe("adapterd inbox", () => {
@@ -175,6 +208,41 @@ describe("adapterd daemon", () => {
   });
 });
 
+describe("adapterd mesh adoption", () => {
+  it("joins the mesh and destroys its actor on close", async () => {
+    const dir = freshDir();
+    const state: FakeMeshState = { nodes: [], destroyed: [], stopped: 0 };
+    const handle = await startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused") });
+    assert.equal(handle.meshOnline, true);
+    assert.deepEqual(state.nodes.map((n) => n.name), ["agent-a"]);
+    await handle.close();
+    assert.deepEqual(state.destroyed, ["actor-agent-a"]);
+    assert.equal(state.stopped, 1);
+  });
+
+  it("a second daemon adopts an actor left Sleeping by a crashed first daemon", async () => {
+    const dir = freshDir();
+    const state: FakeMeshState = { nodes: [{ name: "agent-a", actorId: "actor-agent-a", status: "Sleeping" }], destroyed: [], stopped: 0 };
+    const handle = await startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused") });
+    assert.equal(handle.meshOnline, true);
+    assert.deepEqual(state.destroyed, [], "adoption never destroys the sleeping actor");
+    assert.equal(state.nodes[0]?.status, "Running");
+    await handle.close();
+    assert.deepEqual(state.destroyed, ["actor-agent-a"]);
+  });
+
+  it("refuses to join a Running actor on another host and leaves no socket behind", async () => {
+    const dir = freshDir();
+    const state: FakeMeshState = { nodes: [{ name: "agent-a", actorId: "actor-agent-a", status: "Running" }], destroyed: [], stopped: 0 };
+    await assert.rejects(
+      () => startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused") }),
+      /already Running on another host/,
+    );
+    assert.ok(!fs.existsSync(endpointForName("agent-a", dir)), "socket is cleaned up");
+    assert.ok(!fs.existsSync(metadataForName("agent-a", dir)), "metadata is cleaned up");
+  });
+});
+
 describe("xfer-adapterd CLI smoke", () => {
   const bundle = path.join(import.meta.dirname, "xfer-adapterd.cjs");
 
@@ -210,4 +278,20 @@ describe("xfer-adapterd CLI smoke", () => {
       if (child.exitCode === null) child.kill("SIGKILL");
     }
   });
+  it("mesh send without a config errors clearly and needs no daemon", async () => {
+    const dir = freshDir();
+    const file = path.join(dir, "handoff.md");
+    fs.writeFileSync(file, "body");
+    const child = spawn(
+      process.execPath,
+      [bundle, "mesh", "send", "remote", file, "summary", "--mesh-config", path.join(dir, "missing.json")],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    const code = await waitExit(child);
+    assert.equal(code, 1);
+    assert.match(stderr, /mesh is not configured/);
+  });
+
 });

@@ -48530,6 +48530,13 @@ async function applyDescriptionAction(state, value) {
 async function readDescriptionAction(state) {
   return state.description ?? "";
 }
+function deriveActorStatus(actor2) {
+  if (actor2.destroy_ts !== void 0 && actor2.destroy_ts !== null) return "Destroyed";
+  if (actor2.error !== void 0 && actor2.error !== null) return "Crashed";
+  if (actor2.sleep_ts !== void 0 && actor2.sleep_ts !== null) return "Sleeping";
+  if (actor2.connectable_ts !== void 0 && actor2.connectable_ts !== null) return "Running";
+  return "Pending";
+}
 var QUEUE_SEND_TIMEOUT_MS = 3e4;
 function createRivetEngine(config3, onHandoff) {
   let registry2 = null;
@@ -48583,7 +48590,7 @@ function createRivetEngine(config3, onHandoff) {
     },
     async listNodes() {
       const actors = await engineApi(config3, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
-      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id }));
+      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }));
     },
     async destroyNode(actorId) {
       await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);

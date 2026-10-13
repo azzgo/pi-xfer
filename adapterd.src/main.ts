@@ -13,9 +13,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { sendNotify } from "../client.ts";
-import { XFER_DIR } from "../constants.ts";
+import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
+import { loadMeshConfig, parseMeshConfig } from "../mesh-config.ts";
 import { isEntryPoint, msgId } from "../utils.ts";
-import { defaultAdapterName, startAdapterd, type AdapterdHandle } from "./daemon.ts";
+import { defaultAdapterName, startAdapterd, type AdapterdHandle, type AdapterdMeshOptions } from "./daemon.ts";
 import { inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./inbox.ts";
 
 interface Flags {
@@ -87,6 +88,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     await runSend(positionals.slice(1), flags);
     return;
   }
+  if (command === "mesh" && sub === "send") {
+    await runMeshSend(positionals.slice(2), flags);
+    return;
+  }
   if (command === "inbox") {
     runInbox(sub, flags);
     return;
@@ -103,6 +108,20 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
   const dir = str(flags.dir) ?? XFER_DIR;
   const onHandoff = str(flags["on-handoff"]);
   const once = flags.once === true;
+  let mesh: AdapterdMeshOptions | undefined;
+  if (flags.mesh === true) {
+    const configPath = str(flags["mesh-config"]) ?? MESH_CONFIG_PATH;
+    const engine = str(flags.engine);
+    try {
+      const config = engine
+        ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token) })
+        : loadMeshConfig(configPath);
+      mesh = { configPath, config };
+    } catch (err) {
+      fail(`❌ --mesh requested but mesh is not configured — ${errorText(err)}`);
+      return;
+    }
+  }
   let handle: AdapterdHandle | null = null;
   let signals = 0;
   let armed = false;
@@ -126,6 +145,7 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
       host: str(flags.host) ?? "generic",
       onHandoff,
       once,
+      mesh,
       onOnce: () => process.exit(0),
     });
   } catch (err) {
@@ -133,7 +153,7 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
     return;
   }
 
-  log(`🟢 xfer-adapterd up as "${handle.name}" — ${handle.endpoint}`);
+  log(`🟢 xfer-adapterd up as "${handle.name}" — ${handle.endpoint}${handle.meshOnline ? " [mesh]" : ""}`);
   log(`   inbox: ${handle.inboxPath}${onHandoff ? `\n   on-handoff: ${onHandoff}` : ""}`);
   if (armed) shutdown();
 }
@@ -165,6 +185,43 @@ async function runSend(argv: string[], flags: Flags): Promise<void> {
   }
 }
 
+
+async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
+  const { target, file, summary } = splitSendArgs(argv);
+  if (!target || !file || !summary) {
+    fail(`Usage: xfer-adapterd mesh send <target> <file> <summary>`);
+    return;
+  }
+  if (!fs.existsSync(file)) {
+    fail(`❌ handoff file not found: ${file}`);
+    return;
+  }
+  const { sendMeshHandoff } = await import("../mesh-engine.ts");
+  const engine = str(flags.engine);
+  let config;
+  try {
+    config = engine
+      ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token) })
+      : loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH);
+  } catch (err) {
+    fail(`❌ mesh is not configured — ${errorText(err)}`);
+    return;
+  }
+  const id = msgId();
+  const from = str(flags.from) ?? defaultAdapterName();
+  try {
+    await sendMeshHandoff(config, target, {
+      id,
+      from,
+      to: target,
+      summary,
+      document: fs.readFileSync(file, "utf-8"),
+    });
+    log(id);
+  } catch (err) {
+    fail(`❌ mesh send to "${target}" failed: ${errorText(err)}`);
+  }
+}
 
 function splitSendArgs(argv: string[]): { target?: string; file?: string; summary?: string } {
   const [target, file, ...rest] = argv;

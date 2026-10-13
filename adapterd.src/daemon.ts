@@ -2,7 +2,10 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { XFER_DIR } from "../constants.ts";
+import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
+import { MeshNode, type MeshNodeOptions } from "../mesh.ts";
+import type { MeshConfig } from "../mesh-config.ts";
+import { createRivetEngine } from "../mesh-engine.ts";
 import { createServer } from "../server.ts";
 import type { XferNotifyMessage } from "../types.ts";
 import { endpointForName, metadataForName } from "../utils.ts";
@@ -10,6 +13,16 @@ import { appendInbox, inboxPathForName, type InboxRecord } from "./inbox.ts";
 
 /** Where an inbound handoff goes, one step at a time (first = always). */
 export type DeliverTransport = "local" | "mesh";
+
+/** Optional mesh join for `up`: config from a file, a parsed override, or tests. */
+export interface AdapterdMeshOptions {
+  /** Path to mesh.config.json; used when `config` is absent. */
+  configPath?: string;
+  /** Pre-parsed config (CLI --engine/--namespace/--token fallback). */
+  config?: MeshConfig;
+  /** Engine factory override for tests. */
+  engineFactory?: NonNullable<MeshNodeOptions["engineFactory"]>;
+}
 
 export interface AdapterdOptions {
   /** Node name; defaults to an `agent-` prefixed name at the CLI layer. */
@@ -24,13 +37,18 @@ export interface AdapterdOptions {
   once?: boolean;
   /** Invoked after a `once` shutdown completes; the CLI exits the process here. */
   onOnce?: () => void;
+  /** Join the mesh as this daemon's name after the local listener is up. */
+  mesh?: AdapterdMeshOptions;
 }
+
 
 export interface AdapterdHandle {
   name: string;
   endpoint: string;
   metadataPath: string;
   inboxPath: string;
+  /** True when this daemon joined the mesh. */
+  meshOnline: boolean;
   /** Resolves when every spawned `--on-handoff` command has exited. */
   pendingHandoffs(): Promise<void>;
   close(): Promise<void>;
@@ -148,6 +166,26 @@ export async function startAdapterd(options: AdapterdOptions): Promise<AdapterdH
   await listen(server, endpoint);
   writeMetadata();
 
+  let meshNode: MeshNode | null = null;
+  if (options.mesh) {
+    meshNode = new MeshNode({
+      configPath: options.mesh.configPath ?? MESH_CONFIG_PATH,
+      config: options.mesh.config,
+      deliver: (msg) => delivered(msg, "mesh"),
+      engineFactory: options.mesh.engineFactory ?? ((config, onHandoff) => createRivetEngine(config, onHandoff)),
+    });
+    try {
+      await meshNode.up(name);
+    } catch (err) {
+      meshNode = null;
+      try { await new Promise<void>((resolve) => server.close(() => resolve())); } catch { /* not listening */ }
+      try { fs.unlinkSync(endpoint); } catch { /* already gone */ }
+      try { fs.unlinkSync(metadataPath); } catch { /* already gone */ }
+      throw err;
+    }
+  }
+  const meshOnline = meshNode !== null;
+
   const close = async (): Promise<void> => {
     if (!closed) closed = true;
     try { await new Promise<void>((resolve) => server.close(() => resolve())); } catch { /* not listening */ }
@@ -155,6 +193,11 @@ export async function startAdapterd(options: AdapterdOptions): Promise<AdapterdH
     try { server.closeAllConnections?.(); } catch { /* older node */ }
     try { fs.unlinkSync(endpoint); } catch { /* already gone */ }
     try { fs.unlinkSync(metadataPath); } catch { /* already gone */ }
+    if (meshNode) {
+      const joined = meshNode;
+      meshNode = null;
+      try { await joined.shutdown(); } catch { /* best effort on exit */ }
+    }
     await Promise.all([...handoffChildren]);
   };
 
@@ -163,6 +206,7 @@ export async function startAdapterd(options: AdapterdOptions): Promise<AdapterdH
     endpoint,
     metadataPath,
     inboxPath,
+    meshOnline,
     pendingHandoffs: () => Promise.all([...handoffChildren]).then(() => undefined),
     close,
   };

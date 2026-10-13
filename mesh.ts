@@ -31,10 +31,15 @@ export async function loadMeshRuntimeBundle(dir = import.meta.dirname): Promise<
 export interface MeshNodeOptions {
   /** Where mesh.config.json lives; defaults to XFER_DIR via the caller. */
   configPath: string;
+  /** Already-parsed config override (adapter daemon flags); wins over configPath. */
+  config?: MeshConfig;
   /** Route an inbound mesh handoff into the session (the local deliver pipeline). */
   deliver: (msg: XferNotifyMessage) => void;
-  /** Engine factory override for tests; defaults to loading the committed mesh-runtime.cjs bundle. */
-  engineFactory?: (config: MeshConfig) => MeshEngine | Promise<MeshEngine>;
+  /** Engine factory override for tests; receives the inbound-handoff sink. */
+  engineFactory?: (
+    config: MeshConfig,
+    onHandoff: (message: MeshHandoffMessage, selfKey: string) => void,
+  ) => MeshEngine | Promise<MeshEngine>;
 }
 
 export type MeshStatus =
@@ -47,17 +52,19 @@ export type MeshStatus =
  */
 export class MeshNode {
   private readonly configPath: string;
+  private readonly configOverride?: MeshConfig;
   private readonly deliver: (msg: XferNotifyMessage) => void;
-  private readonly engineFactory: (config: MeshConfig) => MeshEngine | Promise<MeshEngine>;
+  private readonly engineFactory: NonNullable<MeshNodeOptions["engineFactory"]>;
   private engine: MeshEngine | null = null;
   private nodeName: string | null = null;
 
   constructor(options: MeshNodeOptions) {
     this.configPath = options.configPath;
+    this.configOverride = options.config;
     this.deliver = options.deliver;
-    this.engineFactory = options.engineFactory ?? (async (config) => {
+    this.engineFactory = options.engineFactory ?? (async (config, onHandoff) => {
       const bundle = await loadMeshRuntimeBundle();
-      return bundle.createRivetEngine(config, (message: MeshHandoffMessage, selfKey: string) => this.onHandoff(message, selfKey));
+      return bundle.createRivetEngine(config, onHandoff);
     });
   }
 
@@ -71,26 +78,42 @@ export class MeshNode {
   }
 
   /**
-   * Bring this instance online as `name`. Refuses when a node with the same
-   * key already exists on the engine (same key would silently route to the
-   * pre-existing actor).
+   * Bring this instance online as `name`, adopting a same-name actor that is
+   * not currently Running (Sleeping / Crashed / Pending). Adoption re-resolves
+   * the existing actor in this process so the run loop belongs here and durable
+   * actor state (the node description) is preserved; it never destroys.
+   *
+   * A Running actor means another host owns the name right now — refusing is the
+   * only safe answer, because the same key would silently route this process's
+   * traffic to that host.
    */
   async up(name: string): Promise<void> {
     const current = this.status();
     if (current.online) throw new Error(`mesh is already online as "${current.name}" — /xfer mesh down first`);
-    const config = loadMeshConfig(this.configPath);
-    const engine = await this.engineFactory(config);
+    const config = this.configOverride ?? loadMeshConfig(this.configPath);
+    const engine = await this.engineFactory(config, (message, selfKey) => this.onHandoff(message, selfKey));
     const existing = await engine.listNodes();
     const conflict = existing.find((node) => node.name === name);
-    if (conflict) {
-      throw new Error(`mesh node "${name}" already exists on the engine (actor ${conflict.actorId}) — pick another name via /xfer name`);
+    if (conflict?.status === "Running") {
+      throw new Error(
+        `mesh node "${name}" is already Running on another host — run /xfer mesh down there first (先在那边 /xfer mesh down)`,
+      );
     }
-    await engine.ensureNode(name);
+    try {
+      await engine.ensureNode(name);
+    } catch (err) {
+      try { await engine.stop(); } catch { /* best effort */ }
+      throw err;
+    }
     this.engine = engine;
     this.nodeName = name;
   }
 
-  /** Take this instance offline: destroy its actor, then disconnect. */
+  /**
+   * Take this instance offline: destroy its actor, then disconnect. This is the
+   * only path that destroys — status-aware up() adopts a non-Running actor
+   * without destroying it.
+   */
   async down(): Promise<void> {
     const engine = this.engine;
     if (!engine || !this.nodeName) throw new Error("mesh is not online");

@@ -1977,6 +1977,13 @@ async function collectGarbage(xferDir) {
 }
 
 // mesh-engine.ts
+function deriveActorStatus(actor) {
+  if (actor.destroy_ts !== void 0 && actor.destroy_ts !== null) return "Destroyed";
+  if (actor.error !== void 0 && actor.error !== null) return "Crashed";
+  if (actor.sleep_ts !== void 0 && actor.sleep_ts !== null) return "Sleeping";
+  if (actor.connectable_ts !== void 0 && actor.connectable_ts !== null) return "Running";
+  return "Pending";
+}
 async function engineApi(config, method, path9) {
   const url = new URL(path9, config.endpoint);
   if (config.namespace) url.searchParams.set("namespace", config.namespace);
@@ -1990,7 +1997,7 @@ async function engineApi(config, method, path9) {
 }
 function listMeshNodes(config) {
   return engineApi(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)).then(
-    (actors) => actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id }))
+    (actors) => actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }))
   );
 }
 function deserializeKeyString(serialized) {

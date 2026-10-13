@@ -7,6 +7,7 @@ import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js"
 import { parseMeshConfig, serializeMeshKey, deserializeMeshKey } from "./mesh-config.js";
 import {
   applyDescriptionAction,
+  deriveActorStatus,
   normalizeNodeDescription,
   readDescriptionAction,
   type MeshEngine,
@@ -44,7 +45,13 @@ function fakeEngine(state: FakeEngineState): MeshEngine {
     async ensureNode(name) {
       if (state.upFail) throw new Error("engine unreachable");
       state.ensured.push(name);
-      state.nodes.push({ name, actorId: `actor-${name}` });
+      const existing = state.nodes.find((n) => n.name === name);
+      if (existing) {
+        // Adoption: the same actor re-resolves in this process and goes Running.
+        state.nodes = state.nodes.map((n) => (n.name === name ? { ...n, status: "Running" } : n));
+      } else {
+        state.nodes.push({ name, actorId: `actor-${name}`, status: "Running" });
+      }
     },
     async stop() { state.stopped += 1; },
     async listNodes() { return [...state.nodes]; },
@@ -162,6 +169,23 @@ describe("mesh node descriptions", () => {
   });
 });
 
+describe("mesh actor status", () => {
+  it("derives the four live states from raw engine timestamps", () => {
+    assert.equal(deriveActorStatus({ connectable_ts: 1, start_ts: 1 }), "Running");
+    assert.equal(deriveActorStatus({ sleep_ts: 5 }), "Sleeping");
+    assert.equal(deriveActorStatus({ error: { message: "boom" } }), "Crashed");
+    assert.equal(deriveActorStatus({}), "Pending");
+    assert.equal(deriveActorStatus({ start_ts: 1 }), "Pending");
+    assert.equal(deriveActorStatus({ destroy_ts: 9 }), "Destroyed");
+  });
+
+  it("prefers destroy > error > sleep > running", () => {
+    assert.equal(deriveActorStatus({ destroy_ts: 9, error: 1, sleep_ts: 1, connectable_ts: 1 }), "Destroyed");
+    assert.equal(deriveActorStatus({ error: 1, sleep_ts: 1, connectable_ts: 1 }), "Crashed");
+    assert.equal(deriveActorStatus({ sleep_ts: 1, connectable_ts: 1 }), "Sleeping");
+  });
+});
+
 describe("mesh node lifecycle", () => {
   it("up connects under the given name after a conflict check", async () => {
     const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
@@ -171,11 +195,32 @@ describe("mesh node lifecycle", () => {
     assert.deepEqual(node.status(), { online: true, name: "web" });
   });
 
-  it("up refuses when a node with the same name already exists", async () => {
-    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+  it("up adopts a Sleeping actor of the same name without destroying it", async () => {
+    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web", status: "Sleeping" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
-    await assert.rejects(() => node.up("web"), /already exists/);
+    await node.up("web");
+    assert.deepEqual(state.ensured, ["web"]);
+    assert.deepEqual(state.destroyed, [], "adoption never destroys the actor");
+    assert.equal(state.nodes[0]?.status, "Running");
+    assert.deepEqual(node.status(), { online: true, name: "web" });
+  });
+
+  it("up adopts Crashed and Pending actors too", async () => {
+    for (const status of ["Crashed", "Pending"] as const) {
+      const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web", status }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+      const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+      await node.up("web");
+      assert.deepEqual(state.ensured, ["web"]);
+      assert.deepEqual(state.destroyed, []);
+    }
+  });
+
+  it("up refuses when a Running actor of the same name exists on another host", async () => {
+    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web", status: "Running" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await assert.rejects(() => node.up("web"), /already Running on another host/);
     assert.deepEqual(state.ensured, []);
+    assert.deepEqual(state.destroyed, []);
     assert.deepEqual(node.status(), { online: false });
   });
 
@@ -251,12 +296,15 @@ describe("mesh messaging", () => {
   });
 
   it("list queries the engine live and requires being online", async () => {
-    const state: FakeEngineState = { nodes: [{ name: "phone", actorId: "a1" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const state: FakeEngineState = { nodes: [{ name: "phone", actorId: "a1", status: "Running" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await assert.rejects(() => node.list(), /not online/);
     await node.up("web");
     const nodes = await node.list();
-    assert.deepEqual(nodes, [{ name: "phone", actorId: "a1" }, { name: "web", actorId: "actor-web" }]);
+    assert.deepEqual(nodes, [
+      { name: "phone", actorId: "a1", status: "Running" },
+      { name: "web", actorId: "actor-web", status: "Running" },
+    ]);
   });
 });
 
