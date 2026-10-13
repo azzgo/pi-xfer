@@ -1,8 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import type * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 import { XFER_DIR } from "./constants.ts";
+import { readSenderCwdStamp, senderCwdInstruction } from "./sender-cwd-stamp.ts";
 import { createServer, listenServer } from "./server.ts";
 import { XferState } from "./state.ts";
 import type { XferNotifyMessage } from "./types.ts";
@@ -28,9 +30,14 @@ export class XferController {
     const { pi, state } = this;
     const isIdle = state.isRuntimeIdle();
     const via = transport ? ` · ${transport}` : "";
+    // Agent senders stamp their cwd into the doc (P1-D); web-picker senders have
+    // none — a browser has no working directory to anchor edits to.
+    const stamp = msg.from === FROM_WEB_PICKER ? null : readSenderCwdStamp(msg.file);
+    const isLocalSender = stamp !== null && transport !== "mesh" && stamp.machine === os.hostname();
+    const cwdLine = stamp ? `\n${senderCwdInstruction(stamp, { local: isLocalSender })}\n` : "";
     const body =
       `**Request**: ${msg.summary}\n\n` +
-      `**Doc**: \`${msg.file}\`\n\n` +
+      `**Doc**: \`${msg.file}\`\n${cwdLine}\n` +
       "Read the doc and handle the request.";
     const content =
       msg.from === FROM_WEB_PICKER

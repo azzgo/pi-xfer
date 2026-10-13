@@ -56,7 +56,11 @@ The handoff arrives as a message in `beta`'s conversation:
 
 **Request**: Review the error handling in src/server.ts
 **Doc**: /var/folders/.../pi-xfer-....md
+
+**Sender cwd**: `/srv/app` (project app on machine laptop) — make all file edits here unless the doc says otherwise.
 ```
+
+The **Sender cwd** line anchors `beta` in `alpha`'s working directory instead of whatever `beta` happens to be sitting in. Every agent-originated doc carries the same anchor as a first-line comment (`<!-- xfer:sender-cwd cwd=… project=… machine=… branch=… -->`), so it survives both transports and cross-machine delivery — when the path does not exist on the receiver, `project`/`machine` point it at the right tree.
 
 Ask `beta` to read the doc and do the work — then reply the same way: *"Send alpha a handoff with your findings."*
 

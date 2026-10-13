@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { sendNotify } from "./client.ts";
+import { senderCwdStampFor, stampDocument } from "./sender-cwd-stamp.ts";
 import { registerXferCommand } from "./commands.ts";
 import { XferController } from "./controller.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
@@ -32,6 +33,11 @@ export default function (pi: ExtensionAPI) {
     configPath: MESH_CONFIG_PATH,
     deliver: (msg) => controller.deliverInbound(msg, "mesh"),
   });
+
+  /** Working-directory anchor stamped into every handoff doc this session sends (P1-D). */
+  function thisCwdStamp() {
+    return senderCwdStampFor(state.identity?.cwd || process.cwd(), os.hostname());
+  }
 
   // ── Startup: register socket ──
   pi.on("session_start", async (_event, ctx) => {
@@ -91,9 +97,10 @@ export default function (pi: ExtensionAPI) {
 
       const mid = msgId();
       const tmpFile = path.join(os.tmpdir(), `pi-xfer-${mid}.md`);
+      const document = stampDocument(handoff_document, thisCwdStamp());
 
       // 1. write handoff doc to tmp
-      fs.writeFileSync(tmpFile, handoff_document, { encoding: "utf-8", mode: 0o600 });
+      fs.writeFileSync(tmpFile, document, { encoding: "utf-8", mode: 0o600 });
 
       // 2. notify target
       if (onUpdate) {
@@ -163,7 +170,8 @@ export default function (pi: ExtensionAPI) {
         onUpdate({ content: [{ type: "text", text: `📨 Sending to mesh node "${target}"...` }], details: {} });
       }
       try {
-        const { id } = await mesh.send(target, { summary, document: handoff_document });
+        const document = stampDocument(handoff_document, thisCwdStamp());
+        const { id } = await mesh.send(target, { summary, document });
         return {
           content: [{
             type: "text",
