@@ -200,6 +200,38 @@ oracle is needed.
    A timeout (default 30s, `--timeout-ms` override) or no connected tabs exits 1
    with the error on stderr.
 
+## Site compatibility (v1.15)
+
+Real sites fight userscripts in two specific ways; both are handled, and the picker
+tells you which one you are looking at.
+
+**Trusted Types sites** (YouTube serves `require-trusted-types-for 'script'`).
+Every markup write goes through `web-picker.src/tt.js`: a `trustedTypes`
+policy is created when the API exists, and plain assignment is the fallback when
+it does not. A site that used to swallow the whole userscript now gets the full
+UI. If injection ever fails anyway, a small notice is rendered outside the shadow
+DOM with the error text — a silent userscript is the hardest failure to report.
+
+**CSP `connect-src` sites** (npmjs.com allows `'self'` only, so
+`ws://127.0.0.1:4719` is refused). The refusal is peculiar: the WebSocket
+constructs fine, fires `onerror`, and **never** closes. The connection now
+listens for `securitypolicyviolation` while a connect is pending and, when the
+blocked URL is our broker socket, enters a terminal **blocked** state:
+
+- the status dot and the status row turn red and say so in plain words
+  ("blocked by site policy"), which is not the same as "broker not running";
+- auto-reconnect stops — retrying cannot succeed on that page — and the toast
+  explains why instead of failing silently;
+- the **send button is hidden** and **copy handoff prompt** becomes the primary
+  button: it composes the same document locally in the tab (picks, recorded
+  timeline, console/network slices) and copies it, with no broker round-trip.
+
+That offline document deliberately has **no "Follow-up channel" section** — the
+reverse query channel needs the broker connection that this page forbids. Save
+the copied text and open it in an agent session.
+
+Nothing here tries to bypass a site's policy; the picker adapts to it.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |

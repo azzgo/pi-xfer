@@ -7,6 +7,14 @@
 // exported interface — they never touch `ws`/`wsState` directly and react to
 // state through the `onState` callback.
 //
+// CSP-blocked state (v1.15): some sites (npmjs) ship `connect-src 'self'`
+// without a localhost allowance. There `new WebSocket()` does NOT throw — the
+// socket goes straight to readyState 3, `onerror` fires, and `onclose` NEVER
+// does. So the attempt is settled from `onerror` too, and a matching
+// `securitypolicyviolation` moves us to a terminal 'blocked' state: retrying
+// cannot succeed on that page, so backoff stops and the UI says "policy", not
+// "broker down".
+//
 // Auto-link (v1.12): the first MANUAL successful connect writes a per-origin
 // authorization (`wp.autoLink.<origin>` in GM storage) — the user has linked
 // this origin once, so reloads/HMR full refreshes may reconnect on their own.
@@ -25,6 +33,9 @@ import {
 const BACKOFF_STEPS = [1000, 4000, 16000];
 const BACKOFF_CAP = 60000;
 
+/** prompt 组装与 submit/compose 完全一致：留空时落这条默认指令。 */
+export const DEFAULT_PROMPT = '请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。';
+
 export function autoLinkKey(origin) { return 'wp.autoLink.' + origin; }
 
 export function createBrokerConn(deps) {
@@ -34,8 +45,10 @@ export function createBrokerConn(deps) {
   const onPageRequest = deps.onPageRequest || (() => {});
 
   let ws = null;
-  let wsState = 'off';                 // off | connecting | on
-  let connectSettle = null;            // 在途 connect 的结算回调（welcome→true / close→false）
+  let wsState = 'off';                 // off | connecting | on | blocked
+  let policyWarned = false;            // blocked toast already shown this page load
+  let connectSettle = null;            // 在途 connect 的结算回调（welcome→true / 失败→false）
+  let connectingUrl = '';              // 本次尝试的 ws URL，CSP 归因用
   const pending = new Map();           // request id → { kind:'submit'|'compose'|'targets', resolve }
 
   // auto-link state：silent=自动重连中（抑制 toast）；backoffTimer/backoffStep=
@@ -53,7 +66,7 @@ export function createBrokerConn(deps) {
   }
 
   function scheduleReconnect() {
-    if (manualDown || !autoLinkAllowed() || backoffTimer) return;
+    if (manualDown || wsState === 'blocked' || !autoLinkAllowed() || backoffTimer) return;
     const delay = backoffStep < BACKOFF_STEPS.length ? BACKOFF_STEPS[backoffStep] : BACKOFF_CAP;
     backoffStep++;
     debugLog('auto-link: reconnect in', delay, 'ms');
@@ -72,6 +85,62 @@ export function createBrokerConn(deps) {
     try { ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
   }
 
+  // Does this CSP violation concern OUR broker socket? Unrelated page
+  // violations (img-src, frame-src, other hosts) fire constantly on real sites.
+  function matchesBroker(ev, url) {
+    if (!ev || ev.violatedDirective !== 'connect-src') return false;
+    const blocked = String(ev.blockedURI || '');
+    if (!blocked) return false;
+    try {
+      const want = new URL(url);
+      const got = new URL(blocked);
+      // ws:// vs http:// spelling of the same host:port is still our socket.
+      if (got.host === want.host) return true;
+    } catch (e) { /* unparsable URL — fall through to the substring test */ }
+    return blocked.indexOf('127.0.0.1') >= 0 || blocked.indexOf('localhost') >= 0;
+  }
+
+  function onPolicyViolation(ev) {
+    // Browsers disagree on ordering: some fire the violation before onerror,
+    // some after (and a CSP-blocked socket never closes, so there is no later
+    // close to learn from). Attribution therefore keys off the live attempt,
+    // not off wsState being exactly 'connecting'.
+    if (wsState === 'on' || !connectingUrl || !matchesBroker(ev, connectingUrl)) return;
+    debugLog('CSP blocked the broker connection:', ev.violatedDirective, ev.blockedURI);
+    settleConnect(false);
+    silent = false;                     // a blocked link is terminal, never silent
+    clearBackoff();                     // retrying cannot succeed on this page
+    setState('blocked');
+    if (!policyWarned) { policyWarned = true; toast(t('toast.policyBlocked')); }
+  }
+
+  // Settle the in-flight connect promise exactly once (welcome → true,
+  // close/error/CSP → false). The CSP-blocked socket never closes, so this is
+  // the single place the attempt can end besides welcome.
+  function settleConnect(ok) {
+    const settled = connectSettle;
+    connectSettle = null;
+    if (settled) settled(ok);
+  }
+
+  // Defensive: this module is also loaded by node tests and can run in worlds
+  // without a document. CSP feedback is a bonus, never a hard dependency.
+  function armPolicyListener() {
+    try {
+      if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        document.addEventListener('securitypolicyviolation', onPolicyViolation, true);
+      }
+    } catch (e) { /* no document — nothing to listen on */ }
+  }
+
+  function disarmPolicyListener() {
+    try {
+      if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+        document.removeEventListener('securitypolicyviolation', onPolicyViolation, true);
+      }
+    } catch (e) { /* nothing was armed */ }
+  }
+
   function setState(s) {
     wsState = s;
     deps.onState(s);
@@ -84,6 +153,9 @@ export function createBrokerConn(deps) {
     manualDown = false;
     if (ws) { try { ws.close(); } catch (e) {} ws = null; }
     const url = brokerUrl().replace(/\/+$/, '') + '/ws';
+    connectingUrl = url;
+    policyWarned = false;               // a manual retry asks for the message again
+    armPolicyListener();
     setState('connecting');
     let settle;
     const attempt = new Promise((resolve) => { settle = resolve; });
@@ -91,7 +163,8 @@ export function createBrokerConn(deps) {
     let sock;
     try { sock = new WebSocket(url); }
     catch (e) {
-      connectSettle = null;
+      disarmPolicyListener();
+      settleConnect(false);
       setState('off');
       if (!silent) toast(t('conn.wsFailed', { msg: e.message }));
       settle(false);
@@ -113,8 +186,8 @@ export function createBrokerConn(deps) {
         const wasSilent = silent; silent = false;
         if (!wasSilent) toast(t('conn.on'));
         debugLog('auto-link: connected', wasSilent ? '(auto)' : '(manual)');
-        const settled = connectSettle; connectSettle = null;
-        if (settled) settled(true);
+        connectingUrl = '';
+        settleConnect(true);
         if (deps.onWelcome) deps.onWelcome();
         return;
       }
@@ -150,14 +223,15 @@ export function createBrokerConn(deps) {
       }
     };
     sock.onclose = () => {
-      if (ws !== sock) return;               // superseded by a newer connect
+      if (ws !== sock) return;               // superseded by a newer connect or by the CSP verdict
       ws = null;
       for (const p of pending.values()) p.resolve(p.kind === 'submit'
         ? { ok: false, code: 'closed', message: t('conn.closed') }
         : []);
       pending.clear();
-      const settled = connectSettle; connectSettle = null;
-      if (settled) settled(false);           // 握手未完成即断开 = 配对失败
+      connectingUrl = '';
+      disarmPolicyListener();
+      settleConnect(false);                  // 握手未完成即断开 = 配对失败
       const wasSilent = silent; silent = false;
       if (wsState !== 'off') { setState('off'); }
       if (wasSilent) {
@@ -173,11 +247,15 @@ export function createBrokerConn(deps) {
         }
       }
     };
+    // NOTE: onerror does NOT imply a following close — a CSP-blocked connect
+    // fires error and then never closes (npmjs). Settle here or the awaiting
+    // promise (menu / settings save / API connect()) hangs for the page's life.
     sock.onerror = () => {
-      if (ws === sock && wsState !== 'off') {
-        setState('off');
-        if (!silent) toast(t('conn.unreachable', { url }));
-      }
+      if (ws !== sock || wsState === 'off') return;
+      // A matching CSP violation may already have set 'blocked'; if not, this
+      // is an ordinary unreachable-broker failure.
+      if (wsState === 'connecting') { settleConnect(false); setState('off'); }
+      if (!silent) toast(t('conn.unreachable', { url }));
     };
     return attempt;
   }
@@ -186,6 +264,7 @@ export function createBrokerConn(deps) {
     manualDown = true;                     // 本页加载内不再自动重连（授权仍在，reload 后恢复）
     clearBackoff();
     silent = false;
+    disarmPolicyListener();
     setState('off');
     if (ws) { try { ws.close(); } catch (e) {} ws = null; }
     toast(t('conn.disconnected'));
@@ -209,7 +288,7 @@ export function createBrokerConn(deps) {
 
   // prompt 可留空：留空时落 DEFAULT_PROMPT——逐条回应标注 note / 解释元素渲染逻辑。
   // broker 端 v0 校验要求 prompt 非空，所以默认值在这一侧补齐，线上帧始终带具体指令。
-  const DEFAULT_PROMPT = '请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。';
+
   // 反向查询规则随每次 send 下发（prompt 尾部追加）：v1.12 起，用户手动连过
   // broker 的域名会在刷新后自动重连，所以改代码 → 页面刷新 → 重连后 agent 可以
   // 重新查询验证结果；只在 auto-link 未授权的页面才维持「改代码前一次查完」。

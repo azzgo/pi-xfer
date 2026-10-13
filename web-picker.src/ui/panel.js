@@ -8,6 +8,7 @@
 import { loadBatch, saveBatch } from '../storage.js';
 import { escapeHtml } from '../dom-utils.js';
 import { t } from '../i18n.js';
+import { setHTML } from '../tt.js';
 
 export function initPanel(ctx) {
   const { els, toast } = ctx;
@@ -42,8 +43,8 @@ export function initPanel(ctx) {
     const b = loadBatch();
     const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : '';
     elPcount.textContent = (b.length || recHtml) ? t('count.items', { n: b.length + (recHtml ? 1 : 0) }) : '';
-    if (!b.length && !recHtml) { elPlist.innerHTML = `<div class="empty">${t('panel.empty')}</div>`; return; }
-    elPlist.innerHTML = recHtml + b.map((r, i) =>
+    if (!b.length && !recHtml) { setHTML(elPlist, `<div class="empty">${t('panel.empty')}</div>`); return; }
+    setHTML(elPlist, recHtml + b.map((r, i) =>
       '<div class="item" data-i="' + i + '">' +
         '<div class="psel">' + escapeHtml(r.selector) + '</div>' +
         (r.group ? `<div class="pgroup">${t('group.label', { g: escapeHtml(r.group) })}</div>` : '') +
@@ -53,7 +54,7 @@ export function initPanel(ctx) {
         '<div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + '</span>' +
         `<button class="del">${t('btn.delete')}</button></div>` +
       '</div>'
-    ).join('');
+    ).join(''));
   }
   ctx.renderPanel = renderPanel;
 

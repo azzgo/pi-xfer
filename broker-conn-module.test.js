@@ -22,6 +22,7 @@ class FakeWebSocket {
   open() { this.readyState = 1; if (this.onopen) this.onopen(); }
   message(frame) { if (this.onmessage) this.onmessage({ data: JSON.stringify(frame) }); }
   drop() { if (this.onclose) this.onclose(); }
+  error() { this.readyState = 3; if (this.onerror) this.onerror(); }
 }
 FakeWebSocket.instances = [];
 
@@ -51,11 +52,27 @@ function makeConn(overrides = {}) {
 
 function lastSock() { return FakeWebSocket.instances[FakeWebSocket.instances.length - 1]; }
 
+/** Minimal document stub that records capture-phase listeners and can fire them. */
+function makeDocument() {
+  const listeners = [];
+  return {
+    title: 't',
+    listeners,
+    addEventListener(type, fn) { listeners.push({ type, fn }); },
+    removeEventListener(type, fn) {
+      const i = listeners.findIndex((l) => l.type === type && l.fn === fn);
+      if (i >= 0) listeners.splice(i, 1);
+    },
+    /** Deliver a CSP violation the way the browser does. */
+    violation(ev) { for (const l of listeners.slice()) if (l.type === 'securitypolicyviolation') l.fn(ev); },
+  };
+}
+
 beforeEach(() => {
   gmStore.clear();
   FakeWebSocket.instances = [];
   delete globalThis.document; delete globalThis.window; // frameHello not exercised here
-  globalThis.document = { title: 't' };
+  globalThis.document = makeDocument();
 });
 
 test('manual connect success authorizes auto-link for the origin', async () => {
@@ -120,4 +137,56 @@ test('revokeAutoLink clears the per-origin authorization', async () => {
   assert.equal(gmStore.get(ORIGIN_KEY), false);
   assert.equal(conn.autoLinkAllowed(), false);
   assert.equal(conn.maybeAutoConnect(), false);
+});
+
+// ---- CSP-blocked connect (npmjs-style) ----
+
+test('a connect-src violation for our socket settles the attempt and blocks', async () => {
+  const { conn, calls } = makeConn();
+  const attempt = conn.connect();
+  lastSock().error();                       // npmjs fires error…
+  document.violation({                      // …and reports why through the policy event
+    violatedDirective: 'connect-src',
+    blockedURI: 'ws://127.0.0.1:4719/ws',
+  });
+  assert.equal(await attempt, false, 'onerror alone settles: the socket never closes');
+  assert.equal(conn.getState(), 'blocked');
+  assert.equal(calls.toasts.filter((m) => m.includes('策略') || m.includes('policy')).length, 1);
+});
+
+test('blocked stops the backoff reconnect loop', async () => {
+  gmStore.set(ORIGIN_KEY, true);
+  const { conn } = makeConn();
+  conn.maybeAutoConnect();
+  lastSock().error();
+  document.violation({ violatedDirective: 'connect-src', blockedURI: 'ws://127.0.0.1:4719/ws' });
+  assert.equal(conn.getState(), 'blocked');
+  await new Promise((r) => setTimeout(r, 1100));   // first backoff step would have fired
+  assert.equal(FakeWebSocket.instances.length, 1, 'no retry: the policy will not change');
+});
+
+test('unrelated CSP violations (other directives / other hosts) are ignored', async () => {
+  const { conn, calls } = makeConn();
+  const attempt = conn.connect();
+  document.violation({ violatedDirective: 'img-src', blockedURI: 'https://cdn.example/pixel.png' });
+  document.violation({ violatedDirective: 'connect-src', blockedURI: 'wss://api.example.com/track' });
+  assert.equal(conn.getState(), 'connecting');
+  assert.equal(calls.toasts.length, 0);
+  lastSock().open();
+  lastSock().message({ type: 'welcome' });
+  assert.equal(await attempt, true);
+  assert.equal(conn.getState(), 'on');
+});
+
+test('a manual connect after a block retries and can succeed', async () => {
+  const { conn } = makeConn();
+  const blocked = conn.connect();
+  lastSock().error();
+  document.violation({ violatedDirective: 'connect-src', blockedURI: 'ws://127.0.0.1:4719/ws' });
+  await blocked;
+  const retry = conn.connect();
+  lastSock().open();
+  lastSock().message({ type: 'welcome' });
+  assert.equal(await retry, true);
+  assert.equal(conn.getState(), 'on');
 });

@@ -7,6 +7,7 @@ import { GM_TARGET } from '../constants.js';
 import { gm } from '../storage.js';
 import { escapeHtml } from '../dom-utils.js';
 import { t } from '../i18n.js';
+import { setHTML } from '../tt.js';
 
 export function initCombo(ctx) {
   const { els, toast } = ctx;
@@ -36,20 +37,20 @@ export function initCombo(ctx) {
       escapeHtml(s.slice(i + q.length));
   }
   function renderDrop() {
-    if (!targets.length) { elTDrop.innerHTML = `<div class="tempty">${t('combo.noSessions')}</div>`; return; }
+    if (!targets.length) { setHTML(elTDrop, `<div class="tempty">${t('combo.noSessions')}</div>`); return; }
     const list = comboList();
-    if (!list.length) { elTDrop.innerHTML = `<div class="tempty">${t('combo.noMatch')}</div>`; return; }
+    if (!list.length) { setHTML(elTDrop, `<div class="tempty">${t('combo.noMatch')}</div>`); return; }
     if (comboHl >= list.length) comboHl = list.length - 1;
     if (comboHl < 0) comboHl = 0;
     const q = comboFilter.trim();
-    elTDrop.innerHTML = list.map((t, i) => {
+    setHTML(elTDrop, list.map((t, i) => {
       const sub = (t.cwd || '?') + (t.status ? ' · ' + t.status : '');
       return '<div class="titem' + (i === comboHl ? ' hl' : '') + '" data-name="' + escapeHtml(t.name) + '">' +
         '<div class="tname">' + (q ? markMatch(t.name, q) : escapeHtml(t.name)) +
           (t.name === comboSel ? ' <span class="tick">✓</span>' : '') + '</div>' +
         '<div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + '</div>' +
       '</div>';
-    }).join('') + `<div class="thint">${t('combo.hint')}</div>`;
+    }).join('') + `<div class="thint">${t('combo.hint')}</div>`);
     const hl = elTDrop.querySelector('.titem.hl');     // 键盘移动时保持高亮行可见
     if (hl) {
       if (hl.offsetTop < elTDrop.scrollTop) elTDrop.scrollTop = hl.offsetTop;

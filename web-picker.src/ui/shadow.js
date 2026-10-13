@@ -6,6 +6,7 @@ import { HOST_FLAG, KEY_POS } from '../constants.js';
 import { t } from '../i18n.js';
 import { gm } from '../storage.js';
 import { GM_FAB_SIZE } from '../constants.js';
+import { setHTML } from '../tt.js';
 
 export function buildUI() {
   const host = document.createElement('div');
@@ -26,7 +27,7 @@ export function buildUI() {
   }
 
   const root = host.attachShadow({ mode: 'open' });
-  root.innerHTML = `
+  setHTML(root, `
     <style>
       :host {
         --wp-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -234,11 +235,18 @@ export function buildUI() {
         font: 600 12px/1.5 var(--wp-font); color: var(--wp-ink); }
       #sendmenu .mitem:hover { background: #eaf1ff; }
       #sendmenu .msub { font: 400 10px/1.5 var(--wp-font); color: var(--wp-muted); margin-top: 1px; }
+      /* no broker link → copy-prompt takes the send button's place */
+      #sendoffline { flex: none; }
+      #sendoffline[hidden] { display: none; }
       #connstate { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500;
         color: var(--wp-muted); flex: 1; cursor: pointer; user-select: none; white-space: nowrap; }
       #connstate .dot { flex: none; width: 9px; height: 9px; border-radius: 50%;
         background: #94a3b8; transition: background .2s ease, box-shadow .2s ease; }
       #connstate.connecting .dot { background: var(--wp-amber); }
+      /* CSP-blocked: not "broker down" — retrying cannot succeed on this page */
+      #dot.blocked { background: #ef4444; }
+      #connstate.blocked .dot { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.16); }
+      #connstate.blocked { color: #b91c1c; }
       #connstate.on { color: #15803d; }
       #connstate.on .dot { background: var(--wp-green); box-shadow: 0 0 0 3px rgba(34,197,94,.18); }
       #connstate:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -305,6 +313,7 @@ export function buildUI() {
         <div class="srow">
           <span id="connstate"><span class="dot"></span><span id="conntext">${t('conn.off')}</span></span>
           <button class="ghost" id="clearbtn">${t('clearbtn')}</button>
+          <button class="primary" id="sendoffline" hidden>${t('copyprompt.offline')}</button>
           <div id="sendgroup">
             <button class="primary" id="sendbtn">${t('sendbtn')}</button>
             <button class="primary more" id="sendmore" title="${t('sendmore.title')}">▾</button>
@@ -335,7 +344,7 @@ export function buildUI() {
         <button class="primary" id="ssave">${t('settings.save')}</button>
       </div>
     </div>
-  `;
+  `);
 
   const $ = (id) => root.getElementById(id);
   const elHL = $('hl'), elGWrap = $('gwrap'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
@@ -349,7 +358,7 @@ export function buildUI() {
         elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
         elSendGroup = $('sendgroup'), elSendMore = $('sendmore'), elSendMenu = $('sendmenu'), elCopyPrompt = $('copyprompt'),
-        elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'),
+        elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'), elSendOffline = $('sendoffline'),
         elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops'),
         elSAuto = $('sauto'), elSWrite = $('swrite');
   if (gm.get(GM_FAB_SIZE, 'small') === 'large') elFab.classList.add('large');
@@ -386,7 +395,8 @@ export function buildUI() {
     elFab, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
     elPanel, elPH, elPlist, elPcount, elPclose, elPrompt, elTCombo, elTInput,
     elTDrop, elTRefresh, elSend, elClear, elSendGroup, elSendMore, elSendMenu,
-    elCopyPrompt, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite };
+    elCopyPrompt, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite,
+    elSendOffline };
 
   // ---------- trigger 重注入 ----------
   // SPA 路由跳转 / HMR 热更新可能把 documentElement 下的外来节点清掉，host 一旦

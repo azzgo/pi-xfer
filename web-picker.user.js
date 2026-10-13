@@ -1095,13 +1095,16 @@
     "conn.off": { en: "Not connected · click to connect", zh: "未连接 · 点击连接" },
     "conn.on": { en: "broker connected", zh: "broker 已连接" },
     "conn.connecting": { en: "Connecting…", zh: "连接中…" },
+    "conn.blocked": { en: "Blocked by site policy · copy prompt still works", zh: "被站点策略拦截 · 仍可复制 prompt" },
     "pill.disconnect.title": { en: "Click to disconnect broker", zh: "点击断开 broker" },
     "pill.off.title": { en: "Click to connect broker (opens settings on failure)", zh: "点击连接 broker（失败会打开连接设置）" },
+    "pill.blocked.title": { en: "This site's Content Security Policy blocks the local broker (connect-src) — retrying cannot succeed here; copy the handoff prompt instead", zh: "本站 CSP（connect-src）拦截了本地 broker — 重试也不会成功；请改用复制 handoff prompt" },
     "clearbtn": { en: "Clear", zh: "清空" },
     "sendbtn": { en: "Send →", zh: "发送 →" },
     "sendmore.title": { en: "More actions", zh: "更多操作" },
     "copyprompt": { en: "⧉ Copy handoff prompt", zh: "⧉ 复制 handoff prompt" },
     "copyprompt.sub": { en: "broker composes the full handoff doc → clipboard (send to any agent with bash)", zh: "broker 拼好完整 handoff 文档 → 剪贴板（发给任意有 bash 的 agent）" },
+    "copyprompt.offline": { en: "⧉ Copy handoff prompt", zh: "⧉ 复制 handoff prompt" },
     "settings.title": { en: "Connection settings", zh: "连接设置" },
     "settings.burl": { en: "BROKER URL (WS)", zh: "BROKER 地址（WS）" },
     "settings.sprops": { en: "framework.inspect includes component props/state (default off)", zh: "framework.inspect 附带组件 props/state（默认关）" },
@@ -1127,19 +1130,21 @@
     "combo.switched": { en: "Target switched: {name}", zh: "目标已切换：{name}" },
     "combo.refreshed": { en: "Target list refreshed ({n})", zh: "目标列表已刷新（{n}）" },
     "combo.noneFound": { en: "No active local sessions found", zh: "没有发现活跃 local session" },
-    "send.connectFirst": { en: "Connect the broker first (status pill at bottom left)", zh: "先连接 broker（点击左下状态）" },
     "send.needContent": { en: "Pick elements, record actions, or write a prompt first", zh: "先标注元素、录制操作、或写 prompt" },
     "send.composing": { en: "Requesting full handoff prompt from broker…", zh: "正在向 broker 请求完整 handoff prompt…" },
     "send.composeFailed": { en: "Failed to compose prompt: {detail}", zh: "拼 prompt 失败: {detail}" },
     "send.clipboard": { en: "Clipboard unavailable (needs GM_setClipboard or https/localhost)", zh: "剪贴板不可用（需 GM_setClipboard 或 https/localhost）" },
     "send.copied": { en: "Handoff prompt copied ({n} chars · paste to any agent)", zh: "handoff prompt 已复制（{n} 字符 · 可粘贴给任意 agent）" },
+    "send.copiedOffline": { en: "Handoff prompt composed in this tab and copied ({n} chars · no broker link, so no follow-up channel)", zh: "已在本页内拼好 handoff prompt 并复制（{n} 字符 · 未连 broker，无回查通道）" },
     "send.noTarget": { en: "No target available: run xfer listen in a pi session first", zh: "没有可用目标：先启动 pi session 的 xfer listen" },
+    "send.noTargetOffline": { en: "No broker link — copy the handoff prompt instead (send button needs a connected broker)", zh: "未连接 broker — 请改用复制 handoff prompt（发送按钮需要已连接的 broker）" },
     "send.promptOnly.confirm": { en: "No elements picked — send prompt only?", zh: "没有标注任何元素，只发 prompt？" },
     "send.sending": { en: "Sending…", zh: "发送中…" },
     "send.delivered": { en: "Delivered to agent (handoff {id})", zh: "已送达 agent（handoff {id}）" },
     "send.failed": { en: "Send failed: {detail}", zh: "发送失败: {detail}" },
     "send.connecting": { en: "Connecting {url} …", zh: "正在连接 {url} …" },
     "conn.wsFailed": { en: "WebSocket creation failed: {msg}", zh: "WS 创建失败: {msg}" },
+    "toast.policyBlocked": { en: "Site policy (CSP connect-src) blocked the local broker connection — retrying cannot succeed on this page; the handoff prompt can still be copied offline", zh: "站点策略（CSP connect-src）拦截了本地 broker 连接 — 本页重试也不会成功；仍可在离线模式复制 handoff prompt" },
     "conn.brokerError": { en: "broker error: {code}", zh: "broker 错误: {code}" },
     "conn.closed": { en: "broker connection closed", zh: "broker 连接已断开" },
     "conn.unreachable": { en: "Cannot reach broker: {url} (edit the address in connection settings)", zh: "broker 连不上: {url}（连接设置里可改地址）" },
@@ -1171,6 +1176,7 @@
   // web-picker.src/broker-conn.js
   var BACKOFF_STEPS = [1e3, 4e3, 16e3];
   var BACKOFF_CAP = 6e4;
+  var DEFAULT_PROMPT = "请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。";
   function autoLinkKey(origin) {
     return "wp.autoLink." + origin;
   }
@@ -1184,7 +1190,9 @@
     });
     let ws = null;
     let wsState = "off";
+    let policyWarned = false;
     let connectSettle = null;
+    let connectingUrl = "";
     const pending = /* @__PURE__ */ new Map();
     let silent = false;
     let manualDown = false;
@@ -1201,7 +1209,7 @@
       backoffStep = 0;
     }
     function scheduleReconnect() {
-      if (manualDown || !autoLinkAllowed() || backoffTimer) return;
+      if (manualDown || wsState === "blocked" || !autoLinkAllowed() || backoffTimer) return;
       const delay = backoffStep < BACKOFF_STEPS.length ? BACKOFF_STEPS[backoffStep] : BACKOFF_CAP;
       backoffStep++;
       debugLog2("auto-link: reconnect in", delay, "ms");
@@ -1224,6 +1232,51 @@
         return false;
       }
     }
+    function matchesBroker(ev, url) {
+      if (!ev || ev.violatedDirective !== "connect-src") return false;
+      const blocked = String(ev.blockedURI || "");
+      if (!blocked) return false;
+      try {
+        const want = new URL(url);
+        const got = new URL(blocked);
+        if (got.host === want.host) return true;
+      } catch (e) {
+      }
+      return blocked.indexOf("127.0.0.1") >= 0 || blocked.indexOf("localhost") >= 0;
+    }
+    function onPolicyViolation(ev) {
+      if (wsState === "on" || !connectingUrl || !matchesBroker(ev, connectingUrl)) return;
+      debugLog2("CSP blocked the broker connection:", ev.violatedDirective, ev.blockedURI);
+      settleConnect(false);
+      silent = false;
+      clearBackoff();
+      setState("blocked");
+      if (!policyWarned) {
+        policyWarned = true;
+        toast(t("toast.policyBlocked"));
+      }
+    }
+    function settleConnect(ok) {
+      const settled = connectSettle;
+      connectSettle = null;
+      if (settled) settled(ok);
+    }
+    function armPolicyListener() {
+      try {
+        if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+          document.addEventListener("securitypolicyviolation", onPolicyViolation, true);
+        }
+      } catch (e) {
+      }
+    }
+    function disarmPolicyListener() {
+      try {
+        if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+          document.removeEventListener("securitypolicyviolation", onPolicyViolation, true);
+        }
+      } catch (e) {
+      }
+    }
     function setState(s) {
       wsState = s;
       deps.onState(s);
@@ -1239,6 +1292,9 @@
         ws = null;
       }
       const url = brokerUrl().replace(/\/+$/, "") + "/ws";
+      connectingUrl = url;
+      policyWarned = false;
+      armPolicyListener();
       setState("connecting");
       let settle;
       const attempt = new Promise((resolve) => {
@@ -1249,7 +1305,8 @@
       try {
         sock = new WebSocket(url);
       } catch (e) {
-        connectSettle = null;
+        disarmPolicyListener();
+        settleConnect(false);
         setState("off");
         if (!silent) toast(t("conn.wsFailed", { msg: e.message }));
         settle(false);
@@ -1279,9 +1336,8 @@
           silent = false;
           if (!wasSilent) toast(t("conn.on"));
           debugLog2("auto-link: connected", wasSilent ? "(auto)" : "(manual)");
-          const settled = connectSettle;
-          connectSettle = null;
-          if (settled) settled(true);
+          connectingUrl = "";
+          settleConnect(true);
           if (deps.onWelcome) deps.onWelcome();
           return;
         }
@@ -1325,9 +1381,9 @@
         ws = null;
         for (const p of pending.values()) p.resolve(p.kind === "submit" ? { ok: false, code: "closed", message: t("conn.closed") } : []);
         pending.clear();
-        const settled = connectSettle;
-        connectSettle = null;
-        if (settled) settled(false);
+        connectingUrl = "";
+        disarmPolicyListener();
+        settleConnect(false);
         const wasSilent = silent;
         silent = false;
         if (wsState !== "off") {
@@ -1345,10 +1401,12 @@
         }
       };
       sock.onerror = () => {
-        if (ws === sock && wsState !== "off") {
+        if (ws !== sock || wsState === "off") return;
+        if (wsState === "connecting") {
+          settleConnect(false);
           setState("off");
-          if (!silent) toast(t("conn.unreachable", { url }));
         }
+        if (!silent) toast(t("conn.unreachable", { url }));
       };
       return attempt;
     }
@@ -1356,6 +1414,7 @@
       manualDown = true;
       clearBackoff();
       silent = false;
+      disarmPolicyListener();
       setState("off");
       if (ws) {
         try {
@@ -1375,7 +1434,6 @@
     function revokeAutoLink() {
       gm2.set(autoLinkKey(location.origin), false);
     }
-    const DEFAULT_PROMPT = "请逐条回应本页标注：note 写了要求的按 note 处理；没写 note 的，请解释该元素的渲染逻辑（组件与样式来源）。";
     const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：本页已授权 broker 自动重连，修改代码导致页面刷新后，连接会自动恢复（重连期间 page.request 可能短暂返回 no_tabs/timeout，等几秒重试即可，重试上限 3 次）。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。";
     function submitToAgent(prompt, targetName, record) {
       return new Promise((resolve) => {
@@ -1457,6 +1515,45 @@
     };
   }
 
+  // web-picker.src/tt.js
+  var POLICY_NAME = "pi-xfer";
+  var cached;
+  function ttPolicy() {
+    if (cached !== void 0) return cached;
+    cached = null;
+    try {
+      const tt = window.trustedTypes;
+      if (tt && typeof tt.createPolicy === "function") {
+        cached = tt.createPolicy(POLICY_NAME, { createHTML: (s) => s });
+      }
+    } catch (e) {
+      cached = null;
+    }
+    return cached;
+  }
+  function setHTML(target, html) {
+    if (!target) return;
+    const markup = html == null ? "" : String(html);
+    const policy = ttPolicy();
+    try {
+      target.innerHTML = policy ? policy.createHTML(markup) : markup;
+    } catch (e) {
+      try {
+        target.innerHTML = markup;
+      } catch (e2) {
+        target.textContent = markup;
+      }
+    }
+  }
+  function clearHTML(target) {
+    if (!target) return;
+    try {
+      target.innerHTML = "";
+    } catch (e) {
+      target.textContent = "";
+    }
+  }
+
   // web-picker.src/ui/shadow.js
   function buildUI() {
     const host = document.createElement("div");
@@ -1475,7 +1572,7 @@
       }).observe(document.documentElement, { childList: true });
     }
     const root = host.attachShadow({ mode: "open" });
-    root.innerHTML = `
+    setHTML(root, `
     <style>
       :host {
         --wp-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -1683,11 +1780,18 @@
         font: 600 12px/1.5 var(--wp-font); color: var(--wp-ink); }
       #sendmenu .mitem:hover { background: #eaf1ff; }
       #sendmenu .msub { font: 400 10px/1.5 var(--wp-font); color: var(--wp-muted); margin-top: 1px; }
+      /* no broker link → copy-prompt takes the send button's place */
+      #sendoffline { flex: none; }
+      #sendoffline[hidden] { display: none; }
       #connstate { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500;
         color: var(--wp-muted); flex: 1; cursor: pointer; user-select: none; white-space: nowrap; }
       #connstate .dot { flex: none; width: 9px; height: 9px; border-radius: 50%;
         background: #94a3b8; transition: background .2s ease, box-shadow .2s ease; }
       #connstate.connecting .dot { background: var(--wp-amber); }
+      /* CSP-blocked: not "broker down" — retrying cannot succeed on this page */
+      #dot.blocked { background: #ef4444; }
+      #connstate.blocked .dot { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.16); }
+      #connstate.blocked { color: #b91c1c; }
       #connstate.on { color: #15803d; }
       #connstate.on .dot { background: var(--wp-green); box-shadow: 0 0 0 3px rgba(34,197,94,.18); }
       #connstate:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -1754,6 +1858,7 @@
         <div class="srow">
           <span id="connstate"><span class="dot"></span><span id="conntext">${t("conn.off")}</span></span>
           <button class="ghost" id="clearbtn">${t("clearbtn")}</button>
+          <button class="primary" id="sendoffline" hidden>${t("copyprompt.offline")}</button>
           <div id="sendgroup">
             <button class="primary" id="sendbtn">${t("sendbtn")}</button>
             <button class="primary more" id="sendmore" title="${t("sendmore.title")}">▾</button>
@@ -1784,9 +1889,9 @@
         <button class="primary" id="ssave">${t("settings.save")}</button>
       </div>
     </div>
-  `;
+  `);
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
     if (gm.get(GM_FAB_SIZE, "small") === "large") elFab.classList.add("large");
     let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
     try {
@@ -1866,7 +1971,8 @@
       elSCancel,
       elSProps,
       elSAuto,
-      elSWrite
+      elSWrite,
+      elSendOffline
     };
     function reinjectTrigger() {
       if (host.isConnected) return true;
@@ -1920,12 +2026,12 @@
       const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : "";
       elPcount.textContent = b.length || recHtml ? t("count.items", { n: b.length + (recHtml ? 1 : 0) }) : "";
       if (!b.length && !recHtml) {
-        elPlist.innerHTML = `<div class="empty">${t("panel.empty")}</div>`;
+        setHTML(elPlist, `<div class="empty">${t("panel.empty")}</div>`);
         return;
       }
-      elPlist.innerHTML = recHtml + b.map(
+      setHTML(elPlist, recHtml + b.map(
         (r, i) => '<div class="item" data-i="' + i + '"><div class="psel">' + escapeHtml(r.selector) + "</div>" + (r.group ? `<div class="pgroup">${t("group.label", { g: escapeHtml(r.group) })}</div>` : "") + (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + " · " + r.source.file + ":" + r.source.line) + "</div>" : "") + (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + "</div>" : "") + `<textarea placeholder="${t("note.placeholder")}">` + escapeHtml(r.note || "") + '</textarea><div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + `</span><button class="del">${t("btn.delete")}</button></div></div>`
-      ).join("");
+      ).join(""));
     }
     ctx.renderPanel = renderPanel;
     function openPanel() {
@@ -2113,11 +2219,11 @@
       elBadge.style.display = "block";
       elBadge.style.left = r.left + r.width / 2 + "px";
       elBadge.style.top = r.top + "px";
-      elBadge.innerHTML = idx + 1 + `<small>/${t("pick.layers", { n: stack.length })} · ` + Math.round(r.width) + "×" + Math.round(r.height) + "</small>";
+      setHTML(elBadge, idx + 1 + `<small>/${t("pick.layers", { n: stack.length })} · ` + Math.round(r.width) + "×" + Math.round(r.height) + "</small>");
       elInfo.style.display = "block";
       elInfo.style.left = r.left + "px";
       elInfo.style.top = r.top + "px";
-      elInfo.innerHTML = '<span class="pv">' + escapeHtml(selectorPreview(el)) + '</span> <span class="dim">' + Math.round(r.width) + "×" + Math.round(r.height) + " · " + escapeHtml(cssPath(el)) + "</span>";
+      setHTML(elInfo, '<span class="pv">' + escapeHtml(selectorPreview(el)) + '</span> <span class="dim">' + Math.round(r.width) + "×" + Math.round(r.height) + " · " + escapeHtml(cssPath(el)) + "</span>");
     }
     function refresh() {
       applyHighlight(currentEl(), !!pinned);
@@ -2284,7 +2390,7 @@
       toggleGroup(st[0]);
     }
     function renderGroupMarks() {
-      elGWrap.innerHTML = "";
+      clearHTML(elGWrap);
       if (!pickMode || !groupEls.length) {
         elGWrap.style.display = "none";
         return;
@@ -2320,7 +2426,7 @@
     function updateGroupUI() {
       const n = groupEls.length;
       elGH.classList.toggle("on", n > 0);
-      elGH.innerHTML = `<kbd>⇧Enter</kbd>${t("bar.group")}` + (n ? t("gh.note", { n }) : "");
+      setHTML(elGH, `<kbd>⇧Enter</kbd>${t("bar.group")}` + (n ? t("gh.note", { n }) : ""));
       elGCLEAR.style.display = n ? "inline-flex" : "none";
     }
     ctx.updateGroupUI = updateGroupUI;
@@ -2442,21 +2548,21 @@
     }
     function renderDrop() {
       if (!targets.length) {
-        elTDrop.innerHTML = `<div class="tempty">${t("combo.noSessions")}</div>`;
+        setHTML(elTDrop, `<div class="tempty">${t("combo.noSessions")}</div>`);
         return;
       }
       const list = comboList();
       if (!list.length) {
-        elTDrop.innerHTML = `<div class="tempty">${t("combo.noMatch")}</div>`;
+        setHTML(elTDrop, `<div class="tempty">${t("combo.noMatch")}</div>`);
         return;
       }
       if (comboHl >= list.length) comboHl = list.length - 1;
       if (comboHl < 0) comboHl = 0;
       const q = comboFilter.trim();
-      elTDrop.innerHTML = list.map((t2, i) => {
+      setHTML(elTDrop, list.map((t2, i) => {
         const sub = (t2.cwd || "?") + (t2.status ? " · " + t2.status : "");
         return '<div class="titem' + (i === comboHl ? " hl" : "") + '" data-name="' + escapeHtml(t2.name) + '"><div class="tname">' + (q ? markMatch(t2.name, q) : escapeHtml(t2.name)) + (t2.name === comboSel ? ' <span class="tick">✓</span>' : "") + '</div><div class="tsub">' + (q ? markMatch(sub, q) : escapeHtml(sub)) + "</div></div>";
-      }).join("") + `<div class="thint">${t("combo.hint")}</div>`;
+      }).join("") + `<div class="thint">${t("combo.hint")}</div>`);
       const hl = elTDrop.querySelector(".titem.hl");
       if (hl) {
         if (hl.offsetTop < elTDrop.scrollTop) elTDrop.scrollTop = hl.offsetTop;
@@ -2567,6 +2673,107 @@
     });
   }
 
+  // web-picker.src/offline-doc.js
+  function pickSection(pick, index) {
+    const lines = [
+      "### " + (index + 1) + ". " + (pick.selector || "(no selector)"),
+      "",
+      "- xpath: " + (pick.xpath || ""),
+      "- text: " + (pick.textPreview || "")
+    ];
+    if (pick.attributes && Object.keys(pick.attributes).length) {
+      const attrs = Object.keys(pick.attributes).slice(0, 20).map((k) => pick.attributes[k] ? k + '="' + pick.attributes[k] + '"' : k);
+      if (attrs.length) lines.push("- attrs: " + attrs.join(" "));
+    }
+    const r = pick.rect || {};
+    lines.push("- rect: x=" + (r.x || 0) + " y=" + (r.y || 0) + " w=" + (r.w || 0) + " h=" + (r.h || 0));
+    lines.push("- note: " + (pick.note || ""));
+    if (pick.group) lines.push("- group: " + pick.group);
+    if (pick.source && pick.source.file) lines.push("- source: " + pick.source.file + ":" + pick.source.line);
+    lines.push("");
+    return lines;
+  }
+  var RECORD_SCENE_MAX = 40;
+  function recordEventLine(ev) {
+    const parts = ["+`" + ev.t + "ms`", "`" + ev.kind + "`"];
+    if (ev.sel) parts.push("`" + ev.sel + "`");
+    if (ev.kind === "input" && ev.value !== void 0) parts.push("value=`" + ev.value + "`");
+    if (ev.kind === "key" && ev.key) parts.push("key=`" + ev.key + "`");
+    if (ev.kind === "nav" && ev.to) parts.push("→ " + ev.to);
+    if (ev.text) parts.push('— "' + ev.text + '"');
+    if (ev.ref) parts.push("(pick #" + ev.ref + ")");
+    return "- " + parts.join(" ");
+  }
+  function recordSection(rec) {
+    const lines = [
+      "## Operation timeline",
+      "",
+      "- record: " + rec.id,
+      "- span: " + rec.start + (rec.end ? " → " + rec.end : "") + " (" + new Date(rec.start).toISOString() + (rec.end ? " → " + new Date(rec.end).toISOString() : "") + ")",
+      "- url: " + (rec.url1 && rec.url1 !== rec.url0 ? rec.url0 + " → " + rec.url1 : rec.url0 || ""),
+      "",
+      "The user reproduced the problem by hand while the picker recorded. Events are ordered (`seq`) with millisecond offsets (`t`); `input` values are final field values (passwords masked).",
+      ""
+    ];
+    for (const ev of rec.events || []) lines.push(recordEventLine(ev));
+    lines.push("");
+    if (rec.net && rec.net.length) {
+      lines.push("### Network (window slice)", "");
+      for (const n of rec.net.slice(-RECORD_SCENE_MAX)) {
+        const status = n.pending ? "pending" : String(n.status === void 0 ? "?" : n.status);
+        const sse = n.kind === "sse" ? " sse" + (n.msgs !== void 0 ? " msgs=" + n.msgs : "") : "";
+        const dur = n.durationMs !== void 0 ? " " + n.durationMs + "ms" : "";
+        lines.push("- " + (n.method || "?") + " " + (n.url || "?") + " → " + status + sse + dur + (n.error ? ' error="' + n.error + '"' : ""));
+      }
+      lines.push("");
+    }
+    if (rec.console && rec.console.length) {
+      lines.push("### Console (window slice)", "");
+      for (const c of rec.console.slice(-RECORD_SCENE_MAX)) {
+        lines.push("- [" + (c.level || "log") + "] " + (c.text || ""));
+      }
+      lines.push("");
+    }
+    return lines;
+  }
+  function renderOfflineHandoffDoc({ prompt, page, picks, record, target }) {
+    const ts = page && page.ts || Date.now();
+    const lines = [
+      "# Web annotation handoff",
+      "",
+      "## Request",
+      "",
+      prompt || "",
+      "",
+      "## Page",
+      "",
+      "- url: " + (page && page.url || ""),
+      "- title: " + (page && page.title || ""),
+      "- ts: " + ts + " (" + new Date(ts).toISOString() + ")",
+      ""
+    ];
+    if (target) lines.push("- expected receiver: " + target);
+    if (target) lines.push("");
+    lines.push("## Annotations", "");
+    const list = Array.isArray(picks) ? picks : [];
+    if (!list.length) lines.push("_No elements were picked on this page._", "");
+    list.forEach((pick, i) => {
+      lines.push(...pickSection(pick || {}, i));
+    });
+    if (record) lines.push(...recordSection(record));
+    lines.push(
+      "## Offline composition",
+      "",
+      "This document was assembled inside the browser tab by the pi-xfer web-picker userscript: the local broker was not reachable, so **there is no way to query this page later** (no reverse channel, no live browser link). Everything you need is above — the picks, the recorded operation timeline, and its console/network slices. Treat this document as the complete record of what the user saw and did.",
+      "",
+      "---",
+      "",
+      "from: web-picker (browser userscript — composed offline in the tab, no broker link; save this file and open it in an agent session)",
+      "handoff_id: local-" + ts
+    );
+    return lines.join("\n") + "\n";
+  }
+
   // web-picker.src/ui/send.js
   function copyText(text) {
     try {
@@ -2586,20 +2793,36 @@
   }
   function initSend(ctx) {
     const { els, toast } = ctx;
-    const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elConn, elConnText } = els;
+    const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elConn, elConnText, elSendOffline } = els;
     const conn = ctx.conn;
-    async function copyHandoffPrompt() {
-      ctx.closeSendMenu();
-      if (conn.getState() !== "on") {
-        toast(t("send.connectFirst"));
+    function composeOffline() {
+      const prompt = elPrompt.value.trim() || DEFAULT_PROMPT;
+      const target = ctx.getComboSel() || gm.get(GM_TARGET, "") || "";
+      const text = renderOfflineHandoffDoc({
+        prompt,
+        page: { url: location.href, title: document.title, ts: Date.now() },
+        picks: loadBatch(),
+        record: ctx.getRecord ? ctx.getRecord() : null,
+        target
+      });
+      if (!copyText(text)) {
+        toast(t("send.clipboard"));
         return;
       }
+      toast(t("send.copiedOffline", { n: text.length }));
+    }
+    async function copyHandoffPrompt() {
+      ctx.closeSendMenu();
       const prompt = elPrompt.value.trim();
       const target = ctx.getComboSel();
       const hasPicks = loadBatch().length > 0;
       const record = ctx.getRecord ? ctx.getRecord() : null;
       if (!prompt && !hasPicks && !record) {
         toast(t("send.needContent"));
+        return;
+      }
+      if (conn.getState() !== "on") {
+        composeOffline();
         return;
       }
       toast(t("send.composing"));
@@ -2618,7 +2841,7 @@
       const prompt = elPrompt.value.trim();
       const target = ctx.getComboSel();
       if (!target) {
-        toast(conn.getState() !== "on" ? t("send.connectFirst") : t("send.noTarget"));
+        toast(conn.getState() !== "on" ? t("send.noTargetOffline") : t("send.noTarget"));
         return;
       }
       const hasPicks = loadBatch().length > 0;
@@ -2665,6 +2888,7 @@
       elSendMenu.classList.toggle("open", sendMenuOpen);
     });
     elCopyPrompt.addEventListener("click", copyHandoffPrompt);
+    if (elSendOffline) elSendOffline.addEventListener("click", copyHandoffPrompt);
     ctx.copyHandoffPrompt = copyHandoffPrompt;
     window.addEventListener("pointerdown", (e) => {
       if (!sendMenuOpen) return;
@@ -2690,10 +2914,20 @@
         if (!ok) ctx.openSettings();
       });
     });
+    function renderSendAffordance(s) {
+      const linked = s === "on";
+      const busy = s === "connecting";
+      elSendGroup.style.display = linked || busy ? "" : "none";
+      elSend.disabled = !linked;
+      if (elSendOffline) elSendOffline.hidden = linked || busy;
+      if (!linked) closeSendMenu();
+    }
+    ctx.renderSendAffordance = renderSendAffordance;
     ctx.renderConnPill = (s) => {
-      elConn.className = s === "on" ? "on" : s === "connecting" ? "connecting" : "";
-      elConn.title = s === "on" ? t("pill.disconnect.title") : s === "connecting" ? t("conn.connecting") : t("pill.off.title");
-      elConnText.textContent = s === "on" ? t("conn.on") : s === "connecting" ? t("conn.connecting") : t("conn.off");
+      elConn.className = s === "on" ? "on" : s === "connecting" ? "connecting" : s === "blocked" ? "blocked" : "";
+      elConn.title = s === "on" ? t("pill.disconnect.title") : s === "connecting" ? t("conn.connecting") : s === "blocked" ? t("pill.blocked.title") : t("pill.off.title");
+      elConnText.textContent = s === "on" ? t("conn.on") : s === "connecting" ? t("conn.connecting") : s === "blocked" ? t("conn.blocked") : t("conn.off");
+      renderSendAffordance(s);
     };
   }
 
@@ -3332,112 +3566,146 @@
   // web-picker.src/main.js
   if (!window.__PI_WEBPICKER__) {
     window.__PI_WEBPICKER__ = true;
-    installCapture();
-    const ui = buildUI();
-    const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
-    const pageTools = createPageTools({ gm, consoleRing, netRing, debugLog });
-    ctx.pageTools = pageTools;
-    const conn = createBrokerConn({
-      gm,
-      debugLog,
-      toast: ui.toast,
-      onState: (s) => {
-        ui.els.elDot.className = s === "on" ? "on" : s === "connecting" ? "connecting" : "";
-        if (ctx.renderConnPill) ctx.renderConnPill(s);
-        if (s !== "on" && ctx.renderTargetCombo) ctx.renderTargetCombo();
-      },
-      onWelcome: () => {
-        if (ctx.refreshTargets) void ctx.refreshTargets();
-      },
-      onPageRequest: (f) => {
-        try {
-          pageTools.handlePageToolRequest(f, (id, ok, payload) => {
-            conn.sendFrame(framePageResponse(id, ok, payload));
-          });
-        } catch (err) {
-          debugLog("page.request dispatch failed:", err && err.message ? err.message : err);
-          conn.sendFrame(framePageResponse(f.id, false, "dispatch_failed: " + (err && err.message ? err.message : String(err))));
-        }
-      }
-    });
-    ctx.conn = conn;
-    initPanel(ctx);
-    initPick(ctx);
-    initCombo(ctx);
-    initSend(ctx);
-    initSettings(ctx);
-    initFab(ctx);
-    ctx.consoleRing = consoleRing;
-    ctx.netRing = netRing;
-    initRecord(ctx);
-    initHotkeys(ctx);
-    ctx.refreshCount();
-    ctx.updateGroupUI();
-    ctx.renderTargetCombo();
-    conn.maybeAutoConnect();
-    debugLog("ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · " + location.host);
-    window.__PI_WP_API__ = {
-      start: () => {
-        ctx.setActive(true);
-        return true;
-      },
-      stop: () => {
-        ctx.setActive(false);
-        return true;
-      },
-      panel: ctx.togglePanel,
-      record: () => ctx.toggleRecord(),
-      recordState: () => ctx.recState,
-      getRecord: () => ctx.getRecord(),
-      connect: () => conn.connect(),
-      disconnect: () => conn.disconnect(),
-      settings: ctx.openSettings,
-      send: (prompt, target) => conn.submitToAgent(prompt, target),
-      copyPrompt: ctx.copyHandoffPrompt,
-      targets: ctx.getTargets,
-      refreshTargets: () => ctx.refreshTargets(),
-      snapshot: () => loadBatch(),
-      tools: () => Object.keys(pageTools.PAGE_TOOLS),
-      consoleLog: () => consoleRing.slice(),
-      netLog: () => netRing.slice(),
-      frameworkProps: () => gm.get("wp.frameworkProps", false) === true,
-      setFrameworkProps: (on) => {
-        gm.set("wp.frameworkProps", !!on);
-        ui.els.elSProps.checked = !!on;
-        return !!on;
-      },
-      setDebug: (on) => {
-        gm.set(GM_DEBUG, !!on);
-        return !!on;
-      },
-      reinject: ui.reinjectTrigger
-    };
     try {
-      GM_registerMenuCommand(t("menu.connect"), () => conn.connect());
-      GM_registerMenuCommand(t("menu.disconnect"), () => conn.disconnect());
-      GM_registerMenuCommand(t("menu.settings"), ctx.openSettings);
-      GM_registerMenuCommand(t("menu.revokeAuto"), () => {
-        conn.revokeAutoLink();
-        ui.toast(t("toast.autoRevoked", { origin: location.origin }));
+      installCapture();
+      const ui = buildUI();
+      const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
+      const pageTools = createPageTools({ gm, consoleRing, netRing, debugLog });
+      ctx.pageTools = pageTools;
+      const conn = createBrokerConn({
+        gm,
+        debugLog,
+        toast: ui.toast,
+        onState: (s) => {
+          ui.els.elDot.className = s === "on" ? "on" : s === "connecting" ? "connecting" : s === "blocked" ? "blocked" : "";
+          if (ctx.renderConnPill) ctx.renderConnPill(s);
+          if (s !== "on" && ctx.renderTargetCombo) ctx.renderTargetCombo();
+        },
+        onWelcome: () => {
+          if (ctx.refreshTargets) void ctx.refreshTargets();
+        },
+        onPageRequest: (f) => {
+          try {
+            pageTools.handlePageToolRequest(f, (id, ok, payload) => {
+              conn.sendFrame(framePageResponse(id, ok, payload));
+            });
+          } catch (err) {
+            debugLog("page.request dispatch failed:", err && err.message ? err.message : err);
+            conn.sendFrame(framePageResponse(f.id, false, "dispatch_failed: " + (err && err.message ? err.message : String(err))));
+          }
+        }
       });
-      GM_registerMenuCommand(t("menu.openPanel"), ctx.togglePanel);
-      GM_registerMenuCommand(t("menu.startPick"), () => ctx.setActive(true));
-      GM_registerMenuCommand(t("menu.toggleRecord"), () => ctx.toggleRecord());
-      GM_registerMenuCommand(t("menu.reinject"), () => {
-        ui.toast(ui.reinjectTrigger() ? t("toast.reinjected") : t("toast.reinjectStuck"));
-      });
-      GM_registerMenuCommand(t("menu.lang"), () => {
-        const lang2 = toggleLang();
-        ui.toast(t("toast.langSwitched"));
-        debugLog("language set to", lang2);
-      });
-      GM_registerMenuCommand(t("menu.fabSize"), () => {
-        const next = gm.get(GM_FAB_SIZE, "small") === "small" ? "large" : "small";
-        gm.set(GM_FAB_SIZE, next);
-        ui.els.elFab.classList.toggle("large", next === "large");
-        ui.toast(t("toast.fabSize", { size: next }));
-      });
-    } catch (e) {
+      ctx.conn = conn;
+      initPanel(ctx);
+      initPick(ctx);
+      initCombo(ctx);
+      initSend(ctx);
+      initSettings(ctx);
+      initFab(ctx);
+      ctx.consoleRing = consoleRing;
+      ctx.netRing = netRing;
+      initRecord(ctx);
+      initHotkeys(ctx);
+      ctx.refreshCount();
+      ctx.updateGroupUI();
+      ctx.renderTargetCombo();
+      if (ctx.renderSendAffordance) ctx.renderSendAffordance(conn.getState());
+      conn.maybeAutoConnect();
+      debugLog("ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · " + location.host);
+      window.__PI_WP_API__ = {
+        start: () => {
+          ctx.setActive(true);
+          return true;
+        },
+        stop: () => {
+          ctx.setActive(false);
+          return true;
+        },
+        panel: ctx.togglePanel,
+        record: () => ctx.toggleRecord(),
+        recordState: () => ctx.recState,
+        getRecord: () => ctx.getRecord(),
+        connect: () => conn.connect(),
+        disconnect: () => conn.disconnect(),
+        settings: ctx.openSettings,
+        send: (prompt, target) => conn.submitToAgent(prompt, target),
+        copyPrompt: ctx.copyHandoffPrompt,
+        targets: ctx.getTargets,
+        refreshTargets: () => ctx.refreshTargets(),
+        snapshot: () => loadBatch(),
+        tools: () => Object.keys(pageTools.PAGE_TOOLS),
+        consoleLog: () => consoleRing.slice(),
+        netLog: () => netRing.slice(),
+        frameworkProps: () => gm.get("wp.frameworkProps", false) === true,
+        setFrameworkProps: (on) => {
+          gm.set("wp.frameworkProps", !!on);
+          ui.els.elSProps.checked = !!on;
+          return !!on;
+        },
+        setDebug: (on) => {
+          gm.set(GM_DEBUG, !!on);
+          return !!on;
+        },
+        reinject: ui.reinjectTrigger
+      };
+      try {
+        GM_registerMenuCommand(t("menu.connect"), () => conn.connect());
+        GM_registerMenuCommand(t("menu.disconnect"), () => conn.disconnect());
+        GM_registerMenuCommand(t("menu.settings"), ctx.openSettings);
+        GM_registerMenuCommand(t("menu.revokeAuto"), () => {
+          conn.revokeAutoLink();
+          ui.toast(t("toast.autoRevoked", { origin: location.origin }));
+        });
+        GM_registerMenuCommand(t("menu.openPanel"), ctx.togglePanel);
+        GM_registerMenuCommand(t("menu.startPick"), () => ctx.setActive(true));
+        GM_registerMenuCommand(t("menu.toggleRecord"), () => ctx.toggleRecord());
+        GM_registerMenuCommand(t("menu.reinject"), () => {
+          ui.toast(ui.reinjectTrigger() ? t("toast.reinjected") : t("toast.reinjectStuck"));
+        });
+        GM_registerMenuCommand(t("menu.lang"), () => {
+          const lang2 = toggleLang();
+          ui.toast(t("toast.langSwitched"));
+          debugLog("language set to", lang2);
+        });
+        GM_registerMenuCommand(t("menu.fabSize"), () => {
+          const next = gm.get(GM_FAB_SIZE, "small") === "small" ? "large" : "small";
+          gm.set(GM_FAB_SIZE, next);
+          ui.els.elFab.classList.toggle("large", next === "large");
+          ui.toast(t("toast.fabSize", { size: next }));
+        });
+      } catch (e) {
+      }
+    } catch (err) {
+      try {
+        failSafeNotice(err);
+      } catch (e) {
+      }
+      debugLog("init failed:", err && err.message ? err.message : err);
     }
+  }
+  function failSafeNotice(err) {
+    const msg = String(err && err.message || err || "unknown error");
+    const box = document.createElement("div");
+    box.setAttribute("data-pi-wp-error", "");
+    box.textContent = "pi-xfer web picker failed to start: " + msg;
+    Object.assign(box.style, {
+      position: "fixed",
+      right: "12px",
+      bottom: "12px",
+      zIndex: "2147483647",
+      maxWidth: "380px",
+      padding: "10px 12px",
+      borderRadius: "8px",
+      background: "#1e293b",
+      color: "#f8fafc",
+      font: "12px/1.5 system-ui, sans-serif"
+    });
+    (document.body || document.documentElement).appendChild(box);
+    setTimeout(() => {
+      try {
+        box.remove();
+      } catch (e) {
+      }
+    }, 12e3);
   }
 })();

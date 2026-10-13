@@ -10,6 +10,7 @@ import { loadBatch, saveBatch } from '../storage.js';
 import { cssPath, xPath, nearestScrollable, selectorPreview, escapeHtml } from '../dom-utils.js';
 import { sourceInfo } from '../framework.js';
 import { t } from '../i18n.js';
+import { clearHTML, setHTML } from '../tt.js';
 
 export function initPick(ctx) {
   const { host, root, els, toast } = ctx;
@@ -65,12 +66,12 @@ export function initPick(ctx) {
     elBadge.style.display = 'block';
     elBadge.style.left = (r.left + r.width / 2) + 'px';
     elBadge.style.top = r.top + 'px';
-    elBadge.innerHTML = (idx + 1) + `<small>/${t('pick.layers', { n: stack.length })} · ` + Math.round(r.width) + '×' + Math.round(r.height) + '</small>';
+    setHTML(elBadge, (idx + 1) + `<small>/${t('pick.layers', { n: stack.length })} · ` + Math.round(r.width) + '×' + Math.round(r.height) + '</small>');
     elInfo.style.display = 'block';
     elInfo.style.left = r.left + 'px';
     elInfo.style.top = r.top + 'px';
-    elInfo.innerHTML = '<span class="pv">' + escapeHtml(selectorPreview(el)) + '</span> <span class="dim">' +
-      Math.round(r.width) + '×' + Math.round(r.height) + ' · ' + escapeHtml(cssPath(el)) + '</span>';
+    setHTML(elInfo, '<span class="pv">' + escapeHtml(selectorPreview(el)) + '</span> <span class="dim">' +
+      Math.round(r.width) + '×' + Math.round(r.height) + ' · ' + escapeHtml(cssPath(el)) + '</span>');
   }
   function refresh() { applyHighlight(currentEl(), !!pinned); }
   ctx.refresh = refresh;
@@ -221,7 +222,7 @@ export function initPick(ctx) {
     toggleGroup(st[0]);
   }
   function renderGroupMarks() {
-    elGWrap.innerHTML = '';
+    clearHTML(elGWrap);
     if (!pickMode || !groupEls.length) { elGWrap.style.display = 'none'; return; }
     elGWrap.style.display = 'block';
     groupEls.forEach((el, i) => {
@@ -255,8 +256,8 @@ export function initPick(ctx) {
   function updateGroupUI() {
     const n = groupEls.length;
     elGH.classList.toggle('on', n > 0);
-    elGH.innerHTML = `<kbd>⇧Enter</kbd>${t('bar.group')}` +
-      (n ? t('gh.note', { n }) : '');
+    setHTML(elGH, `<kbd>⇧Enter</kbd>${t('bar.group')}` +
+      (n ? t('gh.note', { n }) : ''));
     elGCLEAR.style.display = n ? 'inline-flex' : 'none';
   }
   ctx.updateGroupUI = updateGroupUI;

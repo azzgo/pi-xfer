@@ -2,6 +2,8 @@
 // clear button, copy-handoff-prompt flow.
 
 import { GM_TARGET } from '../constants.js';
+import { DEFAULT_PROMPT } from '../broker-conn.js';
+import { renderOfflineHandoffDoc } from '../offline-doc.js';
 import { gm, loadBatch } from '../storage.js';
 import { t } from '../i18n.js';
 
@@ -18,17 +20,34 @@ function copyText(text) {
 
 export function initSend(ctx) {
   const { els, toast } = ctx;
-  const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elConn, elConnText } = els;
+  const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elConn, elConnText, elSendOffline } = els;
   const conn = ctx.conn;
+
+  // No broker? Compose the same document here in the tab from data we already
+  // hold (picks in sessionStorage, the finished record, this tab's url/title).
+  // No targets fetch, no follow-up channel — the receiver opens the file.
+  function composeOffline() {
+    const prompt = elPrompt.value.trim() || DEFAULT_PROMPT;
+    const target = ctx.getComboSel() || gm.get(GM_TARGET, '') || '';
+    const text = renderOfflineHandoffDoc({
+      prompt,
+      page: { url: location.href, title: document.title, ts: Date.now() },
+      picks: loadBatch(),
+      record: ctx.getRecord ? ctx.getRecord() : null,
+      target,
+    });
+    if (!copyText(text)) { toast(t('send.clipboard')); return; }
+    toast(t('send.copiedOffline', { n: text.length }));
+  }
 
   async function copyHandoffPrompt() {
     ctx.closeSendMenu();
-    if (conn.getState() !== 'on') { toast(t('send.connectFirst')); return; }
     const prompt = elPrompt.value.trim();
     const target = ctx.getComboSel();
     const hasPicks = loadBatch().length > 0;
     const record = ctx.getRecord ? ctx.getRecord() : null;
     if (!prompt && !hasPicks && !record) { toast(t('send.needContent')); return; }
+    if (conn.getState() !== 'on') { composeOffline(); return; }
     toast(t('send.composing'));
     const res = await conn.requestCompose(prompt, target, record);
     if (!res.ok) { toast(t('send.composeFailed', { detail: res.code + (res.message ? ' — ' + res.message : '') })); return; }
@@ -40,7 +59,7 @@ export function initSend(ctx) {
     const prompt = elPrompt.value.trim();            // 可留空 → submitToAgent 落到 DEFAULT_PROMPT
     const target = ctx.getComboSel();
     if (!target) {
-      toast(conn.getState() !== 'on' ? t('send.connectFirst') : t('send.noTarget'));
+      toast(conn.getState() !== 'on' ? t('send.noTargetOffline') : t('send.noTarget'));
       return;
     }
     const hasPicks = loadBatch().length > 0;
@@ -84,6 +103,7 @@ export function initSend(ctx) {
     elSendMenu.classList.toggle('open', sendMenuOpen);
   });
   elCopyPrompt.addEventListener('click', copyHandoffPrompt);
+  if (elSendOffline) elSendOffline.addEventListener('click', copyHandoffPrompt);
   ctx.copyHandoffPrompt = copyHandoffPrompt;
   window.addEventListener('pointerdown', (e) => {
     if (!sendMenuOpen) return;
@@ -107,11 +127,30 @@ export function initSend(ctx) {
   });
 
   // broker 状态 → 面板 conn pill（fab 圆点在 main 的 onState 里一并处理）
+  // 'on' → send split button as always. 'connecting' → visible but disabled
+  // (transient, avoids a flicker on every reconnect). 'off'/'blocked' → send
+  // button hidden entirely and copy-prompt promoted to the primary button: with
+  // no broker, composing into the clipboard is the only thing that can work.
+  function renderSendAffordance(s) {
+    const linked = s === 'on';
+    const busy = s === 'connecting';
+    elSendGroup.style.display = linked || busy ? '' : 'none';
+    elSend.disabled = !linked;
+    if (elSendOffline) elSendOffline.hidden = linked || busy;
+    if (!linked) closeSendMenu();
+  }
+  ctx.renderSendAffordance = renderSendAffordance;
+
   ctx.renderConnPill = (s) => {
-    elConn.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : '';
-    elConn.title = s === 'on' ? t('pill.disconnect.title') : s === 'connecting' ? t('conn.connecting') : t('pill.off.title');
+    elConn.className = s === 'on' ? 'on' : s === 'connecting' ? 'connecting' : s === 'blocked' ? 'blocked' : '';
+    elConn.title = s === 'on' ? t('pill.disconnect.title')
+      : s === 'connecting' ? t('conn.connecting')
+      : s === 'blocked' ? t('pill.blocked.title')
+      : t('pill.off.title');
     elConnText.textContent = s === 'on' ? t('conn.on')
       : s === 'connecting' ? t('conn.connecting')
+      : s === 'blocked' ? t('conn.blocked')
       : t('conn.off');
+    renderSendAffordance(s);
   };
 }
