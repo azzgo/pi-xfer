@@ -22,10 +22,10 @@ after(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
 describe("mesh native: platform triple", () => {
   it("maps linux/mac/windows to napi package triples", () => {
+    assert.equal(platformTriple("darwin", "x64"), "darwin-x64");
+    assert.equal(platformTriple("darwin", "arm64"), "darwin-arm64");
+    assert.equal(platformTriple("win32", "x64"), null);
     assert.equal(platformTriple("linux", "x64"), "linux-x64-gnu");
-    assert.equal(platformTriple("linux", "arm64"), "linux-arm64-gnu");
-    assert.equal(platformTriple("darwin", "arm64"), "darwin-universal");
-    assert.equal(platformTriple("win32", "x64"), "x64-msvc");
     assert.equal(platformTriple("freebsd", "x64"), null);
     assert.equal(platformTriple("linux", "ppc64le"), null);
   });

@@ -149,14 +149,10 @@ var init_mesh_config = __esm({
 
 // mesh-native.ts
 function platformTriple(platform = process.platform, arch = process.arch) {
-  if (platform === "darwin") return arch === "arm64" || arch === "x64" ? "darwin-universal" : null;
+  if (platform === "darwin") return arch === "arm64" || arch === "x64" ? `darwin-${arch}` : null;
   if (platform === "linux") {
     if (arch !== "x64" && arch !== "arm64") return null;
     return `linux-${arch}-${isMusl() ? "musl" : "gnu"}`;
-  }
-  if (platform === "win32") {
-    if (arch !== "x64" && arch !== "arm64") return null;
-    return `${arch === "x64" ? "x64" : "arm64"}-msvc`;
   }
   return null;
 }

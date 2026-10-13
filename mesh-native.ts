@@ -21,15 +21,13 @@ const NAPI_BASE = "rivetkit-napi";
  * @rivetkit/rivetkit-napi's own loader. Null on unsupported platforms.
  */
 export function platformTriple(platform: NodeJS.Platform = process.platform, arch: string = process.arch): string | null {
-  if (platform === "darwin") return arch === "arm64" || arch === "x64" ? "darwin-universal" : null;
+  if (platform === "darwin") return arch === "arm64" || arch === "x64" ? `darwin-${arch}` : null;
   if (platform === "linux") {
     if (arch !== "x64" && arch !== "arm64") return null;
     return `linux-${arch}-${isMusl() ? "musl" : "gnu"}`;
   }
-  if (platform === "win32") {
-    if (arch !== "x64" && arch !== "arm64") return null;
-    return `${arch === "x64" ? "x64" : "arm64"}-msvc`;
-  }
+  // Upstream publishes no windows addon binaries (the win32-* packages ship
+  // package.json/README only), so windows has no native runtime to download.
   return null;
 }
 
