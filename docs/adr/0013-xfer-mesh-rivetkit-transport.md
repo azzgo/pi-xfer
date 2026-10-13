@@ -20,3 +20,5 @@ E2E 注记：durable queue 的缓冲从目标 actor 创建后才生效——向�
 Considered: 纯 Tailscale 自写注册/路由/缓冲（全要手造，durable queue 是大头）；独立 bridge daemon（多一个需 GC 的常驻组件）；registry actor（与引擎判死打架）；自动 fallback 传输选择（歧义逻辑不值 5 个字符）。
 
 后续：ADR 0016 将本文的「同 key 先查后占、拒绝」细化为 status-aware adoption——同名 actor 若为 Sleeping/Crashed/Pending 则接管（不销毁），仅 Running 才拒绝；pi 与 adapter daemon 共用同一行为，无 `--takeover`。
+
+后续：ADR 0017 为多机混布补上 per-host runner pool（`MeshConfig.pool` → `setup().envoy.poolName` + 自身 actor 的 `getOrCreate(..., { poolName })`），把 actor 的调度钉在本机 runner 上；发现、desc、跨池 `mesh send` 保持不限定 pool。
