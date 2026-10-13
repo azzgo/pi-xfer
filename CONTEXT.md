@@ -7,9 +7,27 @@ The opt-in cross-machine transport where an agent instance joins a shared actor 
 _Avoid_: network, cluster, swarm, overlay
 
 **Node**:
-A pi agent instance that has joined the Mesh — one actor, one outbound engine connection, one independent participant. The unit of joining, addressing, and liveness.
-_Avoid_: peer (reserved for local socket discovery), bridge, worker
+One actor on the Mesh engine — one name, one outbound engine connection, one independent participant. The unit of joining, addressing, and liveness; host-agnostic (a pi instance and an Adapter Daemon join the same way).
+_Avoid_: peer (reserved for local socket discovery), bridge, worker, session
 
+
+## Adapter Daemon (non-pi Agent Hosts)
+
+**Agent Host**:
+The kind of host software an agent runs in (pi / Cursor / grok bot / …). It determines the install artifacts and how handoffs are delivered, not the agent's online identity.
+_Avoid_: client, IDE, runtime, harness (too broad)
+
+**Adapter Daemon**:
+The bundle process that adapts a non-pi Agent Host to the xfer network — it owns a Node's local socket and Inbox and speaks the same wire protocol as the extension, so hosts are peers on equal footing.
+_Avoid_: bridge, proxy, gateway, connector
+
+**Inbox**:
+A Node's JSONL receive file with take-to-read semantics: `inbox take` atomically reads and deletes the consumed records. There is no durable storage behind it.
+_Avoid_: mailbox, queue (implies persistence and dispatch), log
+
+**Install**:
+Fixing a skill into a target directory for one Agent Host, producing the host config and a recommended launch command so the host never constructs adapter flags itself.
+_Avoid_: deploy, setup, onboarding
 Glossary for the xfer extension. Implementation details live in `docs/`; this file only fixes terms.
 
 ## Board (async cross-agent collaboration)

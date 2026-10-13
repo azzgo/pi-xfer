@@ -18,3 +18,5 @@
 E2E 注记：durable queue 的缓冲从目标 actor 创建后才生效——向从未上线过的节点发送会在超时后报错（现实现 30s），而非无限期缓冲；目标节点下线前已入队的消息在节点重新上线后仍可消费。引擎侧 crash_policy 默认即 sleep，符合本 ADR，无需额外配置。
 
 Considered: 纯 Tailscale 自写注册/路由/缓冲（全要手造，durable queue 是大头）；独立 bridge daemon（多一个需 GC 的常驻组件）；registry actor（与引擎判死打架）；自动 fallback 传输选择（歧义逻辑不值 5 个字符）。
+
+后续：ADR 0016 将本文的「同 key 先查后占、拒绝」细化为 status-aware adoption——同名 actor 若为 Sleeping/Crashed/Pending 则接管（不销毁），仅 Running 才拒绝；pi 与 adapter daemon 共用同一行为，无 `--takeover`。
