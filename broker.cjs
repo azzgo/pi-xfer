@@ -45,7 +45,7 @@ __export(broker_main_exports, {
   startBroker: () => startBroker
 });
 module.exports = __toCommonJS(broker_main_exports);
-var fs2 = __toESM(require("node:fs"), 1);
+var fs3 = __toESM(require("node:fs"), 1);
 var http = __toESM(require("node:http"), 1);
 var net = __toESM(require("node:net"), 1);
 var os2 = __toESM(require("node:os"), 1);
@@ -229,8 +229,78 @@ function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brok
   return lines.join("\n") + "\n";
 }
 
-// targets.ts
+// mesh-config.ts
 var fs = __toESM(require("node:fs"), 1);
+var XFER_INSTANCE_ACTOR = "xfer-instance";
+function parseMeshConfig(raw) {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("mesh config must be a JSON object");
+  }
+  const obj = raw;
+  if (typeof obj.endpoint !== "string" || obj.endpoint.trim() === "") {
+    throw new Error('mesh config needs a non-empty "endpoint"');
+  }
+  const config = { endpoint: obj.endpoint.trim() };
+  if (typeof obj.namespace === "string" && obj.namespace !== "") config.namespace = obj.namespace;
+  if (typeof obj.token === "string" && obj.token !== "") config.token = obj.token;
+  return withUrlAuth(config);
+}
+function withUrlAuth(config) {
+  try {
+    const url = new URL(config.endpoint);
+    if (!config.namespace && url.username) config.namespace = decodeURIComponent(url.username);
+    if (!config.token && url.password) config.token = decodeURIComponent(url.password);
+    if (url.username || url.password) {
+      url.username = "";
+      url.password = "";
+      config.endpoint = url.toString();
+    }
+  } catch {
+  }
+  return config;
+}
+function loadMeshConfig(configPath) {
+  let text;
+  try {
+    text = fs.readFileSync(configPath, "utf-8");
+  } catch {
+    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token? })`);
+  }
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`mesh config is not valid JSON: ${configPath} — ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return parseMeshConfig(raw);
+}
+
+// mesh-describer.ts
+var DESCRIBE_TIMEOUT_MS = 5e3;
+var GET_DESCRIPTION_ACTION = "getDescription";
+function createMeshDescriber(configPath) {
+  let pending = null;
+  const client = () => pending ??= connect(configPath);
+  return async (name) => {
+    const handle = await client();
+    if (!handle) return void 0;
+    const description = await handle.client.get(XFER_INSTANCE_ACTOR, [name]).action({ name: GET_DESCRIPTION_ACTION, args: [], signal: AbortSignal.timeout(DESCRIBE_TIMEOUT_MS) });
+    return typeof description === "string" && description.trim() !== "" ? description : void 0;
+  };
+}
+async function connect(configPath) {
+  try {
+    const config = loadMeshConfig(configPath);
+    const specifier = ["rivetkit", "client"].join("/");
+    const { createClient } = await import(specifier);
+    return { client: createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token }) };
+  } catch {
+    return null;
+  }
+}
+
+// targets.ts
+var fs2 = __toESM(require("node:fs"), 1);
 var path3 = __toESM(require("node:path"), 1);
 
 // utils.ts
@@ -255,7 +325,7 @@ function isEntryPoint(names) {
 var NULL_METADATA = { sessionName: null, cwd: null, status: null };
 function readSiblingMetadata(metadataPath) {
   try {
-    const raw = JSON.parse(fs.readFileSync(metadataPath, "utf-8"));
+    const raw = JSON.parse(fs2.readFileSync(metadataPath, "utf-8"));
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NULL_METADATA;
     const value = raw;
     return {
@@ -270,7 +340,7 @@ function readSiblingMetadata(metadataPath) {
 function listTargets(xferDir = XFER_DIR) {
   let entries;
   try {
-    entries = fs.readdirSync(xferDir);
+    entries = fs2.readdirSync(xferDir);
   } catch {
     return [];
   }
@@ -278,6 +348,22 @@ function listTargets(xferDir = XFER_DIR) {
     const base = sockFile.replace(/\.sock$/, "");
     return { name: decodeAgentName(base), ...readSiblingMetadata(path3.join(xferDir, `${base}.json`)) };
   }).sort((a, b) => a.name.localeCompare(b.name));
+}
+async function listTargetsWithDescriptions(xferDir = XFER_DIR, describe) {
+  const targets = listTargets(xferDir);
+  if (!describe) return targets;
+  return Promise.all(
+    targets.map(async (target) => {
+      let description;
+      try {
+        description = await describe(target.name);
+      } catch {
+        description = void 0;
+      }
+      const trimmed = description?.trim();
+      return trimmed ? { ...target, description: trimmed } : target;
+    })
+  );
 }
 
 // ws-server.ts
@@ -508,7 +594,7 @@ Sec-WebSocket-Accept: ${acceptKey(key)}\r
 // broker-main.ts
 var VERSION = (() => {
   try {
-    return JSON.parse(fs2.readFileSync(path4.join(__dirname, "package.json"), "utf-8")).version ?? "?";
+    return JSON.parse(fs3.readFileSync(path4.join(__dirname, "package.json"), "utf-8")).version ?? "?";
   } catch {
     return "?";
   }
@@ -560,15 +646,15 @@ function pidAlive(pid) {
 function writeFileAtomic(filePath, content) {
   const temp = `${filePath}.tmp-${process.pid}`;
   try {
-    fs2.writeFileSync(temp, content, { encoding: "utf-8", mode: 384 });
-    fs2.renameSync(temp, filePath);
+    fs3.writeFileSync(temp, content, { encoding: "utf-8", mode: 384 });
+    fs3.renameSync(temp, filePath);
     try {
-      fs2.chmodSync(filePath, 384);
+      fs3.chmodSync(filePath, 384);
     } catch {
     }
   } catch (error) {
     try {
-      fs2.unlinkSync(temp);
+      fs3.unlinkSync(temp);
     } catch {
     }
     throw error;
@@ -576,7 +662,7 @@ function writeFileAtomic(filePath, content) {
 }
 function readPidFile(xferDir) {
   try {
-    const raw = fs2.readFileSync(path4.join(xferDir, "broker.pid"), "utf-8").trim();
+    const raw = fs3.readFileSync(path4.join(xferDir, "broker.pid"), "utf-8").trim();
     const pid = Number.parseInt(raw, 10);
     return Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
@@ -586,7 +672,7 @@ function readPidFile(xferDir) {
 function unlinkBrokerFiles(xferDir) {
   for (const name of ["broker.pid", "broker.json"]) {
     try {
-      fs2.unlinkSync(path4.join(xferDir, name));
+      fs3.unlinkSync(path4.join(xferDir, name));
     } catch {
     }
   }
@@ -623,7 +709,7 @@ function nextRequestId() {
 function pushXferNotify(xferDir, target, msg) {
   return new Promise((resolve, reject) => {
     const endpoint = path4.join(xferDir, `${encodeAgentName(target)}.sock`);
-    if (!fs2.existsSync(endpoint)) {
+    if (!fs3.existsSync(endpoint)) {
       reject(Object.assign(new Error(`peer "${target}" not found`), { code: ERR_TARGET_NOT_FOUND }));
       return;
     }
@@ -742,7 +828,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
     return;
   }
   try {
-    fs2.writeFileSync(doc, content, { mode: 384 });
+    fs3.writeFileSync(doc, content, { mode: 384 });
   } catch (error) {
     sendError(connection, frame, ERR_DELIVERY_FAILED, `cannot write doc: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -821,10 +907,12 @@ function parseRecord(raw) {
   if (!r.events.every((ev) => typeof ev === "object" && ev !== null && typeof ev.seq === "number" && typeof ev.t === "number" && typeof ev.kind === "string")) return null;
   return raw;
 }
-function handleTargetsList(connection, frame, xferDir) {
-  const targets = listTargets(xferDir);
+async function handleTargetsList(connection, frame, xferDir) {
+  const describe = createMeshDescriber(path4.join(xferDir, "mesh.config.json"));
+  const targets = await listTargetsWithDescriptions(xferDir, describe);
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_TARGETS_RESULT, id: frameId(frame), targets });
-  console.log(`[targets] ${targets.length} live local target(s)`);
+  const described = targets.filter((t) => t.description).length;
+  console.log(`[targets] ${targets.length} live local target(s), ${described} with a description`);
 }
 var DEFAULT_PAGE_TIMEOUT_MS = 3e4;
 var latestHandoffByTarget = /* @__PURE__ */ new Map();
@@ -1081,7 +1169,7 @@ async function startBroker(options) {
     });
   });
   const port = boundPort();
-  fs2.mkdirSync(options.xferDir, { recursive: true, mode: 448 });
+  fs3.mkdirSync(options.xferDir, { recursive: true, mode: 448 });
   writeBrokerFiles(options.xferDir, port, startedAt);
   function boundPort() {
     const address = server.address();
@@ -1183,7 +1271,7 @@ async function runPageToolCommand(args) {
   const xferDir = parseArgs(process.argv.slice(2)).xferDir;
   let port;
   try {
-    const raw = JSON.parse(fs2.readFileSync(path4.join(xferDir, "broker.json"), "utf-8"));
+    const raw = JSON.parse(fs3.readFileSync(path4.join(xferDir, "broker.json"), "utf-8"));
     const info = raw;
     if (typeof info.port !== "number" || info.port <= 0 || info.port > 65535) throw new Error("bad port");
     port = info.port;

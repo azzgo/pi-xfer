@@ -5,7 +5,15 @@ import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js";
 import { parseMeshConfig, serializeMeshKey, deserializeMeshKey } from "./mesh-config.js";
-import type { MeshEngine, MeshHandoffMessage, MeshNodeInfo } from "./mesh-engine.js";
+import {
+  applyDescriptionAction,
+  normalizeNodeDescription,
+  readDescriptionAction,
+  type MeshEngine,
+  type MeshHandoffMessage,
+  type MeshNodeInfo,
+  type XferInstanceState,
+} from "./mesh-engine.js";
 import type { XferNotifyMessage } from "./types.js";
 
 let tmpDir: string;
@@ -24,6 +32,10 @@ interface FakeEngineState {
   stopped: number;
   destroyed: string[];
   sent: Array<{ target: string; message: MeshHandoffMessage }>;
+  /** Descriptions as the fake engine "holds" them, keyed by node name. */
+  descriptions: Record<string, string>;
+  /** Names whose actor is unreachable (describe rejects). */
+  unreachable: string[];
   upFail?: boolean;
 }
 
@@ -41,6 +53,17 @@ function fakeEngine(state: FakeEngineState): MeshEngine {
       state.nodes = state.nodes.filter((n) => n.actorId !== actorId);
     },
     async queueSend(target, message) { state.sent.push({ target, message }); },
+    async setDescription(value) {
+      const name = state.nodes.find((n) => n.actorId === `actor-${state.ensured.at(-1)}`);
+      const key = name?.name ?? state.ensured.at(-1) ?? "";
+      const stored = normalizeNodeDescription(value);
+      state.descriptions[key] = stored;
+      return stored;
+    },
+    async getDescription(target) {
+      if (state.unreachable.includes(target)) throw new Error(`mesh: describe "${target}" failed — actor unreachable`);
+      return state.descriptions[target] ?? "";
+    },
   };
 }
 
@@ -78,9 +101,70 @@ describe("mesh config", () => {
   });
 });
 
+describe("mesh node descriptions", () => {
+  const fresh = (): FakeEngineState => ({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] });
+
+  it("set stores the trimmed value on this node and returns it", async () => {
+    const state = fresh();
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    assert.equal(await node.setDescription("  handles auth reviews  "), "handles auth reviews");
+    assert.equal(state.descriptions.web, "handles auth reviews");
+  });
+
+  it("set with empty text clears the description", async () => {
+    const state = fresh();
+    state.descriptions.web = "handles auth reviews";
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    assert.equal(await node.setDescription(""), "");
+    assert.equal(state.descriptions.web, "");
+  });
+
+  it("set rejects a non-string and an over-long description", () => {
+    assert.throws(() => normalizeNodeDescription(42), /must be a string/);
+    assert.throws(() => normalizeNodeDescription("x".repeat(501)), /limited to 500 characters/);
+    assert.equal(normalizeNodeDescription("x".repeat(500)).length, 500);
+    assert.equal(normalizeNodeDescription("   "), "");
+  });
+
+  it("actor action bodies trim + cap on write and read back what is stored", async () => {
+    const state: XferInstanceState = { description: "" };
+    assert.equal(await readDescriptionAction(state), "");
+    assert.equal(await applyDescriptionAction(state, "  handles auth reviews  "), "handles auth reviews");
+    assert.equal(state.description, "handles auth reviews");
+    assert.equal(await readDescriptionAction(state), "handles auth reviews");
+    assert.equal(await applyDescriptionAction(state, "   "), "");
+    await assert.rejects(() => applyDescriptionAction(state, "x".repeat(501)), /limited to 500 characters/);
+  });
+
+  it("describe returns another node's stored description", async () => {
+    const state = fresh();
+    state.descriptions.phone = "handles iOS build fixes";
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    assert.deepEqual(await node.describe("phone"), { name: "phone", description: "handles iOS build fixes" });
+    assert.deepEqual(await node.describe("quiet"), { name: "quiet", description: "" });
+  });
+
+  it("describe surfaces the offline error for an unreachable node", async () => {
+    const state = fresh();
+    state.unreachable.push("phone");
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    await assert.rejects(() => node.describe("phone"), /actor unreachable/);
+  });
+
+  it("set + describe require the mesh to be online", async () => {
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(fresh()));
+    await assert.rejects(() => node.setDescription("x"), /not online/);
+    await assert.rejects(() => node.describe("phone"), /not online/);
+  });
+});
+
 describe("mesh node lifecycle", () => {
   it("up connects under the given name after a conflict check", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await node.up("web");
     assert.deepEqual(state.ensured, ["web"]);
@@ -88,7 +172,7 @@ describe("mesh node lifecycle", () => {
   });
 
   it("up refuses when a node with the same name already exists", async () => {
-    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web" }], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await assert.rejects(() => node.up("web"), /already exists/);
     assert.deepEqual(state.ensured, []);
@@ -96,12 +180,12 @@ describe("mesh node lifecycle", () => {
   });
 
   it("up surfaces config errors with the config path", async () => {
-    const node = makeNode(path.join(tmpDir, "does-not-exist.config.json"), fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] }));
+    const node = makeNode(path.join(tmpDir, "does-not-exist.config.json"), fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }));
     await assert.rejects(() => node.up("web"), /mesh not configured/);
   });
 
   it("up awaits an async engineFactory (default bundle-loading path)", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const engine = fakeEngine(state);
     const node = new MeshNode({
       configPath: writeConfig({ endpoint: "http://localhost:6420" }),
@@ -117,14 +201,14 @@ describe("mesh node lifecycle", () => {
   });
 
   it("up refuses when already online", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await node.up("web");
     await assert.rejects(() => node.up("web"), /already online/);
   });
 
   it("down destroys this node's actor and stops the engine exactly once", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const engine = fakeEngine(state);
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), engine);
     await node.up("web");
@@ -135,7 +219,7 @@ describe("mesh node lifecycle", () => {
   });
 
   it("down stops the engine even when the destroy query fails", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const engine = fakeEngine(state);
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), engine);
     await node.up("web");
@@ -148,7 +232,7 @@ describe("mesh node lifecycle", () => {
 
 describe("mesh messaging", () => {
   it("send enqueues the full inline payload with id/from/summary/document", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await node.up("web");
     const { id } = await node.send("phone", { summary: "fix the thing", document: "# Handoff\n\nbody" });
@@ -162,12 +246,12 @@ describe("mesh messaging", () => {
   });
 
   it("send requires being online", async () => {
-    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] }));
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }));
     await assert.rejects(() => node.send("phone", { summary: "s", document: "d" }), /not online/);
   });
 
   it("list queries the engine live and requires being online", async () => {
-    const state: FakeEngineState = { nodes: [{ name: "phone", actorId: "a1" }], ensured: [], stopped: 0, destroyed: [], sent: [] };
+    const state: FakeEngineState = { nodes: [{ name: "phone", actorId: "a1" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await assert.rejects(() => node.list(), /not online/);
     await node.up("web");
@@ -179,7 +263,7 @@ describe("mesh messaging", () => {
 describe("mesh inbound delivery", () => {
   it("writes the doc to /tmp and routes it through the local deliver pipeline", async () => {
     const delivered: XferNotifyMessage[] = [];
-    const engine = fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] });
+    const engine = fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] });
     const sink = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), engine, delivered);
     (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
       id: "mid-1",
@@ -203,7 +287,7 @@ describe("mesh inbound delivery", () => {
     const delivered: XferNotifyMessage[] = [];
     const sink = makeNode(
       writeConfig({ endpoint: "http://localhost:6420" }),
-      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] }),
+      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }),
       delivered,
     );
     (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
@@ -224,7 +308,7 @@ describe("mesh inbound delivery", () => {
     const delivered: XferNotifyMessage[] = [];
     const sink = makeNode(
       writeConfig({ endpoint: "http://localhost:6420" }),
-      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [] }),
+      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }),
       delivered,
     );
     (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({

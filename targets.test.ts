@@ -9,7 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { listTargets } from "./targets.js";
+import { listTargets, listTargetsWithDescriptions } from "./targets.js";
 
 /** Fresh temp dir, cleaned up even when the assertion throws. */
 function withDir(run: (dir: string) => void): void {
@@ -136,5 +136,53 @@ describe("listTargets", () => {
         ["alpha", "mid", "zeta"],
       );
     });
+  });
+});
+
+describe("listTargetsWithDescriptions", () => {
+  it("attaches each target's description", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-targets-desc-"));
+    try {
+      addTarget(dir, "alpha.sock", `{"status": "idle"}`);
+      addTarget(dir, "beta.sock");
+      const described = await listTargetsWithDescriptions(dir, async (name) =>
+        name === "alpha" ? "handles auth reviews" : "handles iOS builds",
+      );
+      assert.deepEqual(described, [
+        { name: "alpha", sessionName: null, cwd: null, status: "idle", description: "handles auth reviews" },
+        { name: "beta", sessionName: null, cwd: null, status: null, description: "handles iOS builds" },
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("omits the field for unreachable actors, empty notes, and rejections", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-targets-desc-"));
+    try {
+      addTarget(dir, "alpha.sock");
+      addTarget(dir, "beta.sock");
+      addTarget(dir, "gamma.sock");
+      const described = await listTargetsWithDescriptions(dir, async (name) => {
+        if (name === "alpha") throw new Error("actor unreachable");
+        if (name === "beta") return "   ";
+        return undefined;
+      });
+      assert.deepEqual(described.map((t) => t.description), [undefined, undefined, undefined]);
+      assert.deepEqual(described.map((t) => t.name), ["alpha", "beta", "gamma"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the plain scan when no describer is given", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-targets-desc-"));
+    try {
+      addTarget(dir, "alpha.sock");
+      assert.deepEqual(await listTargetsWithDescriptions(dir), listTargets(dir));
+      assert.deepEqual(await listTargetsWithDescriptions(dir, undefined), listTargets(dir));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -431,7 +431,7 @@ describe("xfer command: board subcommand", () => {
 });
 
 /** MeshNode stub recording lifecycle calls; configurable status/list results. */
-function stubMesh(overrides: Partial<{ status: () => any; list: () => Promise<any[]>; up: () => Promise<void>; down: () => Promise<void> }> = {}) {
+function stubMesh(overrides: Partial<{ status: () => any; list: () => Promise<any[]>; up: () => Promise<void>; down: () => Promise<void>; setDescription: (text: string) => Promise<string>; describe: (target: string) => Promise<{ name: string; description: string }> }> = {}) {
   const calls: string[] = [];
   return {
     calls,
@@ -443,6 +443,8 @@ function stubMesh(overrides: Partial<{ status: () => any; list: () => Promise<an
       calls.push(`send ${target}`);
       return { id: "mid-9" };
     },
+    setDescription: overrides.setDescription ?? (async (text: string) => { calls.push(`setDescription ${JSON.stringify(text)}`); return text.trim(); }),
+    describe: overrides.describe ?? (async (target: string) => ({ name: target, description: "" })),
   } as any;
 }
 
@@ -581,5 +583,48 @@ describe("xfer command: doctor", () => {
     assert.match(h.notifications[0].message, /\/xfer doctor/);
     assert.ok((h.completions("") ?? []).map((i) => i.value).includes("doctor"));
     assert.deepEqual((h.completions("doc") ?? []).map((i) => i.value), ["doctor"]);
+  });
+});
+
+describe("xfer command: desc", () => {
+  it("sets a description on the online node", async () => {
+    const mesh = stubMesh({ status: () => ({ online: true, name: "test-agent" }) });
+    const h = harness({ mesh });
+    await h.handler("desc handles auth reviews");
+    assert.deepEqual(mesh.calls, ['setDescription "handles auth reviews"']);
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /Node description set.*handles auth reviews/);
+  });
+
+  it("bare /xfer desc clears the description", async () => {
+    const mesh = stubMesh({ status: () => ({ online: true, name: "test-agent" }) });
+    const h = harness({ mesh });
+    await h.handler("desc");
+    assert.deepEqual(mesh.calls, ['setDescription ""']);
+    assert.match(h.notifications[0].message, /Node description cleared/);
+  });
+
+  it("refuses when the mesh is offline or unavailable", async () => {
+    const offline = stubMesh({ status: () => ({ online: false }) });
+    const h = harness({ mesh: offline });
+    await h.handler("desc something");
+    assert.deepEqual(offline.calls, []);
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /Mesh is offline/);
+
+    const none = harness({});
+    await none.handler("desc something");
+    assert.match(none.notifications[0].message, /Mesh transport is not available/);
+  });
+
+  it("surfaces a set failure as an error notification", async () => {
+    const mesh = stubMesh({
+      status: () => ({ online: true, name: "test-agent" }),
+      setDescription: async () => { throw new Error("description is limited to 500 characters"); },
+    });
+    const h = harness({ mesh });
+    await h.handler("desc " + "x".repeat(501));
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /limited to 500 characters/);
   });
 });

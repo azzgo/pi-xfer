@@ -85,6 +85,12 @@ On each machine, in a pi session:
 
 Local-side steps (`mesh.config.json` parsing, `mesh up` refusal on name conflict, doctor's Mesh line) are verified against the code in this repo; the full two-machine delivery loop was not re-run while writing this guide and depends on your control plane deployment.
 
+## Step 4 — Describe what a node handles
+
+`/xfer desc <text>` writes a short, self-declared capability note for **this** node — the kind of request you want sent its way ("handles Postgres migration reviews", "on-call for the payments service"). `/xfer desc` with no argument clears it.
+
+The note lives in the node's own actor state on the engine, so it survives `mesh down` / `mesh up` and stays readable while that node is offline. It is unverified self-declaration: a claim, not a contract. Nothing in pi-xfer routes or schedules on it — listings stay names-only, and a consumer that wants a capability map loops the per-node describe RPC and caches the result itself. The one convenience is the web picker's `targets` query, which attaches each target's description to its entry (omitted when that node's actor cannot be reached).
+
 ## Troubleshooting
 
 Run `/xfer doctor` first — its **Mesh** line distinguishes config problems from engine problems:

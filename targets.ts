@@ -53,3 +53,32 @@ export function listTargets(xferDir: string = XFER_DIR): TargetInfo[] {
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/** Per-target description lookup; resolve undefined when unknown or unreachable. */
+export type TargetDescriber = (name: string) => Promise<string | undefined>;
+
+/**
+ * {@link listTargets} plus a best-effort description per target — the one place
+ * the picker send flow gets them without an extra round-trip. A describe that
+ * rejects (offline actor, engine down, no mesh configured) just omits the field:
+ * the target listing itself must never fail because of it.
+ */
+export async function listTargetsWithDescriptions(
+  xferDir: string = XFER_DIR,
+  describe?: TargetDescriber,
+): Promise<TargetInfo[]> {
+  const targets = listTargets(xferDir);
+  if (!describe) return targets;
+  return Promise.all(
+    targets.map(async (target): Promise<TargetInfo> => {
+      let description: string | undefined;
+      try {
+        description = await describe(target.name);
+      } catch {
+        description = undefined;
+      }
+      const trimmed = description?.trim();
+      return trimmed ? { ...target, description: trimmed } : target;
+    }),
+  );
+}

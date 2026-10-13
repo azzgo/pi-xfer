@@ -37,4 +37,11 @@ export interface TargetInfo {
   sessionName: string | null;
   cwd: string | null;
   status: string | null;
+  /**
+   * Self-declared mesh capability note, when one could be read for this target.
+   * Absent whenever the lookup did not run or the target's mesh actor was
+   * unreachable — never an empty-string placeholder, so consumers can tell
+   * "no description" from "no idea".
+   */
+  description?: string;
 }

@@ -52,7 +52,8 @@ import * as path from "node:path";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
 import { ERR, FROM_WEB_PICKER, WIRE } from "./wire.ts";
 import { renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./handoff-doc.ts";
-import { listTargets } from "./targets.ts";
+import { createMeshDescriber } from "./mesh-describer.ts";
+import { listTargetsWithDescriptions } from "./targets.ts";
 import { encodeAgentName, isEntryPoint } from "./utils.ts";
 import { attachWsServer, type WsConnection } from "./ws-server.ts";
 import { WIRE_VERSION } from "./wire.ts";
@@ -493,10 +494,17 @@ function parseRecord(raw: unknown): HandoffRecord | null | undefined {
   return raw as HandoffRecord;
 }
 
-function handleTargetsList(connection: WsConnection, frame: Frame, xferDir: string): void {
-  const targets = listTargets(xferDir);
+/**
+ * The picker's pre-send query. Targets carry an optional self-declared mesh
+ * description so a human can pick a node by capability; an unreachable actor
+ * (or no mesh at all) simply omits the field — it never fails the listing.
+ */
+async function handleTargetsList(connection: WsConnection, frame: Frame, xferDir: string): Promise<void> {
+  const describe = createMeshDescriber(path.join(xferDir, "mesh.config.json"));
+  const targets = await listTargetsWithDescriptions(xferDir, describe);
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_TARGETS_RESULT, id: frameId(frame), targets });
-  console.log(`[targets] ${targets.length} live local target(s)`);
+  const described = targets.filter((t) => t.description).length;
+  console.log(`[targets] ${targets.length} live local target(s), ${described} with a description`);
 }
 
 // ---------- reverse channel: page.request / page.response ----------

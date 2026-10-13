@@ -81,6 +81,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer <target> <request>  — generate doc and send\n" +
       "  /xfer list               — list peers\n" +
       "  /xfer name [<name>]      — show or set name\n" +
+      "  /xfer desc [<text>]     — set or clear this mesh node's description (no text clears)\n" +
       "  /xfer board <list|new|read|write|del|clean|open> — async collaboration board\n" +
       "  /xfer gc                 — reap zombie peer sockets (dead pid / no listener)\n" +
       "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle\n" +
@@ -129,6 +130,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       const all: AutocompleteItem[] = [
         { value: "list", label: "list", description: "List available peers" },
         { value: "name", label: "name", description: "Show or set this agent's name" },
+        { value: "desc", label: "desc", description: "Set or clear this mesh node's description (what requests it handles)" },
         { value: "broker", label: "broker", description: "Broker daemon: start / status / stop / logs" },
         { value: "admin", label: "admin", description: "Local web console: open (idempotent start) / stop" },
         { value: "board", label: "board", description: "Async collaboration board: list / new / read / write / del / clean / open" },
@@ -158,6 +160,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer list               — list peers\n" +
           "   /xfer status             — listener status\n" +
           "   /xfer name [<name>]      — show or set name\n" +
+          "   /xfer desc [<text>]     — set or clear this mesh node's description (no text clears)\n" +
           "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
@@ -208,6 +211,32 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           return;
         }
         await controller.rename(ctx, newName);
+        return;
+      }
+
+      // ── desc (set or clear this mesh node's description) ──
+      if (cmd === "desc") {
+        const mesh = options.mesh;
+        if (!mesh) {
+          ctx.ui.notify("❌ Mesh transport is not available in this session", "error");
+          return;
+        }
+        if (!mesh.status().online) {
+          ctx.ui.notify("❌ Mesh is offline — run /xfer mesh up first (descriptions live on this node's mesh actor)", "error");
+          return;
+        }
+        const text = parts.slice(1).join(" ").trim();
+        try {
+          const stored = await mesh.setDescription(text);
+          ctx.ui.notify(
+            stored
+              ? `🪪 Node description set ("${state.identity?.name ?? "this node"}"): ${stored}`
+              : `🪪 Node description cleared ("${state.identity?.name ?? "this node"}")`,
+            "info",
+          );
+        } catch (err) {
+          ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+        }
         return;
       }
 

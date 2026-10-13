@@ -106,6 +106,19 @@ export class MeshNode {
     }
   }
 
+  /**
+   * Per-node describe: this node's own capability note. The only built-in read
+   * path — listings stay names-only, so consumers loop this and cache locally.
+   */
+  async describe(target: string): Promise<{ name: string; description: string }> {
+    return { name: target, description: await this.requireEngine().getDescription(target) };
+  }
+
+  /** Set this node's description (trimmed, capped by the actor). "" clears it. */
+  async setDescription(text: string): Promise<string> {
+    return this.requireEngine().setDescription(text);
+  }
+
   /** Fire-and-forget inline handoff to another mesh node. */
   async send(target: string, params: { summary: string; document: string }): Promise<{ id: string }> {
     const id = msgId();

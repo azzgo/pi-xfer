@@ -11,6 +11,46 @@ export interface MeshHandoffMessage {
   document: string;
 }
 
+/** Durable state kept with each node's actor on the engine (survives reconnect). */
+export interface XferInstanceState {
+  /** Self-declared capability note: what requests this node handles. Absent = "". */
+  description: string;
+}
+
+/** Upper bound on a node description, in characters. */
+export const MAX_NODE_DESCRIPTION = 500;
+
+/**
+ * Validate + normalize a description on the way into actor state: strings only,
+ * trimmed, capped. Returns what is actually stored, so callers can show back
+ * exactly what the actor holds.
+ */
+export function normalizeNodeDescription(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("description must be a string");
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_NODE_DESCRIPTION) {
+    throw new Error(`description is limited to ${MAX_NODE_DESCRIPTION} characters (got ${trimmed.length})`);
+  }
+  return trimmed;
+}
+
+
+/**
+ * Action bodies, kept separate so their semantics are testable without an
+ * engine: the actor wires them straight onto `c.state` (the write-through
+ * proxy the engine persists with the actor).
+ */
+export async function applyDescriptionAction(state: XferInstanceState, value: unknown): Promise<string> {
+  state.description = normalizeNodeDescription(value);
+  return state.description;
+}
+
+export async function readDescriptionAction(state: XferInstanceState): Promise<string> {
+  return state.description ?? "";
+}
+
 /** One mesh node as seen by the engine. */
 export interface MeshNodeInfo {
   name: string;
@@ -33,6 +73,10 @@ export interface MeshEngine {
   destroyNode(actorId: string): Promise<void>;
   /** Fire-and-forget enqueue of an inline handoff to the target node. */
   queueSend(target: string, message: MeshHandoffMessage): Promise<void>;
+  /** Set this node's own description; resolves with the stored (normalized) value. */
+  setDescription(value: string): Promise<string>;
+  /** Read one node's description by name; rejects when the node is unreachable. */
+  getDescription(target: string): Promise<string>;
 }
 
 /** Bound on queue enqueue so a stuck/unreachable target errors instead of hanging. */
@@ -41,13 +85,21 @@ const QUEUE_SEND_TIMEOUT_MS = 30_000;
 export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshHandoffMessage, selfKey: string) => void): MeshEngine {
   let registry: { shutdown(): Promise<void> } | null = null;
   let client: any = null;
+  let selfHandle: any = null;
 
   const engine: MeshEngine = {
     async ensureNode(name: string) {
       await ensureNativeRuntimeReady();
       const { actor, queue, setup } = await import("rivetkit");
       const xferInstance = actor({
-        state: {},
+        // Written through the state proxy, so the note lives with the actor on
+        // the engine: it survives node restart/reconnect and stays readable
+        // while this node is offline.
+        state: { description: "" } satisfies XferInstanceState,
+        actions: {
+          setDescription: (c, value: unknown) => applyDescriptionAction(c.state, value),
+          getDescription: (c) => readDescriptionAction(c.state),
+        },
         queues: {
           [HANDOFF_QUEUE]: queue<MeshHandoffMessage>(),
         },
@@ -70,8 +122,8 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
       registry = regAny;
       const { createClient } = await import("rivetkit/client");
       client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
-      const handle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
-      await handle.resolve();
+      selfHandle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      await selfHandle.resolve();
     },
 
     async stop() {
@@ -79,6 +131,7 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
         await registry.shutdown();
         registry = null;
         client = null;
+        selfHandle = null;
       }
     },
 
@@ -105,6 +158,19 @@ export function createRivetEngine(config: MeshConfig, onHandoff: (message: MeshH
           { cause: err instanceof Error ? err : undefined },
         );
       }
+    },
+    async setDescription(value: string) {
+      if (!client || !selfHandle) throw new Error("mesh is not online — run /xfer mesh up first");
+      const stored = await selfHandle.action({ name: "setDescription", args: [value] });
+      return typeof stored === "string" ? stored : "";
+    },
+
+    async getDescription(target: string) {
+      if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
+      const description = await client
+        .get(XFER_INSTANCE_ACTOR, [target])
+        .action({ name: "getDescription", args: [] });
+      return typeof description === "string" ? description : "";
     },
   };
   return engine;

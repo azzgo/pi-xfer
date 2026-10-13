@@ -25,3 +25,28 @@ describe("mesh runtime bundle consistency", () => {
     );
   });
 });
+
+/**
+ * API-shape guard: the xfer-instance actor leans on the pinned rivetkit's
+ * `state` + `actions` config keys. Nothing else in the suite exercises the real
+ * library (the engine only loads on `/xfer mesh up`), so a rivetkit bump that
+ * drops or renames them would otherwise surface as a broken mesh at runtime —
+ * this turns it into a red test on the machine that bumps the pin.
+ */
+describe("rivetkit actor API shape", () => {
+  it("accepts state + actions on an actor definition", async () => {
+    const { actor, queue } = await import("rivetkit");
+    const definition = actor({
+      state: { description: "" },
+      actions: {
+        setDescription: async () => "",
+        getDescription: async () => "",
+      },
+      queues: { handoff: queue() },
+      run: async () => {},
+    });
+    const config = (definition as unknown as { config: { actions: Record<string, unknown>; state: unknown } }).config;
+    assert.deepEqual(Object.keys(config.actions).sort(), ["getDescription", "setDescription"]);
+    assert.deepEqual(config.state, { description: "" });
+  });
+});

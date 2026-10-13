@@ -48512,16 +48512,42 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
 }
 
 // mesh-engine.ts
+var MAX_NODE_DESCRIPTION = 500;
+function normalizeNodeDescription(value) {
+  if (typeof value !== "string") {
+    throw new Error("description must be a string");
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_NODE_DESCRIPTION) {
+    throw new Error(`description is limited to ${MAX_NODE_DESCRIPTION} characters (got ${trimmed.length})`);
+  }
+  return trimmed;
+}
+async function applyDescriptionAction(state, value) {
+  state.description = normalizeNodeDescription(value);
+  return state.description;
+}
+async function readDescriptionAction(state) {
+  return state.description ?? "";
+}
 var QUEUE_SEND_TIMEOUT_MS = 3e4;
 function createRivetEngine(config3, onHandoff) {
   let registry2 = null;
   let client = null;
+  let selfHandle = null;
   const engine = {
     async ensureNode(name) {
       await ensureNativeRuntimeReady();
       const { actor: actor2, queue: queue2, setup: setup2 } = await Promise.resolve().then(() => (init_mod2(), mod_exports));
       const xferInstance = actor2({
-        state: {},
+        // Written through the state proxy, so the note lives with the actor on
+        // the engine: it survives node restart/reconnect and stays readable
+        // while this node is offline.
+        state: { description: "" },
+        actions: {
+          setDescription: (c, value) => applyDescriptionAction(c.state, value),
+          getDescription: (c) => readDescriptionAction(c.state)
+        },
         queues: {
           [HANDOFF_QUEUE]: queue2()
         },
@@ -48544,14 +48570,15 @@ function createRivetEngine(config3, onHandoff) {
       registry2 = regAny;
       const { createClient: createClient2 } = await Promise.resolve().then(() => (init_mod3(), mod_exports2));
       client = createClient2({ endpoint: config3.endpoint, namespace: config3.namespace, token: config3.token });
-      const handle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
-      await handle.resolve();
+      selfHandle = client.getOrCreate(XFER_INSTANCE_ACTOR, [name]);
+      await selfHandle.resolve();
     },
     async stop() {
       if (registry2) {
         await registry2.shutdown();
         registry2 = null;
         client = null;
+        selfHandle = null;
       }
     },
     async listNodes() {
@@ -48572,6 +48599,16 @@ function createRivetEngine(config3, onHandoff) {
           { cause: err instanceof Error ? err : void 0 }
         );
       }
+    },
+    async setDescription(value) {
+      if (!client || !selfHandle) throw new Error("mesh is not online — run /xfer mesh up first");
+      const stored = await selfHandle.action({ name: "setDescription", args: [value] });
+      return typeof stored === "string" ? stored : "";
+    },
+    async getDescription(target2) {
+      if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
+      const description = await client.get(XFER_INSTANCE_ACTOR, [target2]).action({ name: "getDescription", args: [] });
+      return typeof description === "string" ? description : "";
     }
   };
   return engine;
