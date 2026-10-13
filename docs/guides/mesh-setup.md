@@ -54,6 +54,7 @@ Every machine that joins the mesh writes this file in its own home directory.
 | `endpoint` | yes | Control-plane URL. You may embed namespace and token as URL auth — `https://my-ns:sk_xxx@api.rivet.dev` — and omit the two fields below (pi-xfer parses them out, verified against `parseMeshConfig` in `mesh-config.ts`). |
 | `namespace` | no | The isolated environment your nodes live in. Defaults to `default` engine-side. |
 | `token` | no | Auth token for the engine (`sk_…` from Rivet Cloud; the admin token on self-hosted). Sent as `Authorization: Bearer …`. |
+| `pool` | no | Envoy/runner pool this host's runners join. Set it to the machine/host name on a mixed fleet so the engine can only schedule this Node's actor onto this machine. Unset = the engine-wide `default` pool, where the engine may place the actor on any host (see [per-host pools](#per-host-runner-pools-mixed-fleets)). |
 
 Minimal example (Route A, URL-auth form — one value copied from the dashboard):
 
@@ -72,6 +73,45 @@ Explicit-field example (typical for Route B):
   "token": "your-admin-token"
 }
 ```
+
+### Per-host runner pools (mixed fleets)
+
+By default every machine's runners join the engine-wide `default` pool, so the
+engine may schedule *your* Node's actor onto *another* machine's runner — and the
+handoff then delivers on the wrong host. On a mixed fleet (a grok bot, an
+issue-tracker box, several dev Macs) give each machine its own pool:
+
+1. **Pick a pool name** — use the machine/host name (`yswen-osx-5`, `dev-mac`).
+   The mesh name is still the xfer node name; the pool only decides *where* the
+   runner lives.
+2. **Create its runner-config once** — the same call as the `default` one in
+   step 1, with the pool name substituted:
+
+   ```bash
+   curl -X PUT "http://<engine-host>:6420/runner-configs/<pool>?namespace=<ns>" \
+     -H "Authorization: Bearer <admin-token>" \
+     -H "Content-Type: application/json" \
+     -d '{"datacenters":{"default":{"normal":{}}}}'
+   ```
+
+3. **Add `pool` to that machine's config**:
+
+   ```json
+   {
+     "endpoint": "https://engine.example.com",
+     "namespace": "default",
+     "token": "your-admin-token",
+     "pool": "yswen-osx-5"
+   }
+   ```
+
+With `pool` set, this host's runner joins that pool and this Node's actor is
+created with `runner_name_selector=<pool>`, so only this machine can receive it.
+Discovery, `desc`, and cross-pool `mesh send` stay un-pooled: a Node in another
+pool is still listed and addressable — only placement of your own actor is
+pinned. Repeat on every machine, each with its own pool. The adapter daemon
+accepts the same value as `--pool` (together with `--engine`). Rationale and the
+RivetKit API evidence: [ADR 0017](../adr/0017-mesh-runner-pools.md).
 
 Sanity-check the file at any time with `/xfer doctor` — the **Mesh** line reads the config and queries the engine.
 
@@ -103,5 +143,6 @@ Run `/xfer doctor` first — its **Mesh** line distinguishes config problems fro
 | `mesh up` fails with an auth error | Wrong or missing `token`/`namespace` | Re-copy the values; on Route A the single URL-auth endpoint value avoids split-field mistakes. |
 | `mesh up`: node name already exists on the engine | A node with this xfer name was joined before (possibly from another machine) | `/xfer name <other>` and retry, or destroy the stale actor from the engine dashboard (`<endpoint>/ui`). |
 | Node is up but the peer doesn't see it in `mesh list` | The two machines point at different engines or namespaces | Compare `endpoint` and `namespace` in both machines' configs — discovery is engine-side, so both must resolve to the same engine + namespace. |
+| A handoff arrives on the wrong machine | Every host shares the `default` pool, so the engine scheduled your Node's actor onto another machine's runner | Give each machine its own `pool` and create that pool's runner-config — [per-host pools](#per-host-runner-pools-mixed-fleets), [ADR 0017](../adr/0017-mesh-runner-pools.md). |
 | Send to an offline node errors after ~30 s | Target never came online | Durable queue buffering starts only once the target actor has been created (i.e. it joined at least once). Bring the target online first. |
 | `mesh up` downloads files on first run | Expected | The native runtime is fetched from npm on first `mesh up` and cached locally (see ADR 0013). Needs network access. |
