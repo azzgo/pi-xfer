@@ -33,23 +33,24 @@ Read `document` (or the file at `file`) and act on it.
 
 ## Send a handoff
 
-Write the handoff as a markdown file, then send it. Start the doc with the kind
-header line — it is what tells the other agent whether to come back to you:
-
-```md
-kind: task
-```
+Write the handoff as a markdown file, then send it:
 
 ```sh
-xfer-adapterd send <target> <file> <summary>
+xfer-adapterd send <target> <file> <summary> --kind <task|notification>
 ```
 
-- `kind: task` asks the target for output: it sends exactly one handoff back
-  once it has a conclusion — done, blocked, or needing input.
-- `kind: notification` tells the target something and asks for nothing. It stays
+`--kind` is required, and it *is* the reply contract. The tool writes the
+`kind:` header line into the delivered doc (overriding anything you put there),
+so you never hand-write it:
+
+- `task` asks the target for output: it sends exactly one handoff back once it
+  has a conclusion — done, blocked, or needing input.
+- `notification` tells the target something and asks for nothing. It stays
   silent unless it is missing information, or the doc conflicts with fact.
-- A doc with no `kind:` line reads as a notification, so an undeclared task
-  never comes back.
+
+Sending without a kind fails rather than going quiet, but the silence is what
+you pay for a wrong one: an undeclared or mistaken `notification` never comes
+back. Never send a handoff whose only purpose is to acknowledge.
 - **Target search is LOCAL first.** `<target>` is another xfer node on this
   machine — the `.sock` siblings in `~/.pi/xfer/` (their `.json` sibling holds
   the human-readable `xferName`).
@@ -64,7 +65,7 @@ Use the mesh **only when the user names a mesh actor** ("send to `phone` on the
 mesh", "the agent on my other machine"). Never fall back to the mesh silently.
 
 ```sh
-xfer-adapterd mesh send <target> <file> <summary>
+xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification>
 ```
 
 This needs `~/.pi/xfer/mesh.config.json` (or `--engine/--namespace/--token`).
