@@ -3,7 +3,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 import { loadMeshConfig, type MeshConfig } from "./mesh-config.ts";
-import type { MeshEngine, MeshHandoffMessage, MeshNodeInfo } from "./mesh-engine.ts";
+import type { MeshEngine, MeshHandoffMessage, MeshNodeInfo, RivetEngineOptions } from "./mesh-engine.ts";
+import { MESH_LOG_PATH, logMeshEvent } from "./mesh-log.ts";
 import type { XferNotifyMessage } from "./types.ts";
 import { msgId } from "./utils.ts";
 
@@ -35,10 +36,13 @@ export interface MeshNodeOptions {
   config?: MeshConfig;
   /** Route an inbound mesh handoff into the session (the local deliver pipeline). */
   deliver: (msg: XferNotifyMessage) => void;
+  /** Where mesh lifecycle events are appended; defaults to MESH_LOG_PATH. */
+  logPath?: string;
   /** Engine factory override for tests; receives the inbound-handoff sink. */
   engineFactory?: (
     config: MeshConfig,
     onHandoff: (message: MeshHandoffMessage, selfKey: string) => void,
+    options?: RivetEngineOptions,
   ) => MeshEngine | Promise<MeshEngine>;
 }
 
@@ -55,6 +59,7 @@ export class MeshNode {
   private readonly configOverride?: MeshConfig;
   private readonly deliver: (msg: XferNotifyMessage) => void;
   private readonly engineFactory: NonNullable<MeshNodeOptions["engineFactory"]>;
+  private readonly logPath: string;
   private engine: MeshEngine | null = null;
   private nodeName: string | null = null;
 
@@ -62,9 +67,10 @@ export class MeshNode {
     this.configPath = options.configPath;
     this.configOverride = options.config;
     this.deliver = options.deliver;
-    this.engineFactory = options.engineFactory ?? (async (config, onHandoff) => {
+    this.logPath = options.logPath ?? MESH_LOG_PATH;
+    this.engineFactory = options.engineFactory ?? (async (config, onHandoff, engineOptions) => {
       const bundle = await loadMeshRuntimeBundle();
-      return bundle.createRivetEngine(config, onHandoff);
+      return bundle.createRivetEngine(config, onHandoff, {}, engineOptions);
     });
   }
 
@@ -91,10 +97,25 @@ export class MeshNode {
     const current = this.status();
     if (current.online) throw new Error(`mesh is already online as "${current.name}" — /xfer mesh down first`);
     const config = this.configOverride ?? loadMeshConfig(this.configPath);
-    const engine = await this.engineFactory(config, (message, selfKey) => this.onHandoff(message, selfKey));
+    const session = {
+      node: name,
+      endpoint: config.endpoint,
+      namespace: config.namespace ?? "default",
+      pool: config.pool ?? "(default)",
+      nativeLogLevel: process.env.RIVET_LOG_LEVEL ?? "silent",
+    };
+    const engine = await this.engineFactory(
+      config,
+      (message, selfKey) => this.onHandoff(message, selfKey),
+      { logPath: this.logPath },
+    );
     const existing = await engine.listNodes();
     const conflict = existing.find((node) => node.name === name);
     if (conflict?.status === "Running") {
+      logMeshEvent(this.logPath, "error", "mesh up refused — node is Running elsewhere", {
+        ...session,
+        owner: conflict.pool ?? "(default)",
+      });
       throw new Error(
         `mesh node "${name}" is already Running on another host — run /xfer mesh down there first (先在那边 /xfer mesh down)`,
       );
@@ -104,10 +125,18 @@ export class MeshNode {
       await engine.ensureNode(name);
     } catch (err) {
       try { await engine.stop(); } catch { /* best effort */ }
+      logMeshEvent(this.logPath, "error", "mesh up failed", {
+        ...session,
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
     this.engine = engine;
     this.nodeName = name;
+    logMeshEvent(this.logPath, "info", "mesh up", {
+      ...session,
+      adopted: conflict ? (conflict.status ?? "unknown") : "no",
+    });
   }
 
   /**
@@ -121,13 +150,18 @@ export class MeshNode {
     const name = this.nodeName;
     this.engine = null;
     this.nodeName = null;
+    let actorId: string | undefined;
     try {
       const nodes = await engine.listNodes();
       const mine = nodes.find((node) => node.name === name);
-      if (mine) await engine.destroyNode(mine.actorId);
+      if (mine) {
+        actorId = mine.actorId;
+        await engine.destroyNode(mine.actorId);
+      }
     } finally {
       await engine.stop();
     }
+    logMeshEvent(this.logPath, "info", "mesh down", { node: name, actor: actorId ?? "(not found)" });
   }
 
   /**
@@ -149,7 +183,19 @@ export class MeshNode {
     const from = this.nodeName;
     if (!this.engine || !from) throw new Error("mesh is not online — run /xfer mesh up first");
     const message: MeshHandoffMessage = { id, from, to: target, summary: params.summary, document: params.document };
-    await this.engine.queueSend(target, message);
+    try {
+      await this.engine.queueSend(target, message);
+    } catch (err) {
+      logMeshEvent(this.logPath, "error", "mesh send failed", {
+        from,
+        to: target,
+        id,
+        bytes: params.document.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    logMeshEvent(this.logPath, "info", "mesh send", { from, to: target, id, bytes: params.document.length });
     return { id };
   }
 
@@ -171,6 +217,7 @@ export class MeshNode {
     if (actor === config) return;
     const desired = config ? `"${config}"` : "the default pool";
     const actual = actor ? `"${actor}"` : "the default pool";
+    logMeshEvent(this.logPath, "error", "mesh up refused — actor pool mismatch", { node: name, actorPool: actual, configPool: desired });
     throw new Error(
       `mesh node "${name}" was placed in ${actual} but this config targets ${desired} — ` +
       `an existing actor cannot change pools. Run "/xfer mesh down" (this destroys the old actor, ` +
@@ -195,6 +242,13 @@ export class MeshNode {
     }
     const docPath = path.join(os.tmpdir(), `pi-xfer-${message.id}.md`);
     fs.writeFileSync(docPath, message.document, { encoding: "utf-8", mode: 0o600 });
+    logMeshEvent(this.logPath, "info", "mesh inbound", {
+      id: message.id,
+      from: message.from,
+      to: message.to ?? "(unaddressed)",
+      bytes: message.document.length,
+      doc: docPath,
+    });
     this.deliver({
       type: "xfer-notify",
       msg_id: message.id,
@@ -215,6 +269,12 @@ export class MeshNode {
     const detail =
       `mesh misroute: handoff ${message.id} from "${message.from}" was addressed to ` +
       `"${message.to}" but reached "${selfKey || "<unknown>"}" — refusing to deliver it here`;
+    logMeshEvent(this.logPath, "warn", "mesh misroute", {
+      id: message.id,
+      from: message.from,
+      to: message.to ?? "(unaddressed)",
+      reached: selfKey || "(unknown)",
+    });
     this.deliver({
       type: "xfer-notify",
       msg_id: message.id,

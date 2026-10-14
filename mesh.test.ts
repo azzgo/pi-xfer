@@ -18,6 +18,7 @@ import {
   type RivetEngineDeps,
   type XferInstanceState,
 } from "./mesh-engine.js";
+import type { MeshLogSink } from "./mesh-log.js";
 import type { XferNotifyMessage } from "./types.js";
 
 let tmpDir: string;
@@ -77,11 +78,22 @@ function fakeEngine(state: FakeEngineState): MeshEngine {
   };
 }
 
-function makeNode(configPath: string, engine: MeshEngine, delivered: XferNotifyMessage[] = []): MeshNode {
+/** A per-test mesh log path, so no test ever touches the real `<xfer-dir>/mesh.log`. */
+function meshLogPath(label = "mesh"): string {
+  return path.join(tmpDir, `${label}-${Math.random().toString(36).slice(2)}.log`);
+}
+
+function makeNode(
+  configPath: string,
+  engine: MeshEngine,
+  delivered: XferNotifyMessage[] = [],
+  logPath: string = meshLogPath(),
+): MeshNode {
   return new MeshNode({
     configPath,
     deliver: (msg) => delivered.push(msg),
     engineFactory: () => engine,
+    logPath,
   });
 }
 
@@ -245,6 +257,17 @@ describe("rivet engine wiring", () => {
       else process.env.RIVET_LOG_LEVEL = saved;
     }
   });
+
+  it("routes rivetkit's own logger into the mesh log instead of the host stdout", async () => {
+    const record = fresh();
+    const logPath = meshLogPath("sink");
+    const engine = createRivetEngine({ endpoint: "http://localhost:6420" }, () => {}, fakeDeps(record), { logPath });
+    await engine.ensureNode("web");
+    const sink = (record.setup?.logging as { baseLogger?: MeshLogSink } | undefined)?.baseLogger;
+    assert.equal(typeof sink?.warn, "function", "setup receives a pino-shaped base logger");
+    sink?.child({ actorName: "web" }).warn({ attribute: 1 }, "something happened");
+    assert.match(fs.readFileSync(logPath, "utf-8"), /msg="something happened" actorName=web attribute=1/);
+  });
 });
 
 describe("mesh node descriptions", () => {
@@ -396,6 +419,7 @@ describe("mesh node lifecycle", () => {
     const node = new MeshNode({
       configPath: writeConfig({ endpoint: "http://localhost:6420" }),
       deliver: () => {},
+      logPath: meshLogPath("async-factory"),
       engineFactory: async (config) => {
         await new Promise((resolve) => setTimeout(resolve, 5));
         return engine;
@@ -597,5 +621,65 @@ describe("ensureRunnerPool", () => {
 
   it("refuses when the config has no pool", async () => {
     await assert.rejects(() => ensureRunnerPool(config()), /no "pool"/);
+  });
+});
+
+describe("mesh log", () => {
+  const fresh = (): FakeEngineState => ({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] });
+
+  it("up records the session context, the pool, and whether it adopted an actor", async () => {
+    const logPath = meshLogPath("up");
+    const state = fresh();
+    state.nodes.push({ name: "web", actorId: "actor-web", status: "Sleeping", pool: "host-a" });
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420", pool: "host-a" }), fakeEngine(state), [], logPath);
+    await node.up("web");
+    const line = fs.readFileSync(logPath, "utf-8").trim();
+    assert.match(line, / msg="mesh up"/);
+    assert.match(line, /node=web/);
+    assert.match(line, /endpoint=http:\/\/localhost:6420/);
+    assert.match(line, /namespace=default/);
+    assert.match(line, /pool=host-a/);
+    assert.match(line, /adopted=Sleeping/);
+  });
+
+  it("records a refusal and a failure, so a later reader sees why the node never came up", async () => {
+    const refused = meshLogPath("refused");
+    const running = fresh();
+    running.nodes.push({ name: "web", actorId: "actor-web", status: "Running" });
+    const taken = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(running), [], refused);
+    await assert.rejects(() => taken.up("web"), /already Running/);
+    assert.match(fs.readFileSync(refused, "utf-8"), /msg="mesh up refused — node is Running elsewhere".* owner=\(default\)/);
+
+    const failed = meshLogPath("failed");
+    const broken = fresh();
+    broken.upFail = true;
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(broken), [], failed);
+    await assert.rejects(() => node.up("web"), /engine unreachable/);
+    assert.match(fs.readFileSync(failed, "utf-8"), /msg="mesh up failed".* error="engine unreachable"/);
+  });
+
+  it("records down with the actor it destroyed", async () => {
+    const logPath = meshLogPath("down");
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(fresh()), [], logPath);
+    await node.up("web");
+    await node.down();
+    assert.match(fs.readFileSync(logPath, "utf-8"), /msg="mesh down" node=web actor=actor-web/);
+  });
+
+  it("journals send, inbound, and misroute as metadata only — never the handoff body", async () => {
+    const logPath = meshLogPath("flow");
+    const delivered: XferNotifyMessage[] = [];
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(fresh()), delivered, logPath);
+    await node.up("web");
+    await node.send("phone", { summary: "s", document: "SECRET-BODY" });
+    const inbound = node as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void };
+    inbound.onHandoff({ id: "mid-1", from: "grok", to: "web", summary: "s", document: "SECRET-BODY" }, "web");
+    inbound.onHandoff({ id: "mid-2", from: "grok", to: "phone", summary: "s", document: "SECRET-BODY" }, "web");
+    const log = fs.readFileSync(logPath, "utf-8");
+    assert.match(log, /msg="mesh send" from=web to=phone id=\S+ bytes=11/);
+    assert.match(log, /msg="mesh inbound" id=mid-1 from=grok to=web bytes=11/);
+    assert.match(log, /msg="mesh misroute" id=mid-2 from=grok to=phone reached=web/);
+    assert.ok(!log.includes("SECRET-BODY"), "handoff bodies stay out of the log");
+    fs.rmSync(path.join(os.tmpdir(), "pi-xfer-mid-1.md"), { force: true });
   });
 });

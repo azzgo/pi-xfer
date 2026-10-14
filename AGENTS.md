@@ -13,7 +13,8 @@ documents it points to.
    - board scope (append-only, human-cleaned)
    - web-picker record philosophy
 4. **`docs/dev/web-picker.md`** — userscript + broker workflow details
-5. **`docs/release.md`** — how to cut a release: bump version, tag, push; the publish workflow does the rest
+5. **`docs/dev/mesh-log.md`** — mesh log: what is recorded, what the native runtime keeps off the file, how to maintain it
+6. **`docs/release.md`** — how to cut a release: bump version, tag, push; the publish workflow does the rest
 
 ## Working agreements
 

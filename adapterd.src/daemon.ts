@@ -22,6 +22,8 @@ export interface AdapterdMeshOptions {
   config?: MeshConfig;
   /** Engine factory override for tests. */
   engineFactory?: NonNullable<MeshNodeOptions["engineFactory"]>;
+  /** Mesh log override for tests; production writes `<xfer-dir>/mesh.log`. */
+  logPath?: string;
 }
 
 export interface AdapterdOptions {
@@ -172,7 +174,9 @@ export async function startAdapterd(options: AdapterdOptions): Promise<AdapterdH
       configPath: options.mesh.configPath ?? MESH_CONFIG_PATH,
       config: options.mesh.config,
       deliver: (msg) => delivered(msg, "mesh"),
-      engineFactory: options.mesh.engineFactory ?? ((config, onHandoff) => createRivetEngine(config, onHandoff)),
+      engineFactory: options.mesh.engineFactory
+        ?? ((config, onHandoff, engineOptions) => createRivetEngine(config, onHandoff, {}, engineOptions)),
+      logPath: options.mesh.logPath,
     });
     try {
       await meshNode.up(name);

@@ -73,8 +73,13 @@ function fakeMeshEngine(state: FakeMeshState): MeshEngine {
   };
 }
 
-function meshOptions(state: FakeMeshState, configPath: string) {
-  return { configPath, config: { endpoint: "http://localhost:6420" }, engineFactory: () => fakeMeshEngine(state) };
+function meshOptions(state: FakeMeshState, configPath: string, logPath: string) {
+  return {
+    configPath,
+    config: { endpoint: "http://localhost:6420" },
+    engineFactory: () => fakeMeshEngine(state),
+    logPath,
+  };
 }
 
 describe("adapterd inbox", () => {
@@ -213,7 +218,7 @@ describe("adapterd mesh adoption", () => {
   it("joins the mesh and destroys its actor on close", async () => {
     const dir = freshDir();
     const state: FakeMeshState = { nodes: [], destroyed: [], stopped: 0 };
-    const handle = await startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused") });
+    const handle = await startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused", path.join(dir, "mesh.log")) });
     assert.equal(handle.meshOnline, true);
     assert.deepEqual(state.nodes.map((n) => n.name), ["agent-a"]);
     await handle.close();
@@ -224,7 +229,7 @@ describe("adapterd mesh adoption", () => {
   it("a second daemon adopts an actor left Sleeping by a crashed first daemon", async () => {
     const dir = freshDir();
     const state: FakeMeshState = { nodes: [{ name: "agent-a", actorId: "actor-agent-a", status: "Sleeping" }], destroyed: [], stopped: 0 };
-    const handle = await startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused") });
+    const handle = await startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused", path.join(dir, "mesh.log")) });
     assert.equal(handle.meshOnline, true);
     assert.deepEqual(state.destroyed, [], "adoption never destroys the sleeping actor");
     assert.equal(state.nodes[0]?.status, "Running");
@@ -236,7 +241,7 @@ describe("adapterd mesh adoption", () => {
     const dir = freshDir();
     const state: FakeMeshState = { nodes: [{ name: "agent-a", actorId: "actor-agent-a", status: "Running" }], destroyed: [], stopped: 0 };
     await assert.rejects(
-      () => startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused") }),
+      () => startAdapterd({ name: "agent-a", dir, mesh: meshOptions(state, "unused", path.join(dir, "mesh.log")) }),
       /already Running on another host/,
     );
     assert.ok(!fs.existsSync(endpointForName("agent-a", dir)), "socket is cleaned up");

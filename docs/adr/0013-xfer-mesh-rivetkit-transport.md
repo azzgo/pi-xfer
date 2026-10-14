@@ -17,6 +17,8 @@
 
 实施注记（stdout 隔离）：RivetKit 是按 standalone server 设计的——欢迎横幅走 `console.log`，native 侧（Rust）日志（如 "SQLite transaction is unnamed" 告警）按 `warn` 直接写进程 stdout。在 TUI host 里这些字节会顶掉 pi 的重绘，`mesh up` 后整屏被横幅与告警糊住。因此 mesh seam 强制静音：`setup({ noWelcome: true })` 关掉横幅，`RIVET_LOG_LEVEL=silent` 同时压掉 JS logger 与 native subscriber（2.3.26 上 setup 的 `logging.level` 被解析但不生效，env 才是真旋钮；已实测该 env 覆盖 native 侧，而 `RUST_LOG=off` 无效）。host 自己显式设置的 `RIVET_LOG_LEVEL` 被尊重，作为有意看日志的逃生口（见 docs/guides/mesh-setup.md 排障表）。
 
+实施注记（mesh.log）：静音不能等于丢弃——现场不好复现时，日志是唯一的证据。能捕获的那部分改写入 `<xfer-dir>/mesh.log`（append-only，logfmt 单行）：JS 层经 `setup({ logging: { baseLogger } })` 交给 `mesh-log.ts` 的 sink，扩展自身的 mesh 事件（up/down/send/inbound/misroute/拒绝与失败）写在同一条时间线上，handoff 正文一律不入日志。native 那层**无法**入库：其实测为 fd 级写 stdout，绕过 `process.stdout.write`，且没有任何 `RIVET_LOG_*` 能选文件——只能靠显式 `RIVET_LOG_LEVEL` 启动看终端。维护方式见 docs/dev/mesh-log.md。
+
 E2E 注记：durable queue 的缓冲从目标 actor 创建后才生效——向从未上线过的节点发送会在超时后报错（现实现 30s），而非无限期缓冲；目标节点下线前已入队的消息在节点重新上线后仍可消费。引擎侧 crash_policy 默认即 sleep，符合本 ADR，无需额外配置。
 
 Considered: 纯 Tailscale 自写注册/路由/缓冲（全要手造，durable queue 是大头）；独立 bridge daemon（多一个需 GC 的常驻组件）；registry actor（与引擎判死打架）；自动 fallback 传输选择（歧义逻辑不值 5 个字符）。
