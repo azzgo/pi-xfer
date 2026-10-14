@@ -139,7 +139,7 @@ describe("mesh config", () => {
   });
 });
 
-describe("rivet engine pool wiring", () => {
+describe("rivet engine wiring", () => {
   interface Recorded {
     runtimeReady: number;
     started: number;
@@ -215,6 +215,35 @@ describe("rivet engine pool wiring", () => {
       [XFER_INSTANCE_ACTOR, ["phone"]],
       [XFER_INSTANCE_ACTOR, ["phone"]],
     ]);
+  });
+
+  it("silences the runtime and the welcome banner on ensureNode", async () => {
+    const record = fresh();
+    const saved = process.env.RIVET_LOG_LEVEL;
+    delete process.env.RIVET_LOG_LEVEL;
+    try {
+      const engine = createRivetEngine({ endpoint: "http://localhost:6420" }, () => {}, fakeDeps(record));
+      await engine.ensureNode("web");
+      assert.equal(process.env.RIVET_LOG_LEVEL, "silent", "the native + JS loggers are pinned quiet");
+      assert.equal(record.setup?.noWelcome, true, "the RivetKit welcome banner stays off the host stdout");
+    } finally {
+      if (saved === undefined) delete process.env.RIVET_LOG_LEVEL;
+      else process.env.RIVET_LOG_LEVEL = saved;
+    }
+  });
+
+  it("respects a level the host set explicitly", async () => {
+    const record = fresh();
+    const saved = process.env.RIVET_LOG_LEVEL;
+    process.env.RIVET_LOG_LEVEL = "debug";
+    try {
+      const engine = createRivetEngine({ endpoint: "http://localhost:6420" }, () => {}, fakeDeps(record));
+      await engine.ensureNode("web");
+      assert.equal(process.env.RIVET_LOG_LEVEL, "debug");
+    } finally {
+      if (saved === undefined) delete process.env.RIVET_LOG_LEVEL;
+      else process.env.RIVET_LOG_LEVEL = saved;
+    }
   });
 });
 

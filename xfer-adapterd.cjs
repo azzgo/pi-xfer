@@ -48528,9 +48528,13 @@ __export(mesh_engine_exports, {
   ensureRunnerPool: () => ensureRunnerPool,
   listMeshNodes: () => listMeshNodes,
   normalizeNodeDescription: () => normalizeNodeDescription,
+  quietMeshRuntime: () => quietMeshRuntime,
   readDescriptionAction: () => readDescriptionAction,
   sendMeshHandoff: () => sendMeshHandoff
 });
+function quietMeshRuntime() {
+  if (!process.env.RIVET_LOG_LEVEL) process.env.RIVET_LOG_LEVEL = "silent";
+}
 function normalizeNodeDescription(value) {
   if (typeof value !== "string") {
     throw new Error("description must be a string");
@@ -48561,6 +48565,7 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
   let selfHandle = null;
   const engine = {
     async ensureNode(name) {
+      quietMeshRuntime();
       await (deps.ensureRuntimeReady ?? ensureNativeRuntimeReady)();
       const { actor: actor2, queue: queue2, setup: setup2 } = await (deps.importRivetkit ?? (() => Promise.resolve().then(() => (init_mod2(), mod_exports))))();
       const xferInstance = actor2({
@@ -48588,6 +48593,7 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
         namespace: config3.namespace,
         token: config3.token,
         runtime: "native",
+        noWelcome: true,
         ...config3.pool ? { envoy: { poolName: config3.pool } } : {}
       });
       const regAny = reg;
@@ -48644,6 +48650,7 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
   return engine;
 }
 async function sendMeshHandoff(config3, target2, message, timeoutMs = QUEUE_SEND_TIMEOUT_MS) {
+  quietMeshRuntime();
   const { createClient: createClient2 } = await Promise.resolve().then(() => (init_mod3(), mod_exports2));
   const client = createClient2({ endpoint: config3.endpoint, namespace: config3.namespace, token: config3.token });
   const handle = client.get(XFER_INSTANCE_ACTOR, [target2]);
@@ -49051,11 +49058,12 @@ var MeshNode = class {
   /**
    * A handoff addressed elsewhere reached this node: the mesh transport
    * misrouted it. Surface it rather than dropping it silently — the sender
-   * otherwise sees a successful send while the message never arrives.
+   * otherwise sees a successful send while the message never arrives. Surfaced
+   * through the deliver pipeline only: this runs inside the host process, where
+   * a console line lands on the TUI rather than in a log.
    */
   onMisroute(message, selfKey) {
     const detail = `mesh misroute: handoff ${message.id} from "${message.from}" was addressed to "${message.to}" but reached "${selfKey || "<unknown>"}" — refusing to deliver it here`;
-    console.warn(`[xfer] ${detail}`);
     this.deliver({
       type: "xfer-notify",
       msg_id: message.id,

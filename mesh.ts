@@ -207,13 +207,14 @@ export class MeshNode {
   /**
    * A handoff addressed elsewhere reached this node: the mesh transport
    * misrouted it. Surface it rather than dropping it silently — the sender
-   * otherwise sees a successful send while the message never arrives.
+   * otherwise sees a successful send while the message never arrives. Surfaced
+   * through the deliver pipeline only: this runs inside the host process, where
+   * a console line lands on the TUI rather than in a log.
    */
   private onMisroute(message: MeshHandoffMessage, selfKey: string): void {
     const detail =
       `mesh misroute: handoff ${message.id} from "${message.from}" was addressed to ` +
       `"${message.to}" but reached "${selfKey || "<unknown>"}" — refusing to deliver it here`;
-    console.warn(`[xfer] ${detail}`);
     this.deliver({
       type: "xfer-notify",
       msg_id: message.id,
