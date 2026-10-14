@@ -40,7 +40,9 @@ export function peerDescription(peer: PeerInfo): string {
   const source = peer.sessionName ? `session: ${peer.sessionName}` : "session: unnamed";
   const details = [source, displayPath(peer.cwd), peer.model, peer.status]
     .filter((value): value is string => Boolean(value));
-  return details.join(" · ");
+  const base = details.join(" · ");
+  const description = peer.description?.trim();
+  return description ? `${base} · ${description}` : base;
 }
 
 /**

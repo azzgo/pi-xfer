@@ -10,6 +10,7 @@ export interface PeerInfo {
   status?: string;
   pid?: number;
   startedAt?: number;
+  description?: string;
 }
 
 /** `xfer-notify` frame sent over the peer socket (one-way handoff). */

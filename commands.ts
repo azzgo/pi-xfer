@@ -83,7 +83,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer <target> <request>  — generate doc and send\n" +
       "  /xfer list               — list peers\n" +
       "  /xfer name [<name>]      — show or set name\n" +
-      "  /xfer desc [<text>]     — set or clear this mesh node's description (no text clears)\n" +
+      "  /xfer desc [<text>]     — set or clear this node's description (no text clears; synced to mesh when online)\n" +
       "  /xfer board <list|new|read|write|del|clean|open> — async collaboration board\n" +
       "  /xfer gc                 — reap zombie peer sockets (dead pid / no listener)\n" +
       "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle\n" +
@@ -133,7 +133,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       const all: AutocompleteItem[] = [
         { value: "list", label: "list", description: "List available peers" },
         { value: "name", label: "name", description: "Show or set this agent's name" },
-        { value: "desc", label: "desc", description: "Set or clear this mesh node's description (what requests it handles)" },
+        { value: "desc", label: "desc", description: "Set or clear this node's description (what requests it handles; synced to mesh when online)" },
         { value: "broker", label: "broker", description: "Broker daemon: start / status / stop / logs" },
         { value: "admin", label: "admin", description: "Local web console: open (idempotent start) / stop" },
         { value: "board", label: "board", description: "Async collaboration board: list / new / read / write / del / clean / open" },
@@ -163,7 +163,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer list               — list peers\n" +
           "   /xfer status             — listener status\n" +
           "   /xfer name [<name>]      — show or set name\n" +
-          "   /xfer desc [<text>]     — set or clear this mesh node's description (no text clears)\n" +
+          "   /xfer desc [<text>]     — set or clear this node's description (no text clears; synced to mesh when online)\n" +
           "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
@@ -217,28 +217,37 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         return;
       }
 
-      // ── desc (set or clear this mesh node's description) ──
+      // ── desc (set or clear this node's description) ──
+      // Stored locally in this node's <name>.json so it works without mesh;
+      // synced to the mesh actor best-effort when online (and on /xfer mesh up).
       if (cmd === "desc") {
-        const mesh = options.mesh;
-        if (!mesh) {
-          ctx.ui.notify("❌ Mesh transport is not available in this session", "error");
-          return;
-        }
-        if (!mesh.status().online) {
-          ctx.ui.notify("❌ Mesh is offline — run /xfer mesh up first (descriptions live on this node's mesh actor)", "error");
-          return;
-        }
         const text = parts.slice(1).join(" ").trim();
-        try {
-          const stored = await mesh.setDescription(text);
+        state.description = text || undefined;
+        state.writeMetadata(true);
+        const name = state.identity?.name ?? "this node";
+        const mesh = options.mesh;
+        if (mesh?.status().online) {
+          try {
+            const stored = await mesh.setDescription(text);
+            ctx.ui.notify(
+              stored
+                ? `🪪 Node description set ("${name}", synced to mesh): ${stored}`
+                : `🪪 Node description cleared ("${name}", synced to mesh)`,
+              "info",
+            );
+          } catch (err) {
+            ctx.ui.notify(
+              `⚠️ Saved locally, but mesh sync failed: ${err instanceof Error ? err.message : String(err)}`,
+              "error",
+            );
+          }
+        } else {
           ctx.ui.notify(
-            stored
-              ? `🪪 Node description set ("${state.identity?.name ?? "this node"}"): ${stored}`
-              : `🪪 Node description cleared ("${state.identity?.name ?? "this node"}")`,
+            text
+              ? `🪪 Node description set ("${name}", local only): ${text}`
+              : `🪪 Node description cleared ("${name}", local only)`,
             "info",
           );
-        } catch (err) {
-          ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
         }
         return;
       }
@@ -350,6 +359,9 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           }
           try {
             await mesh.up(name);
+            if (state.description) {
+              try { await mesh.setDescription(state.description); } catch { /* best effort */ }
+            }
             ctx.ui.notify(`🟢 Mesh online as "${name}" (engine: ${MESH_CONFIG_PATH})`, "info");
           } catch (err) {
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");

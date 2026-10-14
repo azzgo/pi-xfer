@@ -560,7 +560,8 @@ function readSiblingMetadata(metadataPath) {
     return {
       sessionName: typeof value.sessionName === "string" ? value.sessionName : null,
       cwd: typeof value.cwd === "string" ? value.cwd : null,
-      status: typeof value.status === "string" ? value.status : null
+      status: typeof value.status === "string" ? value.status : null,
+      ...typeof value.description === "string" && value.description.trim() !== "" ? { description: value.description } : {}
     };
   } catch {
     return NULL_METADATA;
