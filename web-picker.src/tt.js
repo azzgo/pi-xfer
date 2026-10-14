@@ -36,7 +36,15 @@ export function ttEnabled() {
 
 /**
  * Write markup into `target` (element or shadow root) the way the page's CSP
- * allows. Falls back to plain assignment, then to text, and never throws.
+ * allows. Escalating fallbacks, none of which throw:
+ *   1. policy-created TrustedHTML (YouTube-style enforcement)
+ *   2. plain innerHTML (no enforcement)
+ *   3. DOMParser parse in a detached document, then adopt the nodes —
+ *     DOMParser is not a Trusted Types sink, so this works on pages like
+ *     Teams whose `trusted-types` allow-list blocks every policy name we
+ *     could create AND enforces require-trusted-types-for (where fallback 2
+ *     throws too). Safe because our templates are first-party static markup.
+ *   4. textContent — degraded but visible
  */
 export function setHTML(target, html) {
   if (!target) return;
@@ -44,9 +52,19 @@ export function setHTML(target, html) {
   const policy = ttPolicy();
   try {
     target.innerHTML = policy ? policy.createHTML(markup) : markup;
-  } catch (e) {
-    try { target.innerHTML = markup; } catch (e2) { target.textContent = markup; }
-  }
+    return;
+  } catch (e) { /* TT enforcement or sink blocked */ }
+  try {
+    target.innerHTML = markup;
+    return;
+  } catch (e) { /* enforced without a usable policy */ }
+  try {
+    const doc = new DOMParser().parseFromString(markup, 'text/html');
+    let node = doc.body.firstChild;
+    while (node) { target.appendChild(node); node = doc.body.firstChild; }
+    return;
+  } catch (e) { /* nothing left to try */ }
+  try { target.textContent = markup; } catch (e2) { /* give up silently */ }
 }
 
 /** Clear an element's children without assigning markup (same as innerHTML = ''). */
