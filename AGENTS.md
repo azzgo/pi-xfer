@@ -34,3 +34,5 @@ documents it points to.
 | `web-picker.src/` | userscript source (bundled to `web-picker.user.js`) |
 | `broker-main.ts`, `admin-main.ts` | daemon sources (bundled to `broker.cjs`, `admin.cjs` — what the managers spawn) |
 | `docs/adr/`, `CONTEXT.md` | decisions and glossary — update only with cause, never casually |
+| `skills/xfer/` | the pi-side skill + its `scripts/xfer` wrapper — canonical here, deployed by symlink (never copied into dotfiles) |
+| `skills/xfer-agent/` | the non-pi host skill, rendered by `xfer-adapterd install` |
