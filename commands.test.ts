@@ -464,10 +464,18 @@ describe("xfer command: mesh subcommand", () => {
 
   it("up goes online and reports the node name", async () => {
     const mesh = stubMesh();
-    const h = harness({ mesh });
+    const h = harness({ mesh, xferDir: fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-meshup-")) });
     await h.handler("mesh up");
     assert.deepEqual(mesh.calls, ["up"]);
     assert.match(h.notifications[0].message, /🟢 Mesh online as "test-agent"/);
+  });
+
+  it("up pushes a locally-stored description to the mesh actor", async () => {
+    const mesh = stubMesh();
+    const h = harness({ mesh });
+    await h.handler("desc handles schema reviews");
+    await h.handler("mesh up");
+    assert.deepEqual(mesh.calls, ["up", 'setDescription "handles schema reviews"']);
   });
 
   it("down goes offline", async () => {
