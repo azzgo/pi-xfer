@@ -172,7 +172,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer doctor             — self-check the install and print fix hints\n" +
 
           "\n" +
-          "💡 One-way, no wait. Reply via /xfer.",
+          "💡 One-way, no wait. Declare the kind — a task comes back, a notification stays silent.",
           "info",
         );
         return;
@@ -434,7 +434,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           `- Specific requirements\n` +
           `- Relevant files/code references\n` +
           `- **Suggested skills**: Skills from the agent's repertoire that would help complete the task.\n` +
-          `- **Return address**: from=\`${state.identity.name}\`. Only reply back if you have new information to communicate.\n` +
+          `- **Kind**: pass \`kind\` to \`xfer_mesh_to\` — 'notification' when the target is only being told something, 'task' when it must produce output. A task returns a conclusion; a notification stays silent.\n` +
+          `- **Return address**: from=\`${state.identity.name}\` — the reply target, for a task.\n` +
           `- Notes\n\n` +
           `Note: mesh xfer is one-way, no reply wait. The doc is sent inline (no /tmp path on the other machine).`,
           { deliverAs: "followUp", triggerTurn: true },
@@ -632,7 +633,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         ctx.ui.notify("❌ Xfer is not initialised", "error");
         return;
       }
-      const targetEndpoint = endpointForName(target);
+      const targetEndpoint = endpointForName(target, xferDir);
       if (!fs.existsSync(targetEndpoint)) {
         ctx.ui.notify(`❌ Peer "${target}" not found — use /xfer list`, "error");
         return;
@@ -651,7 +652,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         `- Specific requirements\n` +
         `- Relevant files/code references\n` +
         `- **Suggested skills**: Skills from the agent's repertoire that would help complete the task.\n` +
-        `- **Return address**: from=\`${state.identity.name}\`. Only reply back if you have new information to share.\n` +
+        `- **Kind**: pass \`kind\` to \`xfer_to\` — 'notification' when the target is only being told something, 'task' when it must produce output. A task returns a conclusion; a notification stays silent.\n` +
+        `- **Return address**: from=\`${state.identity.name}\` — the reply target, for a task.\n` +
         `- Notes\n\n` +
         `Note: xfer is one-way, no reply wait. Returns handoff_id upon delivery.`,
         { deliverAs: "followUp", triggerTurn: true },

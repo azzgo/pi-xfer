@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { XFER_DIR } from "./constants.ts";
 import { readSenderCwdStamp, senderCwdInstruction } from "./sender-cwd-stamp.ts";
+import { readHandoffKind } from "./handoff-kind.ts";
 import { createServer, listenServer } from "./server.ts";
 import { XferState } from "./state.ts";
 import type { XferNotifyMessage } from "./types.ts";
@@ -35,7 +36,9 @@ export class XferController {
     const stamp = msg.from === FROM_WEB_PICKER ? null : readSenderCwdStamp(msg.file);
     const isLocalSender = stamp !== null && transport !== "mesh" && stamp.machine === os.hostname();
     const cwdLine = stamp ? `\n${senderCwdInstruction(stamp, { local: isLocalSender })}\n` : "";
+    const kind = readHandoffKind(msg.file);
     const body =
+      `**Handoff**: \`${msg.msg_id}\` — kind: ${kind}\n\n` +
       `**Request**: ${msg.summary}\n\n` +
       `**Doc**: \`${msg.file}\`\n${cwdLine}\n` +
       "Read the doc and handle the request.";
@@ -54,7 +57,9 @@ export class XferController {
         : (
             `📨 [Xfer from **${msg.from}**${via}]\n\n` +
             body +
-            "\n\nXfer is one-way — only reply if you have meaningful new information to communicate back."
+            (kind === "task"
+              ? `\n\nThis handoff is a **Task**: it asks you for output. Once you have a conclusion — done, blocked, or needing input — send exactly one reverse handoff to \`${msg.from}\`. That handoff carries the conclusion; a bare acknowledgement is not one.`
+              : `\n\nThis handoff is a **Notification**: it asks you for nothing. Do not reply. Send a reverse handoff only if you are missing information you need, or if the document conflicts with fact.`)
           );
     pi.sendMessage({
       customType: "xfer-inbound",
