@@ -41,11 +41,19 @@ async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void
   }
 }
 
-function waitExit(child: ChildProcess): Promise<number | null> {
+function waitExit(child: ChildProcess, timeoutMs = 20000): Promise<number | null> {
   // A child that already exited has emitted its one `exit` event, so attaching
   // a listener now would wait forever.
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+  return new Promise((resolve, reject) => {
+    // A child that never exits would otherwise hang the whole run with no
+    // output; failing loudly names the test instead.
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`child did not exit within ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.on("exit", (code) => { clearTimeout(timer); resolve(code); });
+  });
 }
 
 interface FakeMeshState {

@@ -1,8 +1,7 @@
 /**
  * index.test.ts — the two handoff tools as the model sees them: `kind` is a
  * required part of the contract, offers exactly the two values, and the tool
- * description never re-opens the "reply if it's worth saying" judgement
- * (docs/adr/0018-handoff-kind-sender-declares.md).
+ * description states what each one obliges.
  *
  * Hermetic: a stub `pi` captures tool registrations and nothing is started —
  * no socket, no mesh, no writes under a real `~/.pi/xfer`.

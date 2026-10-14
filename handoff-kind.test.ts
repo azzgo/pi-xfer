@@ -1,7 +1,7 @@
 /**
  * handoff-kind.test.ts — the sender-declared Kind header line: grammar, the
- * default for docs that predate the field, tool-stamped wins over a
- * hand-written line, and idempotent stamping under the cwd stamp.
+ * default for an unmarked doc, tool-stamped wins over a hand-written line, and
+ * idempotent stamping under the cwd stamp.
  *
  * Hermetic: docs are synthetic strings or live in a fresh `os.tmpdir()`
  * sandbox; nothing here touches a real xfer install.

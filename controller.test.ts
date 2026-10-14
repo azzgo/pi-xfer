@@ -119,7 +119,7 @@ describe("inbound envelope: handoff kind", () => {
     assert.doesNotMatch(content, /Send exactly one reverse handoff/);
   });
 
-  it("reads a doc that predates the field as a notification", () => {
+  it("reads a doc with no kind line as a notification", () => {
     const content = deliver(notify(doc()));
     assert.match(content, /\*\*Handoff\*\*: `m1` — kind: notification/);
     assert.match(content, /Do not reply/);
