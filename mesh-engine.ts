@@ -21,6 +21,22 @@ export interface XferInstanceState {
 export const MAX_NODE_DESCRIPTION = 500;
 
 /**
+ * RivetKit writes to this process's stdout, which is right for a standalone
+ * server and fatal inside a TUI host: every line it emits displaces a pi
+ * redraw, so `mesh up` leaves the welcome banner and native SQLite warnings
+ * smeared across the screen. Pin the runtime quiet instead.
+ *
+ * `RIVET_LOG_LEVEL` is the knob that actually works on 2.3.26 — it filters the
+ * JS logger *and* the native subscriber (`logging.level` in the setup config is
+ * parsed but unused), and it wins over the deprecated `LOG_LEVEL` fallback.
+ * A level the host set explicitly is respected, so `RIVET_LOG_LEVEL=debug pi`
+ * stays the way to watch mesh logs on purpose.
+ */
+export function quietMeshRuntime(): void {
+  if (!process.env.RIVET_LOG_LEVEL) process.env.RIVET_LOG_LEVEL = "silent";
+}
+
+/**
  * Validate + normalize a description on the way into actor state: strings only,
  * trimmed, capped. Returns what is actually stored, so callers can show back
  * exactly what the actor holds.
@@ -130,6 +146,7 @@ export function createRivetEngine(
 
   const engine: MeshEngine = {
     async ensureNode(name: string) {
+      quietMeshRuntime();
       await (deps.ensureRuntimeReady ?? ensureNativeRuntimeReady)();
       const { actor, queue, setup } = await (deps.importRivetkit ?? (() => import("rivetkit")))();
       const xferInstance = actor({
@@ -157,6 +174,7 @@ export function createRivetEngine(
         namespace: config.namespace,
         token: config.token,
         runtime: "native",
+        noWelcome: true,
         ...(config.pool ? { envoy: { poolName: config.pool } } : {}),
       });
       const regAny = reg as unknown as { startAndWait(): Promise<void>; shutdown(): Promise<void> };
@@ -238,6 +256,7 @@ export async function sendMeshHandoff(
   message: MeshHandoffMessage,
   timeoutMs: number = QUEUE_SEND_TIMEOUT_MS,
 ): Promise<void> {
+  quietMeshRuntime();
   const { createClient } = await import("rivetkit/client");
   const client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
   const handle = client.get(XFER_INSTANCE_ACTOR, [target]);

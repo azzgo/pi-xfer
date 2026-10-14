@@ -48522,6 +48522,9 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
 
 // mesh-engine.ts
 var MAX_NODE_DESCRIPTION = 500;
+function quietMeshRuntime() {
+  if (!process.env.RIVET_LOG_LEVEL) process.env.RIVET_LOG_LEVEL = "silent";
+}
 function normalizeNodeDescription(value) {
   if (typeof value !== "string") {
     throw new Error("description must be a string");
@@ -48553,6 +48556,7 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
   let selfHandle = null;
   const engine = {
     async ensureNode(name) {
+      quietMeshRuntime();
       await (deps.ensureRuntimeReady ?? ensureNativeRuntimeReady)();
       const { actor: actor2, queue: queue2, setup: setup2 } = await (deps.importRivetkit ?? (() => Promise.resolve().then(() => (init_mod2(), mod_exports))))();
       const xferInstance = actor2({
@@ -48580,6 +48584,7 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
         namespace: config3.namespace,
         token: config3.token,
         runtime: "native",
+        noWelcome: true,
         ...config3.pool ? { envoy: { poolName: config3.pool } } : {}
       });
       const regAny = reg;
