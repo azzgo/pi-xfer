@@ -60,7 +60,7 @@ var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // constants.ts
-var os, path, XFER_DIR, MESH_CONFIG_PATH, MESH_CACHE_DIR, CONNECT_TIMEOUT_MS, ACK_TIMEOUT_MS, DESCRIPTION_TTL_MS, MAX_FRAME_BYTES;
+var os, path, XFER_DIR, MESH_CONFIG_PATH, MESH_CACHE_DIR, CONNECT_TIMEOUT_MS, ACK_TIMEOUT_MS, MAX_FRAME_BYTES;
 var init_constants = __esm({
   "constants.ts"() {
     os = __toESM(require("node:os"), 1);
@@ -70,7 +70,6 @@ var init_constants = __esm({
     MESH_CACHE_DIR = path.join(XFER_DIR, "cache");
     CONNECT_TIMEOUT_MS = 5e3;
     ACK_TIMEOUT_MS = 5e3;
-    DESCRIPTION_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
     MAX_FRAME_BYTES = 1024 * 1024;
   }
 });

@@ -1,7 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import { METADATA_POLL_MS } from "./constants.ts";
-import { touchStoredDescription } from "./descriptions.ts";
 import type { Identity } from "./types.ts";
 
 /** Runtime identity + status for this agent; owns the `<name>.json` metadata file. */
@@ -49,7 +48,6 @@ export class XferState {
       fs.renameSync(temp, this.identity.metadata);
       try { fs.chmodSync(this.identity.metadata, 0o600); } catch { /* best effort */ }
       this.lastMetadata = serialized;
-      if (this.description) touchStoredDescription(this.identity.name);
     } catch {
       try { fs.unlinkSync(temp); } catch { /* best effort */ }
     }

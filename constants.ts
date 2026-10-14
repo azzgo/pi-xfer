@@ -13,8 +13,6 @@ export const MESH_CACHE_DIR = path.join(XFER_DIR, "cache");
 export const CONNECT_TIMEOUT_MS = 5_000;
 export const ACK_TIMEOUT_MS = 5_000;
 export const METADATA_POLL_MS = 1_000;
-/** How long a node description survives after its process stops refreshing it. */
-export const DESCRIPTION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 export const MAX_FRAME_BYTES = 1024 * 1024;
 
 /** Deadline for a mesh engine query (node listing) before the engine counts as unreachable. */
