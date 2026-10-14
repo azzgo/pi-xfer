@@ -35,28 +35,34 @@ export function ttEnabled() {
 }
 
 /**
+/**
  * Write markup into `target` (element or shadow root) the way the page's CSP
  * allows. Escalating fallbacks, none of which throw:
- *   1. policy-created TrustedHTML (YouTube-style enforcement)
- *   2. plain innerHTML (no enforcement)
+ *   1. plain innerHTML (no enforcement — the common case; also avoids the
+ *     console noise a createPolicy attempt causes on allow-list pages like
+ *     Teams, whose `trusted-types` directive rejects every name we pick)
+ *   2. policy-created TrustedHTML (YouTube-style enforcement)
  *   3. DOMParser parse in a detached document, then adopt the nodes —
  *     DOMParser is not a Trusted Types sink, so this works on pages like
  *     Teams whose `trusted-types` allow-list blocks every policy name we
- *     could create AND enforces require-trusted-types-for (where fallback 2
- *     throws too). Safe because our templates are first-party static markup.
+ *     could create AND enforces require-trusted-types-for (where fallbacks
+ *     1 and 2 throw too). Safe because our templates are first-party
+ *     static markup.
  *   4. textContent — degraded but visible
  */
 export function setHTML(target, html) {
   if (!target) return;
   const markup = html == null ? '' : String(html);
-  const policy = ttPolicy();
-  try {
-    target.innerHTML = policy ? policy.createHTML(markup) : markup;
-    return;
-  } catch (e) { /* TT enforcement or sink blocked */ }
   try {
     target.innerHTML = markup;
     return;
+  } catch (e) { /* TT enforcement or sink blocked */ }
+  try {
+    const policy = ttPolicy();
+    if (policy) {
+      target.innerHTML = policy.createHTML(markup);
+      return;
+    }
   } catch (e) { /* enforced without a usable policy */ }
   try {
     const doc = new DOMParser().parseFromString(markup, 'text/html');

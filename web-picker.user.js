@@ -1054,6 +1054,7 @@
     "bar.freeze": { en: "freeze", zh: "冻结" },
     "escx.title": { en: "Exit pick mode", zh: "退出拾取模式" },
     "bar.exit": { en: "exit", zh: "退出" },
+    "fab.title": { en: "pi xfer — pick, record, hand off", zh: "pi xfer — 拾取、录制、交接" },
     "recbadge.title": { en: "Open pick panel", zh: "打开标注面板" },
     "recbadge": { en: "panel", zh: "面板" },
     "recstop": { en: "■ Stop", zh: "■ 停止" },
@@ -1555,15 +1556,17 @@
   function setHTML(target, html) {
     if (!target) return;
     const markup = html == null ? "" : String(html);
-    const policy = ttPolicy();
     try {
-      target.innerHTML = policy ? policy.createHTML(markup) : markup;
+      target.innerHTML = markup;
       return;
     } catch (e) {
     }
     try {
-      target.innerHTML = markup;
-      return;
+      const policy = ttPolicy();
+      if (policy) {
+        target.innerHTML = policy.createHTML(markup);
+        return;
+      }
     } catch (e) {
     }
     try {
