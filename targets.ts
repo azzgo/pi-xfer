@@ -5,7 +5,7 @@ import type { TargetInfo } from "./types.ts";
 import { decodeAgentName } from "./utils.ts";
 
 /** Metadata-less fields used when the sibling `<name>.json` is absent or unreadable. */
-type SiblingMetadata = Pick<TargetInfo, "sessionName" | "cwd" | "status">;
+type SiblingMetadata = Pick<TargetInfo, "sessionName" | "cwd" | "status" | "description">;
 
 const NULL_METADATA: SiblingMetadata = { sessionName: null, cwd: null, status: null };
 
@@ -24,6 +24,7 @@ function readSiblingMetadata(metadataPath: string): SiblingMetadata {
       sessionName: typeof value.sessionName === "string" ? value.sessionName : null,
       cwd: typeof value.cwd === "string" ? value.cwd : null,
       status: typeof value.status === "string" ? value.status : null,
+      ...(typeof value.description === "string" && value.description.trim() !== "" ? { description: value.description } : {}),
     };
   } catch {
     return NULL_METADATA;

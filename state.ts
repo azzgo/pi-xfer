@@ -9,7 +9,7 @@ export class XferState {
   runtimeContext: ExtensionContext | null = null;
   currentModel = "unknown";
   currentStatus = "idle";
-
+  description?: string;
   private metadataPollTimer: NodeJS.Timeout | null = null;
   private lastMetadata = "";
 
@@ -38,6 +38,7 @@ export class XferState {
       status: this.currentStatus,
       pid: process.pid,
       startedAt: this.identity.startedAt,
+      ...(this.description ? { description: this.description } : {}),
     };
     const serialized = `${JSON.stringify(metadata, null, 2)}\n`;
     if (!force && serialized === this.lastMetadata) return;

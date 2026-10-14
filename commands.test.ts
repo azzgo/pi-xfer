@@ -101,7 +101,12 @@ function harness(options: {
     on: () => {},
   } as unknown as ExtensionAPI;
   const controller = {
-    state: { identity: makeIdentity(), sessionName: () => undefined },
+    state: {
+      identity: makeIdentity(),
+      sessionName: () => undefined,
+      description: undefined,
+      writeMetadata: () => {},
+    },
   } as unknown as XferController;
 
   registerXferCommand(pi, controller, {
@@ -604,20 +609,21 @@ describe("xfer command: desc", () => {
     assert.match(h.notifications[0].message, /Node description cleared/);
   });
 
-  it("refuses when the mesh is offline or unavailable", async () => {
+  it("falls back to local-only when the mesh is offline or unavailable", async () => {
     const offline = stubMesh({ status: () => ({ online: false }) });
     const h = harness({ mesh: offline });
     await h.handler("desc something");
     assert.deepEqual(offline.calls, []);
-    assert.equal(h.notifications[0].type, "error");
-    assert.match(h.notifications[0].message, /Mesh is offline/);
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /local only.*something/s);
 
     const none = harness({});
     await none.handler("desc something");
-    assert.match(none.notifications[0].message, /Mesh transport is not available/);
+    assert.equal(none.notifications[0].type, "info");
+    assert.match(none.notifications[0].message, /local only/);
   });
 
-  it("surfaces a set failure as an error notification", async () => {
+  it("surfaces a mesh sync failure while keeping the local save", async () => {
     const mesh = stubMesh({
       status: () => ({ online: true, name: "test-agent" }),
       setDescription: async () => { throw new Error("description is limited to 500 characters"); },
@@ -625,6 +631,7 @@ describe("xfer command: desc", () => {
     const h = harness({ mesh });
     await h.handler("desc " + "x".repeat(501));
     assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /Saved locally/);
     assert.match(h.notifications[0].message, /limited to 500 characters/);
   });
 });
