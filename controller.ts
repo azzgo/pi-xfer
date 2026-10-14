@@ -58,8 +58,8 @@ export class XferController {
             `📨 [Xfer from **${msg.from}**${via}]\n\n` +
             body +
             (kind === "task"
-              ? `\n\nThis handoff is a **Task**: it asks you for output. Once you have a conclusion — done, blocked, or needing input — send exactly one reverse handoff to \`${msg.from}\`. That handoff carries the conclusion; a bare acknowledgement is not one.`
-              : `\n\nThis handoff is a **Notification**: it asks you for nothing. Do not reply. Send a reverse handoff only if you are missing information you need, or if the document conflicts with fact.`)
+              ? `\n\nThis handoff is a **Task**: it asks you for output. Send exactly one reverse handoff to \`${msg.from}\` once you have a conclusion, and declare its kind deliberately — \`notification\` when it carries that conclusion, which closes the exchange, or \`task\` when you are blocked and need something further from \`${msg.from}\`. A bare acknowledgement is not a conclusion.`
+              : `\n\nThis handoff is a **Notification**: it asks you for nothing. Do not reply. Send a reverse handoff only if you are missing information you need, or if the document conflicts with fact — declare it \`task\` when you need something back.`)
           );
     pi.sendMessage({
       customType: "xfer-inbound",
