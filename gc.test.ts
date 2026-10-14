@@ -15,7 +15,6 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
-import { setStoredDescription } from "./descriptions.js";
 import { collectGarbage, planGc, processAlive, socketHasListener } from "./gc.js";
 
 const tmpDirs: string[] = [];
@@ -208,29 +207,5 @@ describe("gc: planGc / collectGarbage", () => {
   it("returns an empty report for a missing directory without throwing", async () => {
     const report = await collectGarbage(path.join(tmpXferDir(), "does-not-exist"));
     assert.deepEqual(report, { zombies: [], alive: [] });
-  });
-});
-
-describe("gc: descriptions store", () => {
-  it("prunes stale entries on collectGarbage and keeps fresh ones", async () => {
-    const dir = tmpXferDir();
-    setStoredDescription("stale-node", "old duty", dir);
-    setStoredDescription("fresh-node", "current duty", dir);
-    const stalePath = path.join(dir, "descriptions.json");
-    const store = JSON.parse(fs.readFileSync(stalePath, "utf-8")) as Record<string, { text: string; updatedAt: number }>;
-    store["stale-node"].updatedAt = Date.now() - 40 * 24 * 60 * 60 * 1_000;
-    fs.writeFileSync(stalePath, JSON.stringify(store));
-
-    await collectGarbage(dir);
-    const after = JSON.parse(fs.readFileSync(stalePath, "utf-8")) as Record<string, unknown>;
-    assert.deepEqual(Object.keys(after).sort(), ["fresh-node"]);
-  });
-
-  it("descriptions.json is never reaped as peer metadata", async () => {
-    const dir = tmpXferDir();
-    setStoredDescription("some-node", "duty", dir);
-    const report = await collectGarbage(dir);
-    assert.deepEqual(report, { zombies: [], alive: [] });
-    assert.ok(fs.existsSync(path.join(dir, "descriptions.json")));
   });
 });

@@ -3,7 +3,6 @@ import * as path from "node:path";
 import { XFER_DIR } from "./constants.ts";
 import type { TargetInfo } from "./types.ts";
 import { decodeAgentName } from "./utils.ts";
-import { getStoredDescription } from "./descriptions.ts";
 
 /** Metadata-less fields used when the sibling `<name>.json` is absent or unreadable. */
 type SiblingMetadata = Pick<TargetInfo, "sessionName" | "cwd" | "status" | "description">;
@@ -51,10 +50,7 @@ export function listTargets(xferDir: string = XFER_DIR): TargetInfo[] {
     .filter((file) => file.endsWith(".sock"))
     .map((sockFile): TargetInfo => {
       const base = sockFile.replace(/\.sock$/, "");
-      const name = decodeAgentName(base);
-      const sibling = readSiblingMetadata(path.join(xferDir, `${base}.json`));
-      const description = sibling.description ?? getStoredDescription(name, xferDir);
-      return { name, ...sibling, ...(description ? { description } : {}) };
+      return { name: decodeAgentName(base), ...readSiblingMetadata(path.join(xferDir, `${base}.json`)) };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }

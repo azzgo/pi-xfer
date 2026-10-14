@@ -48343,7 +48343,6 @@ var path = __toESM(require("node:path"), 1);
 var XFER_DIR = path.join(os.homedir(), ".pi", "xfer");
 var MESH_CONFIG_PATH = path.join(XFER_DIR, "mesh.config.json");
 var MESH_CACHE_DIR = path.join(XFER_DIR, "cache");
-var DESCRIPTION_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var MAX_FRAME_BYTES = 1024 * 1024;
 
 // mesh-native.ts

@@ -14,7 +14,6 @@ import type { MeshNode } from "./mesh.ts";
 import { ensureRunnerPool, listMeshNodes } from "./mesh-engine.ts";
 import { loadMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
-import { getStoredDescription, setStoredDescription } from "./descriptions.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
 
 /** Options for `registerXferCommand`. */
@@ -219,15 +218,13 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       }
 
       // ── desc (set or clear this node's description) ──
-      // Durable: kept in the descriptions store (TTL-pruned by gc) so it outlives
-      // this process, mirrored into <name>.json for local peer listings, and
+      // Stored locally in this node's <name>.json so it works without mesh;
       // synced to the mesh actor best-effort when online (and on /xfer mesh up).
       if (cmd === "desc") {
         const text = parts.slice(1).join(" ").trim();
-        const name = state.identity?.name ?? "this node";
         state.description = text || undefined;
-        setStoredDescription(name, text, xferDir);
         state.writeMetadata(true);
+        const name = state.identity?.name ?? "this node";
         const mesh = options.mesh;
         if (mesh?.status().online) {
           try {
@@ -362,9 +359,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           }
           try {
             await mesh.up(name);
-            const stored = state.description ?? getStoredDescription(name, xferDir);
-            if (stored) {
-              try { await mesh.setDescription(stored); } catch { /* best effort */ }
+            if (state.description) {
+              try { await mesh.setDescription(state.description); } catch { /* best effort */ }
             }
             ctx.ui.notify(`🟢 Mesh online as "${name}" (engine: ${MESH_CONFIG_PATH})`, "info");
           } catch (err) {
