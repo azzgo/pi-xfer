@@ -45,11 +45,11 @@ __export(broker_main_exports, {
   startBroker: () => startBroker
 });
 module.exports = __toCommonJS(broker_main_exports);
-var fs3 = __toESM(require("node:fs"), 1);
+var fs4 = __toESM(require("node:fs"), 1);
 var http = __toESM(require("node:http"), 1);
 var net = __toESM(require("node:net"), 1);
 var os2 = __toESM(require("node:os"), 1);
-var path4 = __toESM(require("node:path"), 1);
+var path5 = __toESM(require("node:path"), 1);
 
 // constants.ts
 var os = __toESM(require("node:os"), 1);
@@ -59,6 +59,7 @@ var MESH_CONFIG_PATH = path.join(XFER_DIR, "mesh.config.json");
 var MESH_CACHE_DIR = path.join(XFER_DIR, "cache");
 var CONNECT_TIMEOUT_MS = 5e3;
 var ACK_TIMEOUT_MS = 5e3;
+var DESCRIPTION_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 var MAX_FRAME_BYTES = 1024 * 1024;
 
 // wire.ts
@@ -312,8 +313,8 @@ async function connect(configPath) {
 }
 
 // targets.ts
-var fs2 = __toESM(require("node:fs"), 1);
-var path3 = __toESM(require("node:path"), 1);
+var fs3 = __toESM(require("node:fs"), 1);
+var path4 = __toESM(require("node:path"), 1);
 
 // utils.ts
 var path2 = __toESM(require("node:path"), 1);
@@ -333,11 +334,32 @@ function isEntryPoint(names) {
   return names.includes(path2.basename(invoked));
 }
 
+// descriptions.ts
+var fs2 = __toESM(require("node:fs"), 1);
+var path3 = __toESM(require("node:path"), 1);
+var DESCRIPTIONS_FILE = "descriptions.json";
+function storePath(xferDir = XFER_DIR) {
+  return path3.join(xferDir, DESCRIPTIONS_FILE);
+}
+function loadStore(xferDir) {
+  try {
+    const raw = JSON.parse(fs2.readFileSync(storePath(xferDir), "utf-8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return raw;
+  } catch {
+    return {};
+  }
+}
+function getStoredDescription(name, xferDir = XFER_DIR) {
+  const entry = loadStore(xferDir)[name];
+  return entry?.text.trim() || void 0;
+}
+
 // targets.ts
 var NULL_METADATA = { sessionName: null, cwd: null, status: null };
 function readSiblingMetadata(metadataPath) {
   try {
-    const raw = JSON.parse(fs2.readFileSync(metadataPath, "utf-8"));
+    const raw = JSON.parse(fs3.readFileSync(metadataPath, "utf-8"));
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NULL_METADATA;
     const value = raw;
     return {
@@ -353,13 +375,16 @@ function readSiblingMetadata(metadataPath) {
 function listTargets(xferDir = XFER_DIR) {
   let entries;
   try {
-    entries = fs2.readdirSync(xferDir);
+    entries = fs3.readdirSync(xferDir);
   } catch {
     return [];
   }
   return entries.filter((file) => file.endsWith(".sock")).map((sockFile) => {
     const base = sockFile.replace(/\.sock$/, "");
-    return { name: decodeAgentName(base), ...readSiblingMetadata(path3.join(xferDir, `${base}.json`)) };
+    const name = decodeAgentName(base);
+    const sibling = readSiblingMetadata(path4.join(xferDir, `${base}.json`));
+    const description = sibling.description ?? getStoredDescription(name, xferDir);
+    return { name, ...sibling, ...description ? { description } : {} };
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 async function listTargetsWithDescriptions(xferDir = XFER_DIR, describe) {
@@ -607,7 +632,7 @@ Sec-WebSocket-Accept: ${acceptKey(key)}\r
 // broker-main.ts
 var VERSION = (() => {
   try {
-    return JSON.parse(fs3.readFileSync(path4.join(__dirname, "package.json"), "utf-8")).version ?? "?";
+    return JSON.parse(fs4.readFileSync(path5.join(__dirname, "package.json"), "utf-8")).version ?? "?";
   } catch {
     return "?";
   }
@@ -659,15 +684,15 @@ function pidAlive(pid) {
 function writeFileAtomic(filePath, content) {
   const temp = `${filePath}.tmp-${process.pid}`;
   try {
-    fs3.writeFileSync(temp, content, { encoding: "utf-8", mode: 384 });
-    fs3.renameSync(temp, filePath);
+    fs4.writeFileSync(temp, content, { encoding: "utf-8", mode: 384 });
+    fs4.renameSync(temp, filePath);
     try {
-      fs3.chmodSync(filePath, 384);
+      fs4.chmodSync(filePath, 384);
     } catch {
     }
   } catch (error) {
     try {
-      fs3.unlinkSync(temp);
+      fs4.unlinkSync(temp);
     } catch {
     }
     throw error;
@@ -675,7 +700,7 @@ function writeFileAtomic(filePath, content) {
 }
 function readPidFile(xferDir) {
   try {
-    const raw = fs3.readFileSync(path4.join(xferDir, "broker.pid"), "utf-8").trim();
+    const raw = fs4.readFileSync(path5.join(xferDir, "broker.pid"), "utf-8").trim();
     const pid = Number.parseInt(raw, 10);
     return Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
@@ -685,16 +710,16 @@ function readPidFile(xferDir) {
 function unlinkBrokerFiles(xferDir) {
   for (const name of ["broker.pid", "broker.json"]) {
     try {
-      fs3.unlinkSync(path4.join(xferDir, name));
+      fs4.unlinkSync(path5.join(xferDir, name));
     } catch {
     }
   }
 }
 function writeBrokerFiles(xferDir, port, startedAt) {
-  writeFileAtomic(path4.join(xferDir, "broker.pid"), `${process.pid}
+  writeFileAtomic(path5.join(xferDir, "broker.pid"), `${process.pid}
 `);
   writeFileAtomic(
-    path4.join(xferDir, "broker.json"),
+    path5.join(xferDir, "broker.json"),
     `${JSON.stringify({ port, pid: process.pid, startedAt, version: VERSION }, null, 2)}
 `
   );
@@ -721,8 +746,8 @@ function nextRequestId() {
 }
 function pushXferNotify(xferDir, target, msg) {
   return new Promise((resolve, reject) => {
-    const endpoint = path4.join(xferDir, `${encodeAgentName(target)}.sock`);
-    if (!fs3.existsSync(endpoint)) {
+    const endpoint = path5.join(xferDir, `${encodeAgentName(target)}.sock`);
+    if (!fs4.existsSync(endpoint)) {
       reject(Object.assign(new Error(`peer "${target}" not found`), { code: ERR_TARGET_NOT_FOUND }));
       return;
     }
@@ -815,7 +840,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
     return;
   }
   const msgId = nextMsgId();
-  const doc = path4.join(os2.tmpdir(), `pi-xfer-${msgId}.md`);
+  const doc = path5.join(os2.tmpdir(), `pi-xfer-${msgId}.md`);
   const pageRaw = typeof frame.page === "object" && frame.page !== null ? frame.page : {};
   const page = {
     url: typeof pageRaw.url === "string" ? pageRaw.url : "",
@@ -834,14 +859,14 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
       // follow-up command directly runnable (compose passes it too — the two
       // render paths must not drift).
       fromTarget: targetName,
-      brokerCliPath: path4.join(__dirname, "broker-main.ts")
+      brokerCliPath: path5.join(__dirname, "broker-main.ts")
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
     return;
   }
   try {
-    fs3.writeFileSync(doc, content, { mode: 384 });
+    fs4.writeFileSync(doc, content, { mode: 384 });
   } catch (error) {
     sendError(connection, frame, ERR_DELIVERY_FAILED, `cannot write doc: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -901,7 +926,7 @@ function handleAnnotationCompose(connection, frame) {
       picks,
       record: record ?? void 0,
       fromTarget: targetName,
-      brokerCliPath: path4.join(__dirname, "broker-main.ts")
+      brokerCliPath: path5.join(__dirname, "broker-main.ts")
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -921,7 +946,7 @@ function parseRecord(raw) {
   return raw;
 }
 async function handleTargetsList(connection, frame, xferDir) {
-  const describe = createMeshDescriber(path4.join(xferDir, "mesh.config.json"));
+  const describe = createMeshDescriber(path5.join(xferDir, "mesh.config.json"));
   const targets = await listTargetsWithDescriptions(xferDir, describe);
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_TARGETS_RESULT, id: frameId(frame), targets });
   const described = targets.filter((t) => t.description).length;
@@ -1182,7 +1207,7 @@ async function startBroker(options) {
     });
   });
   const port = boundPort();
-  fs3.mkdirSync(options.xferDir, { recursive: true, mode: 448 });
+  fs4.mkdirSync(options.xferDir, { recursive: true, mode: 448 });
   writeBrokerFiles(options.xferDir, port, startedAt);
   function boundPort() {
     const address = server.address();
@@ -1284,7 +1309,7 @@ async function runPageToolCommand(args) {
   const xferDir = parseArgs(process.argv.slice(2)).xferDir;
   let port;
   try {
-    const raw = JSON.parse(fs3.readFileSync(path4.join(xferDir, "broker.json"), "utf-8"));
+    const raw = JSON.parse(fs4.readFileSync(path5.join(xferDir, "broker.json"), "utf-8"));
     const info = raw;
     if (typeof info.port !== "number" || info.port <= 0 || info.port > 65535) throw new Error("bad port");
     port = info.port;

@@ -11,13 +11,16 @@
  *   3. orphan `.sock` with no `.json` and no listener               → remove sock
  *   4. anything ambiguous (EPERM, connect timeout, odd errors)      → keep
  *
- * `broker.*` and `settings.json` are never touched. Note: pid reuse can make
+ * `broker.*`, `settings.json` and the durable descriptions store are never
+ * touched (the store has its own TTL prune, run here). Note: pid reuse can make
  * a dead peer look alive; the worst case is a leftover that gc skips — never
  * a live peer getting reaped.
  */
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
+import { DESCRIPTIONS_FILE, pruneStoredDescriptions } from "./descriptions.ts";
+import { DESCRIPTION_TTL_MS } from "./constants.ts";
 
 export type GcReason = "dead-pid" | "orphan-sock" | "unreadable-json";
 
@@ -37,7 +40,7 @@ export interface GcReport {
 }
 
 /** Broker + settings files that live in the xfer dir but are not peer metadata. */
-const GC_SKIP_JSON = new Set(["broker.json", "settings.json"]);
+const GC_SKIP_JSON = new Set(["broker.json", "settings.json", DESCRIPTIONS_FILE]);
 
 /** True when `pid` refers to a live process; ambiguous errors count as live. */
 export function processAlive(pid: number): boolean {
@@ -151,5 +154,6 @@ export async function collectGarbage(xferDir: string): Promise<GcReport> {
       try { fs.unlinkSync(zombie.jsonPath); } catch { /* already gone */ }
     }
   }
+  pruneStoredDescriptions(DESCRIPTION_TTL_MS, xferDir);
   return report;
 }

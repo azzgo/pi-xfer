@@ -9,6 +9,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as fs from "node:fs";
+import { getStoredDescription } from "./descriptions.ts";
 import * as os from "node:os";
 import * as path from "node:path";
 import { sendNotify } from "./client.ts";
@@ -42,6 +43,8 @@ export default function (pi: ExtensionAPI) {
   // ── Startup: register socket ──
   pi.on("session_start", async (_event, ctx) => {
     await controller.start(ctx);
+    const name = state.identity?.name;
+    if (name) state.description ??= getStoredDescription(name);
   });
 
   // ── xfer_to availability: keep the ~1KB tool description out of the prompt
