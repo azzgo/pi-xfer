@@ -1,5 +1,4 @@
 ---
----
 name: verify
 description: Verify admin page and interactive command changes in a real browser/session.
 ---
