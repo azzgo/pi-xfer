@@ -48525,6 +48525,7 @@ __export(mesh_engine_exports, {
   applyDescriptionAction: () => applyDescriptionAction,
   createRivetEngine: () => createRivetEngine,
   deriveActorStatus: () => deriveActorStatus,
+  ensureRunnerPool: () => ensureRunnerPool,
   listMeshNodes: () => listMeshNodes,
   normalizeNodeDescription: () => normalizeNodeDescription,
   readDescriptionAction: () => readDescriptionAction,
@@ -48655,16 +48656,33 @@ async function sendMeshHandoff(config3, target2, message, timeoutMs = QUEUE_SEND
     );
   }
 }
-async function engineApi(config3, method2, path10) {
+async function engineApi(config3, method2, path10, body) {
   const url3 = new URL(path10, config3.endpoint);
   if (config3.namespace) url3.searchParams.set("namespace", config3.namespace);
   const headers = {};
   if (config3.token) headers.Authorization = `Bearer ${config3.token}`;
-  const response = await fetch(url3, { method: method2, headers });
+  if (body !== void 0) headers["Content-Type"] = "application/json";
+  const response = await fetch(url3, { method: method2, headers, ...body !== void 0 ? { body: JSON.stringify(body) } : {} });
   if (!response.ok) {
     throw new Error(`mesh engine ${method2} ${url3.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
   }
   return await response.json();
+}
+async function ensureRunnerPool(config3) {
+  if (!config3.pool) {
+    throw new Error('mesh config has no "pool" — nothing to ensure (unset pool uses the engine default runner-config)');
+  }
+  const pool = config3.pool;
+  const existing = await engineApi(
+    config3,
+    "GET",
+    `/runner-configs?runner_name=${encodeURIComponent(pool)}`
+  );
+  if (Object.keys(existing.runner_configs ?? {}).includes(pool)) return { pool, existed: true };
+  await engineApi(config3, "PUT", `/runner-configs/${encodeURIComponent(pool)}`, {
+    datacenters: { default: { normal: {} } }
+  });
+  return { pool, existed: false };
 }
 function listMeshNodes(config3) {
   return engineApi(config3, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)).then(

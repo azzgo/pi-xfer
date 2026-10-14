@@ -1996,12 +1996,13 @@ function deriveActorStatus(actor) {
   if (actor.connectable_ts !== void 0 && actor.connectable_ts !== null) return "Running";
   return "Pending";
 }
-async function engineApi(config, method, path9) {
+async function engineApi(config, method, path9, body) {
   const url = new URL(path9, config.endpoint);
   if (config.namespace) url.searchParams.set("namespace", config.namespace);
   const headers = {};
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
-  const response = await fetch(url, { method, headers });
+  if (body !== void 0) headers["Content-Type"] = "application/json";
+  const response = await fetch(url, { method, headers, ...body !== void 0 ? { body: JSON.stringify(body) } : {} });
   if (!response.ok) {
     throw new Error(`mesh engine ${method} ${url.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
   }

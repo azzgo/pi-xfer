@@ -9,6 +9,7 @@ import {
   applyDescriptionAction,
   createRivetEngine,
   deriveActorStatus,
+  ensureRunnerPool,
   normalizeNodeDescription,
   readDescriptionAction,
   type MeshEngine,
@@ -521,5 +522,51 @@ describe("mesh runtime bundle", () => {
 
   it("the bundle lives next to the extension source", () => {
     assert.ok(fs.existsSync(path.join(import.meta.dirname, MESH_RUNTIME_BUNDLE)));
+  });
+});
+
+describe("ensureRunnerPool", () => {
+  const config = (pool?: string) => ({ endpoint: "http://localhost:6420", ...(pool ? { pool } : {}) });
+
+  function stubFetch(responses: Array<{ method: string; path: string; status: number; body?: unknown }>) {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = new URL(String(input));
+      calls.push({ method: init?.method ?? "GET", url: url.pathname + url.search, body: init?.body ? JSON.parse(init.body) : undefined });
+      const match = responses.find((r) => r.method === calls.at(-1)!.method && url.pathname === r.path);
+      if (!match) throw new Error(`unexpected ${calls.at(-1)!.method} ${url.pathname}`);
+      return new Response(match.body === undefined ? "" : JSON.stringify(match.body), { status: match.status });
+    }) as typeof fetch;
+    return { calls, restore: () => { globalThis.fetch = original; } };
+  }
+
+  after(() => { /* individual tests restore */ });
+
+  it("creates the runner-config when the engine does not have it", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: {} } },
+      { method: "PUT", path: "/runner-configs/host-a", status: 200, body: {} },
+    ]);
+    try {
+      const result = await ensureRunnerPool(config("host-a"));
+      assert.deepEqual(result, { pool: "host-a", existed: false });
+      assert.deepEqual(stub.calls[1]?.body, { datacenters: { default: { normal: {} } } });
+    } finally { stub.restore(); }
+  });
+
+  it("leaves an existing runner-config untouched", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: { "host-a": { datacenters: {} } } } },
+    ]);
+    try {
+      const result = await ensureRunnerPool(config("host-a"));
+      assert.deepEqual(result, { pool: "host-a", existed: true });
+      assert.equal(stub.calls.length, 1, "no PUT when the config already exists");
+    } finally { stub.restore(); }
+  });
+
+  it("refuses when the config has no pool", async () => {
+    await assert.rejects(() => ensureRunnerPool(config()), /no "pool"/);
   });
 });
