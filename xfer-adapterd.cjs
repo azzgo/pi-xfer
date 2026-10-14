@@ -49003,7 +49003,7 @@ var MeshNode = class {
     const desired = config3 ? `"${config3}"` : "the default pool";
     const actual = actor2 ? `"${actor2}"` : "the default pool";
     throw new Error(
-      `mesh node "${name}" was placed in ${actual} but this config targets ${desired} — getOrCreate cannot move an existing actor. Run "/xfer mesh down" then "/xfer mesh up ${name}" in a freshly restarted pi process (an older extension build without pool support must not perform the migration)`
+      `mesh node "${name}" was placed in ${actual} but this config targets ${desired} — an existing actor cannot change pools. Run "/xfer mesh down" (this destroys the old actor, dropping its queued handoffs and description) then "/xfer mesh up" in this session — no name argument — in a freshly restarted pi process (an older extension build without pool support must not perform the migration)`
     );
   }
   /**
