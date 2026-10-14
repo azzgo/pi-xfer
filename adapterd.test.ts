@@ -42,6 +42,9 @@ async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void
 }
 
 function waitExit(child: ChildProcess): Promise<number | null> {
+  // A child that already exited has emitted its one `exit` event, so attaching
+  // a listener now would wait forever.
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => child.on("exit", (code) => resolve(code)));
 }
 
@@ -265,6 +268,47 @@ describe("xfer-adapterd CLI smoke", () => {
       const code = await waitExit(child);
       assert.equal(code, 0, `stderr: ${stderr}`);
       assert.equal(takeInbox(inboxPathForName("agent-smoke", dir))[0]?.document, "cli body");
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
+  });
+
+  it("declares the sender's cwd in the delivered doc and leaves the original alone", async () => {
+    const dir = freshDir();
+    const child = spawn(process.execPath, [bundle, "up", "--name", "agent-stamp", "--once", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    try {
+      await waitFor(() => fs.existsSync(endpointForName("agent-stamp", dir)), 10000);
+      fs.writeFileSync(metadataForName("agent-sender", dir), JSON.stringify({ xferName: "agent-sender", cwd: "/srv/app" }));
+      const doc = path.join(dir, "handoff.md");
+      fs.writeFileSync(doc, "kind: task\n# Doc\n");
+      const sender = spawn(process.execPath, [bundle, "send", "agent-stamp", doc, "s", "--from", "agent-sender", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+      let sendErr = "";
+      sender.stderr?.on("data", (chunk) => { sendErr += chunk.toString(); });
+      assert.equal(await waitExit(sender), 0, `stderr: ${sendErr}`);
+      assert.equal(await waitExit(child), 0, `stderr: ${stderr}`);
+      const delivered = takeInbox(inboxPathForName("agent-stamp", dir))[0]?.document ?? "";
+      assert.match(delivered, /^<!-- xfer:sender-cwd cwd=\/srv\/app project=app machine=[^ ]+ -->\nkind: task\n# Doc\n$/);
+      assert.equal(fs.readFileSync(doc, "utf-8"), "kind: task\n# Doc\n");
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
+  });
+
+  it("leaves an unknown sender unstamped rather than guessing a cwd", async () => {
+    const dir = freshDir();
+    const child = spawn(process.execPath, [bundle, "up", "--name", "agent-plain", "--once", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    try {
+      await waitFor(() => fs.existsSync(endpointForName("agent-plain", dir)), 10000);
+      const doc = path.join(dir, "handoff.md");
+      fs.writeFileSync(doc, "plain body");
+      const sender = spawn(process.execPath, [bundle, "send", "agent-plain", doc, "s", "--from", "agent-unknown", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+      assert.equal(await waitExit(sender), 0);
+      assert.equal(await waitExit(child), 0, `stderr: ${stderr}`);
+      assert.equal(takeInbox(inboxPathForName("agent-plain", dir))[0]?.document, "plain body");
     } finally {
       if (child.exitCode === null) child.kill("SIGKILL");
     }

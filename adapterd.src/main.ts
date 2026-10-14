@@ -11,11 +11,13 @@
  * the mesh is an opt-in that pi's extension shares (same MeshNode).
  */
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { sendNotify } from "../client.ts";
 import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
 import { loadMeshConfig, parseMeshConfig } from "../mesh-config.ts";
-import { endpointForName, isEntryPoint, msgId } from "../utils.ts";
+import { senderCwdStampFor, stampDocument, type SenderCwdStamp } from "../sender-cwd-stamp.ts";
+import { endpointForName, isEntryPoint, metadataForName, msgId } from "../utils.ts";
 import { defaultAdapterName, startAdapterd, type AdapterdHandle, type AdapterdMeshOptions } from "./daemon.ts";
 import { inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./inbox.ts";
 
@@ -72,7 +74,7 @@ const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
   xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
   xfer-adapterd send <target> <file> <summary> [--from N] [--dir D]
-  xfer-adapterd mesh send <target> <file> <summary> [--from N] [--mesh-config P]
+  xfer-adapterd mesh send <target> <file> <summary> [--from N] [--dir D] [--mesh-config P]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 
@@ -176,18 +178,40 @@ async function runSend(argv: string[], flags: Flags): Promise<void> {
   const dir = str(flags.dir) ?? XFER_DIR;
   const from = str(flags.from) ?? defaultAdapterName();
   const id = msgId();
+  const stamp = senderStamp(from, dir);
   try {
     await sendNotify(target, {
       type: "xfer-notify",
       msg_id: id,
       from,
-      file: path.resolve(file),
+      file: stamp ? stampedCopy(file, stamp, id) : path.resolve(file),
       summary,
     }, dir);
     log(id);
   } catch (err) {
     fail(`❌ send to "${target}" failed: ${errorText(err)}`);
   }
+}
+
+/**
+ * The cwd anchor to declare on this sender's docs, read from the named daemon's
+ * metadata. Null when there is none — an unknown cwd is better left unsaid than
+ * guessed from the CLI's own working directory.
+ */
+function senderStamp(from: string, dir: string): SenderCwdStamp | null {
+  try {
+    const metadata = JSON.parse(fs.readFileSync(metadataForName(from, dir), "utf-8")) as { cwd?: string };
+    return metadata.cwd ? senderCwdStampFor(metadata.cwd, os.hostname()) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Writes a stamped copy beside the original, so the file handed in stays untouched. */
+function stampedCopy(file: string, stamp: SenderCwdStamp, id: string): string {
+  const target = path.join(os.tmpdir(), `xfer-adapterd-${id}.md`);
+  fs.writeFileSync(target, stampDocument(fs.readFileSync(file, "utf-8"), stamp), { encoding: "utf-8", mode: 0o600 });
+  return target;
 }
 
 
@@ -212,15 +236,18 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
     fail(`❌ mesh is not configured — ${errorText(err)}`);
     return;
   }
+  const dir = str(flags.dir) ?? XFER_DIR;
   const id = msgId();
   const from = str(flags.from) ?? defaultAdapterName();
+  const stamp = senderStamp(from, dir);
+  const body = fs.readFileSync(file, "utf-8");
   try {
     await sendMeshHandoff(config, target, {
       id,
       from,
       to: target,
       summary,
-      document: fs.readFileSync(file, "utf-8"),
+      document: stamp ? stampDocument(body, stamp) : body,
     });
     log(id);
   } catch (err) {
