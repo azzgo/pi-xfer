@@ -508,7 +508,7 @@ describe("xfer command: mesh subcommand", () => {
     const mesh = stubMesh();
     const h = harness({ mesh });
     assert.deepEqual((h.completions("mesh") ?? []).map((i) => i.value), ["mesh"]);
-    assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "up"]);
+    assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "setup", "up"]);
   });
 });
 

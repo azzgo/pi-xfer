@@ -84,17 +84,7 @@ issue-tracker box, several dev Macs) give each machine its own pool:
 1. **Pick a pool name** — use the machine/host name (`workstation`, `dev-mac`).
    The mesh name is still the xfer node name; the pool only decides *where* the
    runner lives.
-2. **Create its runner-config once** — the same call as the `default` one in
-   step 1, with the pool name substituted:
-
-   ```bash
-   curl -X PUT "http://<engine-host>:6420/runner-configs/<pool>?namespace=<ns>" \
-     -H "Authorization: Bearer <admin-token>" \
-     -H "Content-Type: application/json" \
-     -d '{"datacenters":{"default":{"normal":{}}}}'
-   ```
-
-3. **Add `pool` to that machine's config**:
+2. **Add `pool` to that machine's config**:
 
    ```json
    {
@@ -104,6 +94,13 @@ issue-tracker box, several dev Macs) give each machine its own pool:
      "pool": "workstation"
    }
    ```
+
+3. **Create its runner-config once** — run `/xfer mesh setup` on that machine.
+   It parses the config, creates the pool's runner-config on the engine if
+   missing (the same PUT the `default` pool got in step 1), and confirms the
+   engine is reachable. Idempotent — safe to re-run at any time. The manual
+   equivalent is still possible:
+   `curl -X PUT "http://<engine>:6420/runner-configs/<pool>?namespace=<ns>" -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"datacenters":{"default":{"normal":{}}}}'`
 
 With `pool` set, this host's runner joins that pool and this Node's actor is
 created with `runner_name_selector=<pool>`, so only this machine can receive it.

@@ -254,12 +254,13 @@ export async function sendMeshHandoff(
 
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
-async function engineApi<T>(config: MeshConfig, method: string, path: string): Promise<T> {
+async function engineApi<T>(config: MeshConfig, method: string, path: string, body?: unknown): Promise<T> {
   const url = new URL(path, config.endpoint);
   if (config.namespace) url.searchParams.set("namespace", config.namespace);
   const headers: Record<string, string> = {};
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
-  const response = await fetch(url, { method, headers });
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(url, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   if (!response.ok) {
     throw new Error(`mesh engine ${method} ${url.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
   }
@@ -271,6 +272,29 @@ async function engineApi<T>(config: MeshConfig, method: string, path: string): P
  * uses, for readers that only observe (the admin console) rather than
  * participate as a node.
  */
+/**
+ * Make sure the configured pool actually has a runner-config on the engine.
+ * Without one, actors pinned to the pool queue forever — the node looks online
+ * but nothing ever picks it up. Idempotent: an existing config is left as-is.
+ * A config without `pool` is a no-op (the engine default runner-config covers it).
+ */
+export async function ensureRunnerPool(config: MeshConfig): Promise<{ pool: string; existed: boolean }> {
+  if (!config.pool) {
+    throw new Error('mesh config has no "pool" — nothing to ensure (unset pool uses the engine default runner-config)');
+  }
+  const pool = config.pool;
+  const existing = await engineApi<{ runner_configs: Record<string, unknown> }>(
+    config,
+    "GET",
+    `/runner-configs?runner_name=${encodeURIComponent(pool)}`,
+  );
+  if (Object.keys(existing.runner_configs ?? {}).includes(pool)) return { pool, existed: true };
+  await engineApi(config, "PUT", `/runner-configs/${encodeURIComponent(pool)}`, {
+    datacenters: { default: { normal: {} } },
+  });
+  return { pool, existed: false };
+}
+
 export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
   return engineApi<{ actors: any[] }>(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)).then(
     (actors) =>

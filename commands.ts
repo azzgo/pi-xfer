@@ -11,6 +11,8 @@ import { doctorSeverity, formatDoctorReport, runDoctor } from "./doctor.ts";
 import { collectGarbage } from "./gc.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
 import type { MeshNode } from "./mesh.ts";
+import { ensureRunnerPool, listMeshNodes } from "./mesh-engine.ts";
+import { loadMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
 
@@ -124,6 +126,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           { value: "mesh up", label: "up", description: "Bring this instance online as its xfer name (needs mesh.config.json)" },
           { value: "mesh down", label: "down", description: "Destroy this node and go offline" },
           { value: "mesh list", label: "list", description: "List mesh nodes (live engine query)" },
+          { value: "mesh setup", label: "setup", description: "Verify mesh.config.json works: parse config, ensure the pool's runner-config, query the engine" },
         ].filter(i => i.label.startsWith(subPrefix));
         return items.length > 0 ? items : null;
       }
@@ -333,6 +336,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             "   /xfer mesh up           — bring this instance online (as its xfer name)\n" +
             "   /xfer mesh down         — destroy this node and go offline\n" +
             "   /xfer mesh list         — list mesh nodes (live engine query)\n" +
+            "   /xfer mesh setup        — verify mesh.config.json: config parse, pool runner-config, engine reachability\n" +
             "   /xfer mesh <name> <request> — send a one-way handoff via mesh",
             "info",
           );
@@ -371,6 +375,25 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
           }
           return;
+        if (sub === "setup") {
+          try {
+            const config = loadMeshConfig(MESH_CONFIG_PATH);
+            const lines = [`✓ config OK (${MESH_CONFIG_PATH}) — engine ${config.endpoint}`];
+            if (config.pool) {
+              const { existed } = await ensureRunnerPool(config);
+              lines.push(existed ? `✓ runner-config "${config.pool}" already exists` : `✓ created runner-config "${config.pool}"`);
+            } else {
+              lines.push('ℹ no "pool" set — this host uses the engine default pool');
+            }
+            const nodes = await listMeshNodes(config);
+            lines.push(`✓ engine reachable — ${nodes.length} node(s)`);
+            lines.push('Next: /xfer mesh up');
+            ctx.ui.notify(lines.join("\n"), "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
         }
         const target = sub;
         const requirement = parts.slice(2).join(" ").trim();

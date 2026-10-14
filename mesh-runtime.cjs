@@ -48635,12 +48635,13 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
   };
   return engine;
 }
-async function engineApi(config3, method2, path4) {
+async function engineApi(config3, method2, path4, body) {
   const url2 = new URL(path4, config3.endpoint);
   if (config3.namespace) url2.searchParams.set("namespace", config3.namespace);
   const headers = {};
   if (config3.token) headers.Authorization = `Bearer ${config3.token}`;
-  const response = await fetch(url2, { method: method2, headers });
+  if (body !== void 0) headers["Content-Type"] = "application/json";
+  const response = await fetch(url2, { method: method2, headers, ...body !== void 0 ? { body: JSON.stringify(body) } : {} });
   if (!response.ok) {
     throw new Error(`mesh engine ${method2} ${url2.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
   }
