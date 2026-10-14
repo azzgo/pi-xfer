@@ -1553,6 +1553,15 @@
     }
     return cached;
   }
+  function parseDetached(markup) {
+    try {
+      return new DOMParser().parseFromString(markup, "text/html");
+    } catch (e) {
+    }
+    const doc = document.implementation.createHTMLDocument("pi-xfer");
+    doc.body.innerHTML = markup;
+    return doc;
+  }
   function setHTML(target, html) {
     if (!target) return;
     const markup = html == null ? "" : String(html);
@@ -1570,7 +1579,7 @@
     } catch (e) {
     }
     try {
-      const doc = new DOMParser().parseFromString(markup, "text/html");
+      const doc = parseDetached(markup);
       let node = doc.body.firstChild;
       while (node) {
         target.appendChild(node);

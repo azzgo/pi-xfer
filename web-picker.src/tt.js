@@ -50,6 +50,22 @@ export function ttEnabled() {
  *     static markup.
  *   4. textContent — degraded but visible
  */
+/**
+ * Parse markup in a detached document — not a Trusted Types sink, and not
+ * reachable through a page-hardened global: `DOMParser` first, then a
+ * document from `document.implementation` (neither carries the page's CSP,
+ * which is exactly why sanitizer libraries parse there). Teams hardens its
+ * globals enough that `new DOMParser()` can throw, hence the second route.
+ */
+function parseDetached(markup) {
+  try {
+    return new DOMParser().parseFromString(markup, 'text/html');
+  } catch (e) { /* DOMParser blocked or stripped */ }
+  const doc = document.implementation.createHTMLDocument('pi-xfer');
+  doc.body.innerHTML = markup;
+  return doc;
+}
+
 export function setHTML(target, html) {
   if (!target) return;
   const markup = html == null ? '' : String(html);
@@ -65,7 +81,7 @@ export function setHTML(target, html) {
     }
   } catch (e) { /* enforced without a usable policy */ }
   try {
-    const doc = new DOMParser().parseFromString(markup, 'text/html');
+    const doc = parseDetached(markup);
     let node = doc.body.firstChild;
     while (node) { target.appendChild(node); node = doc.body.firstChild; }
     return;
