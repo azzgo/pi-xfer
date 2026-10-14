@@ -101,18 +101,22 @@ describe("inbound envelope: handoff kind", () => {
     assert.match(content, /\*\*Handoff\*\*: `m1` — kind: task/);
   });
 
-  it("obliges exactly one conclusion for a task", () => {
+  it("obliges exactly one conclusion for a task, and says which kind carries it", () => {
     const content = deliver(notify(doc(undefined, "task")));
     assert.match(content, /This handoff is a \*\*Task\*\*/);
-    assert.match(content, /send exactly one reverse handoff to `alpha`/);
+    assert.match(content, /Send exactly one reverse handoff to `alpha`/);
+    assert.match(content, /declare its kind deliberately/);
+    assert.match(content, /`notification` when it carries that conclusion, which closes the exchange/);
+    assert.match(content, /`task` when you are blocked/);
     assert.doesNotMatch(content, /Do not reply/);
   });
 
-  it("stays silent for a notification", () => {
+  it("stays silent for a notification, asking for the answer kind when one is unavoidable", () => {
     const content = deliver(notify(doc(undefined, "notification")));
     assert.match(content, /This handoff is a \*\*Notification\*\*/);
     assert.match(content, /Do not reply/);
-    assert.doesNotMatch(content, /send exactly one reverse handoff/);
+    assert.match(content, /declare it `task` when you need something back/);
+    assert.doesNotMatch(content, /Send exactly one reverse handoff/);
   });
 
   it("reads a doc that predates the field as a notification", () => {
