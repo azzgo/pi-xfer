@@ -25,6 +25,11 @@ function sink(opts: { innerHTMLThrows?: boolean; appendChildThrows?: boolean; te
     textContent: "",
     appendChild(node: unknown) {
       if (opts.appendChildThrows) throw new Error("appendChild blocked");
+      const n = node as { parent?: { kids: unknown[]; firstChild?: unknown } } | null;
+      if (n && n.parent) {
+        n.parent.kids = n.parent.kids.filter((k) => k !== n);
+        n.parent.firstChild = n.parent.kids[0] ?? null;
+      }
       s.appended.push(node);
     },
   };
@@ -90,5 +95,79 @@ describe("setHTML fallback ladder", () => {
 
   it("ignores null targets", () => {
     assert.doesNotThrow(() => setHTML(null, "<div>a</div>"));
+  });
+
+  it("renders markup via the built-in mini-parser when every platform sink is blocked (Teams)", () => {
+    const s = sink({ innerHTMLThrows: true });
+    type FakeNode = {
+      tag: string;
+      ns?: string;
+      attrs: Record<string, string>;
+      kids: FakeNode[] | { text: string; parent?: FakeNode }[];
+      parent: FakeNode | null;
+      appendChild(c: FakeNode): void;
+      setAttribute(n: string, v: string): void;
+      firstChild: FakeNode | { text: string } | null;
+    };
+    function withFakeDocument<T>(fn: () => T): T {
+      const made: unknown[] = [];
+      function el(tag: string, ns?: string) {
+        const e: FakeNode = {
+          tag,
+          ns,
+          attrs: {},
+          kids: [],
+          parent: null,
+          appendChild(c: FakeNode) {
+            if (c.parent) {
+              c.parent.kids = (c.parent.kids as FakeNode[]).filter((k) => k !== c);
+              c.parent.firstChild = (c.parent.kids as FakeNode[])[0] ?? null;
+            }
+            c.parent = e;
+            (e.kids as FakeNode[]).push(c);
+            e.firstChild = (e.kids as FakeNode[])[0] ?? null;
+          },
+          setAttribute(n: string, v: string) { e.attrs[n] = v; },
+          firstChild: null,
+        };
+        made.push(e);
+        return e;
+      }
+      const g = globalThis as { document?: unknown };
+      const saved = g.document;
+      g.document = {
+        createElement: (t: string) => el(t),
+        createElementNS: (ns: string, t: string) => el(t, ns),
+        createTextNode: (t: string) => ({ text: t }),
+        createDocumentFragment: () => el("#fragment"),
+      };
+      try { return fn(); } finally { g.document = saved; }
+    }
+    const markup = `<style>.x{color:red}</style><div id="a" class="c" data-n="2">hi &amp; bye<br><svg viewBox="0 0 24 24"><circle cx="12"/></svg><input type="checkbox" checked></div>`;
+    withFakeDocument(() => {
+      withFakeDomParser(() => { throw new Error("TT covers DOMParser here"); }, () => {
+        setHTML(s, markup);
+      });
+    });
+    assert.equal(s.textContentWrites.length, 0, "must not degrade to text");
+    const style = s.appended[0] as Record<string, unknown>;
+    assert.equal(style.tag, "style");
+    assert.equal(style.kids?.length, 1);
+    assert.equal((style.kids?.[0] as { text?: string }).text, ".x{color:red}");
+    const div = s.appended[1] as Record<string, unknown> & { kids: Array<Record<string, unknown>> };
+    assert.deepEqual({ ...div.attrs }, { id: "a", class: "c", "data-n": "2" });
+    assert.equal((div.kids[0] as { text?: string }).text, "hi & bye");
+    assert.equal(div.tag, "div");
+    const svg = div.kids[2] as Record<string, unknown> & { kids: Array<Record<string, unknown>> };
+    assert.equal((div.kids[1] as { tag?: string }).tag, "br");
+    assert.equal(svg.tag, "svg");
+    assert.equal(svg.ns, "http://www.w3.org/2000/svg");
+    assert.equal(svg.attrs.viewBox, "0 0 24 24");
+    const circle = svg.kids[0] as Record<string, unknown>;
+    assert.equal(circle.tag, "circle");
+    assert.equal(circle.ns, "http://www.w3.org/2000/svg");
+    const input = div.kids[3] as Record<string, unknown>;
+    assert.equal(input.tag, "input");
+    assert.deepEqual({ ...input.attrs }, { type: "checkbox", checked: "" });
   });
 });
