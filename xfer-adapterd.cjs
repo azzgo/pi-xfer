@@ -49406,7 +49406,7 @@ var USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
   xfer-adapterd send <target> <file> <summary> [--from N] [--dir D]
   xfer-adapterd mesh send <target> <file> <summary> [--from N] [--mesh-config P]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
-  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N]`;
+  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 async function main(argv = process.argv.slice(2)) {
   const { positionals, flags } = parseArgs(argv);
   const [command, sub] = positionals;
@@ -49560,11 +49560,17 @@ function runInbox(sub, flags) {
     return;
   }
   const dir = str(flags.dir) ?? XFER_DIR;
+  const name = str(flags.name);
+  const inboxFlag = str(flags.inbox);
   let inboxPath;
   try {
-    inboxPath = str(flags.inbox) ?? resolveInboxPath(dir, str(flags.name));
+    inboxPath = inboxFlag ?? resolveInboxPath(dir, name);
   } catch (err) {
     fail(`❌ ${errorText2(err)}`);
+    return;
+  }
+  if (!inboxFlag && name && !fs8.existsSync(endpointForName(name, dir))) {
+    fail(`no daemon "${name}" — start one with \`xfer-adapterd up --name ${name}\``);
     return;
   }
   let records;
@@ -49606,7 +49612,8 @@ function runInstall(flags, install) {
   }
   const name = str(flags.name) ?? defaultAdapterName();
   const bundle = process.argv[1] ? path9.resolve(process.argv[1]) : "xfer-adapterd.cjs";
-  const launchCommand = `node "${bundle}" up --name "${name}"`;
+  const meshFlag = flags["no-mesh"] === true ? "" : " --mesh";
+  const launchCommand = `node "${bundle}" up --name "${name}"${meshFlag}`;
   try {
     const result = install({ host, into, name, launchCommand });
     log(`✅ installed ${host} skill into ${into}`);
