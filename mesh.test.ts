@@ -114,6 +114,17 @@ describe("mesh config", () => {
     assert.throws(() => parseMeshConfig({ endpoint: "http://localhost:6420", pool: 42 }), /"pool" must be a non-empty string/);
   });
 
+  it("rejects credentials set twice (URL userinfo + explicit fields)", () => {
+    assert.throws(
+      () => parseMeshConfig({ endpoint: "https://ns:token@example.com:6420", namespace: "ns", token: "token" }),
+      /credentials twice/,
+    );
+    assert.throws(
+      () => parseMeshConfig({ endpoint: "https://placeholder:placeholder@example.com:6420", namespace: "ns" }),
+      /credentials twice/,
+    );
+  });
+
   it("omits pool entirely when absent (backward-compatible parse)", () => {
     const config = parseMeshConfig({ endpoint: "http://localhost:6420" });
     assert.equal("pool" in config, false);
@@ -311,6 +322,28 @@ describe("mesh node lifecycle", () => {
       assert.deepEqual(state.ensured, ["web"]);
       assert.deepEqual(state.destroyed, []);
     }
+  });
+
+  it("up refuses to adopt an actor placed in a different pool than the config targets", async () => {
+    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web", status: "Sleeping", pool: "old-host" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420", pool: "new-host" }), fakeEngine(state));
+    await assert.rejects(() => node.up("web"), /placed in "old-host" but this config targets "new-host"/);
+    assert.deepEqual(state.ensured, []);
+    assert.deepEqual(node.status(), { online: false });
+  });
+
+  it("up adopts when the actor's pool matches the configured pool", async () => {
+    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web", status: "Sleeping", pool: "host-a" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420", pool: "host-a" }), fakeEngine(state));
+    await node.up("web");
+    assert.deepEqual(state.ensured, ["web"]);
+  });
+
+  it("up treats a missing pool on either side as the default pool", async () => {
+    const state: FakeEngineState = { nodes: [{ name: "web", actorId: "actor-web", status: "Sleeping" }], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    assert.deepEqual(state.ensured, ["web"]);
   });
 
   it("up refuses when a Running actor of the same name exists on another host", async () => {

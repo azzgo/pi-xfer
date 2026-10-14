@@ -99,6 +99,7 @@ export class MeshNode {
         `mesh node "${name}" is already Running on another host — run /xfer mesh down there first (先在那边 /xfer mesh down)`,
       );
     }
+    if (conflict) this.assertPoolMatch(name, conflict.pool, config.pool);
     try {
       await engine.ensureNode(name);
     } catch (err) {
@@ -155,6 +156,26 @@ export class MeshNode {
   async shutdown(): Promise<void> {
     if (!this.engine) return;
     try { await this.down(); } catch { /* best effort on process exit */ }
+  }
+
+  /**
+   * An adopted actor keeps its original pool placement — `getOrCreate` with a
+   * different `poolName` does not move it. Detecting the mismatch here turns a
+   * silent "migration succeeded but the actor still lives on the old pool"
+   * into an actionable error, including the restart-pi caveat: a pre-pool
+   * extension build cannot fix this on its own.
+   */
+  private assertPoolMatch(name: string, actorPool: string | undefined, configPool: string | undefined): void {
+    const actor = actorPool || undefined;
+    const config = configPool || undefined;
+    if (actor === config) return;
+    const desired = config ? `"${config}"` : "the default pool";
+    const actual = actor ? `"${actor}"` : "the default pool";
+    throw new Error(
+      `mesh node "${name}" was placed in ${actual} but this config targets ${desired} — ` +
+      `getOrCreate cannot move an existing actor. Run "/xfer mesh down" then "/xfer mesh up ${name}" ` +
+      `in a freshly restarted pi process (an older extension build without pool support must not perform the migration)`,
+    );
   }
 
   /**

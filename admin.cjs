@@ -470,14 +470,20 @@ function parseMeshConfig(raw) {
 function withUrlAuth(config) {
   try {
     const url = new URL(config.endpoint);
-    if (!config.namespace && url.username) config.namespace = decodeURIComponent(url.username);
-    if (!config.token && url.password) config.token = decodeURIComponent(url.password);
     if (url.username || url.password) {
+      if (config.namespace || config.token) {
+        throw new Error(
+          "mesh config sets credentials twice — namespace/token fields AND URL userinfo (https://ns:token@host). Keep exactly one; a stale placeholder in either would otherwise win silently"
+        );
+      }
+      config.namespace = decodeURIComponent(url.username);
+      config.token = decodeURIComponent(url.password);
       url.username = "";
       url.password = "";
       config.endpoint = url.toString();
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("credentials twice")) throw err;
   }
   return config;
 }

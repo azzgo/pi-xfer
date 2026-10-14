@@ -97,14 +97,20 @@ function parseMeshConfig(raw) {
 function withUrlAuth(config3) {
   try {
     const url3 = new URL(config3.endpoint);
-    if (!config3.namespace && url3.username) config3.namespace = decodeURIComponent(url3.username);
-    if (!config3.token && url3.password) config3.token = decodeURIComponent(url3.password);
     if (url3.username || url3.password) {
+      if (config3.namespace || config3.token) {
+        throw new Error(
+          "mesh config sets credentials twice — namespace/token fields AND URL userinfo (https://ns:token@host). Keep exactly one; a stale placeholder in either would otherwise win silently"
+        );
+      }
+      config3.namespace = decodeURIComponent(url3.username);
+      config3.token = decodeURIComponent(url3.password);
       url3.username = "";
       url3.password = "";
       config3.endpoint = url3.toString();
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("credentials twice")) throw err;
   }
   return config3;
 }
@@ -48601,7 +48607,12 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
     },
     async listNodes() {
       const actors = await engineApi(config3, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
-      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }));
+      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({
+        name: deserializeKeyString(a.key),
+        actorId: a.actor_id,
+        status: deriveActorStatus(a),
+        ...a.runner_name_selector ? { pool: a.runner_name_selector } : {}
+      }));
     },
     async destroyNode(actorId) {
       await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
@@ -48919,6 +48930,7 @@ var MeshNode = class {
         `mesh node "${name}" is already Running on another host — run /xfer mesh down there first (先在那边 /xfer mesh down)`
       );
     }
+    if (conflict) this.assertPoolMatch(name, conflict.pool, config3.pool);
     try {
       await engine.ensureNode(name);
     } catch (err) {
@@ -48976,6 +48988,23 @@ var MeshNode = class {
       await this.down();
     } catch {
     }
+  }
+  /**
+   * An adopted actor keeps its original pool placement — `getOrCreate` with a
+   * different `poolName` does not move it. Detecting the mismatch here turns a
+   * silent "migration succeeded but the actor still lives on the old pool"
+   * into an actionable error, including the restart-pi caveat: a pre-pool
+   * extension build cannot fix this on its own.
+   */
+  assertPoolMatch(name, actorPool, configPool) {
+    const actor2 = actorPool || void 0;
+    const config3 = configPool || void 0;
+    if (actor2 === config3) return;
+    const desired = config3 ? `"${config3}"` : "the default pool";
+    const actual = actor2 ? `"${actor2}"` : "the default pool";
+    throw new Error(
+      `mesh node "${name}" was placed in ${actual} but this config targets ${desired} — getOrCreate cannot move an existing actor. Run "/xfer mesh down" then "/xfer mesh up ${name}" in a freshly restarted pi process (an older extension build without pool support must not perform the migration)`
+    );
   }
   /**
    * Inbound queue message → tmp doc on this machine → local deliver pipeline.
