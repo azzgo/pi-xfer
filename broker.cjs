@@ -111,6 +111,11 @@ var ERR = {
 };
 var FROM_WEB_PICKER = "web-picker";
 
+// handoff-kind.ts
+function formatHandoffKind(kind) {
+  return `kind: ${kind}`;
+}
+
 // handoff-doc.ts
 function followUpSection(fromTarget, brokerCliPath) {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
@@ -201,6 +206,10 @@ function recordSection(rec) {
 function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brokerCliPath }) {
   const lines = [
     "# Web annotation handoff",
+    "",
+    // A submit is a Task: it asks for output. Its reply channel is the
+    // follow-up section below, not a reverse xfer — the sender is a browser.
+    formatHandoffKind("task"),
     "",
     "## Request",
     "",

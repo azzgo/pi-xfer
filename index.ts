@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { sendNotify } from "./client.ts";
 import { senderCwdStampFor, stampDocument } from "./sender-cwd-stamp.ts";
+import { stampHandoffKind } from "./handoff-kind.ts";
 import { registerXferCommand } from "./commands.ts";
 import { XferController } from "./controller.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
@@ -73,7 +74,7 @@ export default function (pi: ExtensionAPI) {
     name: "xfer_to",
     label: "Transfer to Pi",
     description:
-      "Send a one-way handoff markdown document to another Pi agent over its xfer socket; returns immediately with a handoff_id (no reply wait). Use /xfer list for target names. One-way channel: never send acknowledgements; only xfer when you have meaningful new information to communicate.",
+      "Send a one-way handoff markdown document to another Pi agent over its xfer socket; returns immediately with a handoff_id (no reply wait). Use /xfer list for target names. Declare `kind`: \"task\" asks the target for output and comes back with exactly one conclusion (done, blocked, or needing input); \"notification\" informs and stays silent unless the target lacks information or the document conflicts with fact. Never send a handoff that only acknowledges or confirms.",
 
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 
@@ -81,6 +82,9 @@ export default function (pi: ExtensionAPI) {
       target: Type.String({ description: "Target agent name (see /xfer list)." }),
       summary: Type.String({ description: "One-sentence summary of the request." }),
       handoff_document: Type.String({ description: "Full markdown handoff doc: context, problem, specific request, relevant files, suggested skills, notes." }),
+      kind: Type.Union([Type.Literal("task"), Type.Literal("notification")], {
+        description: "What this handoff asks of the target. \"task\": the target must produce output and returns one conclusion. \"notification\": it asks for nothing and stays silent. Never send a handoff whose only purpose is to acknowledge or confirm.",
+      }),
     }),
 
     outputSchema: Type.Object({
@@ -91,13 +95,13 @@ export default function (pi: ExtensionAPI) {
     }),
 
     async execute(_callId, params, _signal, onUpdate, ctx) {
-      const { target, summary, handoff_document } = params as any;
+      const { target, summary, handoff_document, kind } = params as any;
       if (!state.identity) throw new Error("xfer not initialised");
       const senderName = state.identity.name;
 
       const mid = msgId();
       const tmpFile = path.join(os.tmpdir(), `pi-xfer-${mid}.md`);
-      const document = stampDocument(handoff_document, thisCwdStamp());
+      const document = stampHandoffKind(stampDocument(handoff_document, thisCwdStamp()), kind);
 
       // 1. write handoff doc to tmp
       fs.writeFileSync(tmpFile, document, { encoding: "utf-8", mode: 0o600 });
@@ -134,7 +138,9 @@ export default function (pi: ExtensionAPI) {
         content: [{
           type: "text",
           text: `✅ Sent to "${target}" (handoff_id: ${mid})\n\nDoc: ${tmpFile}\n\n` +
-                `One-way handoff — reply via /xfer if needed.`,
+                (kind === "task"
+                  ? `Task handoff — the target returns a conclusion once it has one.`
+                  : `Notification handoff — no reply expected unless the target is missing information.`),
         }],
         details: {
           target,
@@ -152,12 +158,15 @@ export default function (pi: ExtensionAPI) {
     name: "xfer_mesh_to",
     label: "Transfer to Mesh Node",
     description:
-      "Send a one-way handoff markdown document to another Pi agent over the xfer mesh (cross-machine RivetKit transport); returns immediately with a handoff_id (no reply wait). Use /xfer mesh list for node names; the mesh must be online (/xfer mesh up). The document is sent inline. One-way channel: never send acknowledgements; only xfer when you have meaningful new information to communicate.",
+      "Send a one-way handoff markdown document to another Pi agent over the xfer mesh (cross-machine RivetKit transport); returns immediately with a handoff_id (no reply wait). Use /xfer mesh list for node names; the mesh must be online (/xfer mesh up). The document is sent inline. Declare `kind`: \"task\" asks the target for output and comes back with exactly one conclusion (done, blocked, or needing input); \"notification\" informs and stays silent unless the target lacks information or the document conflicts with fact. Never send a handoff that only acknowledges or confirms.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     parameters: Type.Object({
       target: Type.String({ description: "Target mesh node name (see /xfer mesh list)." }),
       summary: Type.String({ description: "One-sentence summary of the request." }),
       handoff_document: Type.String({ description: "Full markdown handoff doc: context, problem, specific request, relevant files, suggested skills, notes." }),
+      kind: Type.Union([Type.Literal("task"), Type.Literal("notification")], {
+        description: "What this handoff asks of the target. \"task\": the target must produce output and returns one conclusion. \"notification\": it asks for nothing and stays silent. Never send a handoff whose only purpose is to acknowledge or confirm.",
+      }),
     }),
     outputSchema: Type.Object({
       handoff_id: Type.String(),
@@ -165,17 +174,20 @@ export default function (pi: ExtensionAPI) {
       status: Type.String(),
     }),
     async execute(_callId, params, _signal, onUpdate, _ctx) {
-      const { target, summary, handoff_document } = params as any;
+      const { target, summary, handoff_document, kind } = params as any;
       if (onUpdate) {
         onUpdate({ content: [{ type: "text", text: `📨 Sending to mesh node "${target}"...` }], details: {} });
       }
       try {
-        const document = stampDocument(handoff_document, thisCwdStamp());
+        const document = stampHandoffKind(stampDocument(handoff_document, thisCwdStamp()), kind);
         const { id } = await mesh.send(target, { summary, document });
         return {
           content: [{
             type: "text",
-            text: `✅ Sent to mesh node "${target}" (handoff_id: ${id})\n\nOne-way handoff — reply via /xfer mesh if needed.`,
+            text: `✅ Sent to mesh node "${target}" (handoff_id: ${id})\n\n` +
+                  (kind === "task"
+                    ? `Task handoff — the target returns a conclusion once it has one.`
+                    : `Notification handoff — no reply expected unless the target is missing information.`),
           }],
           details: { target, handoff_id: id, status: "sent" },
           structuredContent: { handoff_id: id, target, status: "sent" },

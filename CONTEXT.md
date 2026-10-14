@@ -75,5 +75,13 @@ The always-on ring-buffer captures (console entries, network requests) sliced to
 _Avoid_: telemetry, logs, tracing output
 
 **Handoff**:
-The rendered document a submit delivers to a target session. Picks and Records are sections in it; both are markers at different axes (space vs time).
-_Avoid_: prompt, message, report
+The document one node delivers to a target node. Carries a Kind, and the reverse message is itself a Handoff — never a "reply" or "receipt". In a web-picker submit, Picks and Records are its sections; both are markers at different axes (space vs time). A Handoff carries a message, not memory — state that must survive a session belongs to the Board.
+_Avoid_: prompt, message, report, reply, receipt, acknowledgement
+
+**Notification**:
+A Handoff Kind that informs without asking for output. Silent by default: a receiver sends a reverse Handoff only when it lacks information, or when the document conflicts with fact.
+_Avoid_: FYI, broadcast (handoffs are point-to-point by name)
+
+**Task**:
+A Handoff Kind that asks for output. A receiver always sends a reverse Handoff once it has a conclusion — done, blocked, or needing input.
+_Avoid_: request, job, ticket (implies lifecycle)

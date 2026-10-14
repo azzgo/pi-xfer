@@ -14,6 +14,7 @@ import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { XferController } from "./controller.js";
 import { senderCwdStampFor, stampDocument } from "./sender-cwd-stamp.js";
+import { stampHandoffKind, type HandoffKind } from "./handoff-kind.js";
 import { XferState } from "./state.js";
 import type { XferNotifyMessage } from "./types.js";
 import { FROM_WEB_PICKER } from "./wire.js";
@@ -34,10 +35,11 @@ function controller(): XferController {
 
 let docSeq = 0;
 
-function doc(stamp?: ReturnType<typeof senderCwdStampFor>): string {
+function doc(stamp?: ReturnType<typeof senderCwdStampFor>, kind?: HandoffKind): string {
   const file = path.join(sandbox, `pi-xfer-${docSeq++}.md`);
   const body = "# Handoff\n\ndo the thing\n";
-  fs.writeFileSync(file, stamp ? stampDocument(body, stamp) : body, "utf-8");
+  const stamped = stamp ? stampDocument(body, stamp) : body;
+  fs.writeFileSync(file, kind ? stampHandoffKind(stamped, kind) : stamped, "utf-8");
   return file;
 }
 
@@ -90,5 +92,40 @@ describe("inbound envelope: sender cwd anchoring", () => {
     assert.doesNotMatch(content, /Sender cwd/);
     assert.match(content, /browser userscript/);
     assert.match(content, /page-tool/);
+  });
+});
+
+describe("inbound envelope: handoff kind", () => {
+  it("carries the sender's handoff id and declared kind into the envelope", () => {
+    const content = deliver(notify(doc(senderCwdStampFor("/srv/app", os.hostname()), "task")));
+    assert.match(content, /\*\*Handoff\*\*: `m1` — kind: task/);
+  });
+
+  it("obliges exactly one conclusion for a task", () => {
+    const content = deliver(notify(doc(undefined, "task")));
+    assert.match(content, /This handoff is a \*\*Task\*\*/);
+    assert.match(content, /send exactly one reverse handoff to `alpha`/);
+    assert.doesNotMatch(content, /Do not reply/);
+  });
+
+  it("stays silent for a notification", () => {
+    const content = deliver(notify(doc(undefined, "notification")));
+    assert.match(content, /This handoff is a \*\*Notification\*\*/);
+    assert.match(content, /Do not reply/);
+    assert.doesNotMatch(content, /send exactly one reverse handoff/);
+  });
+
+  it("reads a doc that predates the field as a notification", () => {
+    const content = deliver(notify(doc()));
+    assert.match(content, /\*\*Handoff\*\*: `m1` — kind: notification/);
+    assert.match(content, /Do not reply/);
+  });
+
+  it("believes the doc's first kind line over a later one", () => {
+    const file = path.join(sandbox, `pi-xfer-${docSeq++}.md`);
+    fs.writeFileSync(file, "kind: task\n\nkind: notification\n", "utf-8");
+    const content = deliver(notify(file));
+    assert.match(content, /kind: task/);
+    assert.match(content, /asks you for output/);
   });
 });

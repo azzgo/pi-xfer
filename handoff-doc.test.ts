@@ -47,6 +47,8 @@ function input(overrides: Partial<RenderHandoffDocInput> = {}): RenderHandoffDoc
 
 const GOLDEN = `# Web annotation handoff
 
+kind: task
+
 ## Request
 
 Merge these two buttons
@@ -105,7 +107,7 @@ describe("renderHandoffDoc", () => {
       doc.indexOf("from: web-picker"),
       doc.indexOf("handoff_id: m1"),
     ];
-    assert.equal(doc.startsWith("# Web annotation handoff\n"), true);
+    assert.equal(doc.startsWith("# Web annotation handoff\n\nkind: task\n"), true);
     for (let i = 1; i < offsets.length; i++) {
       assert.ok(offsets[i] > offsets[i - 1], `section ${i} must come after ${i - 1}: ${offsets.join(", ")}`);
     }

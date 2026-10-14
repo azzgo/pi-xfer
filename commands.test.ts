@@ -517,6 +517,34 @@ describe("xfer command: mesh subcommand", () => {
   });
 });
 
+describe("xfer command: handoff prompt", () => {
+  it("tells the agent to declare the kind and pass it to xfer_to", async () => {
+    fs.writeFileSync(path.join(tmpDir, "peer-kind.sock"), "");
+    const h = harness();
+    await h.handler("peer-kind review the patch");
+    assert.equal(h.sent.length, 1);
+    assert.match(h.sent[0].content, /`xfer_to`/);
+    assert.match(h.sent[0].content, /\*\*Kind\*\*: pass `kind` to `xfer_to`/);
+    assert.match(h.sent[0].content, /'notification' when the target is only being told something/);
+  });
+
+  it("never grants a blanket permission to reply", async () => {
+    fs.writeFileSync(path.join(tmpDir, "peer-kind.sock"), "");
+    const h = harness();
+    await h.handler("peer-kind review the patch");
+    assert.doesNotMatch(h.sent[0].content, /Only reply back if/);
+    assert.doesNotMatch(h.sent[0].content, /Return address\*\*: from=`test-agent`\./);
+  });
+
+  it("declares the kind on the mesh prompt too", async () => {
+    const mesh = stubMesh({ status: () => ({ online: true, name: "test-agent" }) });
+    const h = harness({ mesh });
+    await h.handler("mesh phone review the patch");
+    assert.match(h.sent[0].content, /\*\*Kind\*\*: pass `kind` to `xfer_mesh_to`/);
+    assert.doesNotMatch(h.sent[0].content, /Only reply back if/);
+  });
+});
+
 describe("xfer command: doctor", () => {
   it("reports every check and notifies info when nothing is off", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-commands-doctor-"));
