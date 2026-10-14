@@ -79,6 +79,8 @@ export interface MeshNodeInfo {
   actorId: string;
   /** Lifecycle state; drives status-aware adoption in `MeshNode.up()`. */
   status: MeshActorStatus;
+  /** Runner pool the actor was placed in (engine `runner_name_selector`); "" = default pool. */
+  pool?: string;
 }
 
 /**
@@ -183,7 +185,12 @@ export function createRivetEngine(
       const actors = await engineApi<{ actors: any[] }>(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
       return actors.actors
         .filter((a) => a.destroy_ts === undefined || a.destroy_ts === null)
-        .map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }));
+        .map((a) => ({
+          name: deserializeKeyString(a.key),
+          actorId: a.actor_id,
+          status: deriveActorStatus(a),
+          ...(a.runner_name_selector ? { pool: a.runner_name_selector } : {}),
+        }));
     },
 
     async destroyNode(actorId: string) {

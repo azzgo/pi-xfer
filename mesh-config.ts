@@ -45,17 +45,30 @@ export function parseMeshConfig(raw: unknown): MeshConfig {
 }
 
 /** Fill namespace/token from URL auth syntax when not set explicitly. */
+/**
+ * Fill namespace/token from URL auth syntax when not set explicitly. Both
+ * spellings at once is almost always a stale placeholder in one of them, so it
+ * is refused instead of silently preferring the explicit fields.
+ */
 function withUrlAuth(config: MeshConfig): MeshConfig {
   try {
     const url = new URL(config.endpoint);
-    if (!config.namespace && url.username) config.namespace = decodeURIComponent(url.username);
-    if (!config.token && url.password) config.token = decodeURIComponent(url.password);
     if (url.username || url.password) {
+      if (config.namespace || config.token) {
+        throw new Error(
+          "mesh config sets credentials twice — namespace/token fields AND URL userinfo (https://ns:token@host). " +
+          "Keep exactly one; a stale placeholder in either would otherwise win silently",
+        );
+      }
+      config.namespace = decodeURIComponent(url.username);
+      config.token = decodeURIComponent(url.password);
       url.username = "";
       url.password = "";
       config.endpoint = url.toString();
     }
-  } catch { /* endpoint stays as-is; rivetkit validates it */ }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("credentials twice")) throw err;
+  }
   return config;
 }
 

@@ -48272,14 +48272,20 @@ function parseMeshConfig(raw) {
 function withUrlAuth(config3) {
   try {
     const url2 = new URL(config3.endpoint);
-    if (!config3.namespace && url2.username) config3.namespace = decodeURIComponent(url2.username);
-    if (!config3.token && url2.password) config3.token = decodeURIComponent(url2.password);
     if (url2.username || url2.password) {
+      if (config3.namespace || config3.token) {
+        throw new Error(
+          "mesh config sets credentials twice — namespace/token fields AND URL userinfo (https://ns:token@host). Keep exactly one; a stale placeholder in either would otherwise win silently"
+        );
+      }
+      config3.namespace = decodeURIComponent(url2.username);
+      config3.token = decodeURIComponent(url2.password);
       url2.username = "";
       url2.password = "";
       config3.endpoint = url2.toString();
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("credentials twice")) throw err;
   }
   return config3;
 }
@@ -48594,7 +48600,12 @@ function createRivetEngine(config3, onHandoff, deps = {}) {
     },
     async listNodes() {
       const actors = await engineApi(config3, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
-      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }));
+      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({
+        name: deserializeKeyString(a.key),
+        actorId: a.actor_id,
+        status: deriveActorStatus(a),
+        ...a.runner_name_selector ? { pool: a.runner_name_selector } : {}
+      }));
     },
     async destroyNode(actorId) {
       await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);

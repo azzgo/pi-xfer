@@ -107,6 +107,13 @@ issue-tracker box, several dev Macs) give each machine its own pool:
 
 With `pool` set, this host's runner joins that pool and this Node's actor is
 created with `runner_name_selector=<pool>`, so only this machine can receive it.
+
+> **Migrating an existing node**: adding `pool` does **not** move an actor that
+> already exists — `getOrCreate` keeps the original placement, so a plain
+> `down → up` can look successful while the actor still lives in the old pool.
+> `up` now detects this and refuses. To migrate: restart the pi process (an
+> extension build from before pool support cannot perform the migration), then
+> run `/xfer mesh down` followed by `/xfer mesh up` with the new config.
 Discovery, `desc`, and cross-pool `mesh send` stay un-pooled: a Node in another
 pool is still listed and addressable — only placement of your own actor is
 pinned. Repeat on every machine, each with its own pool. The adapter daemon
