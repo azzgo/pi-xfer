@@ -1558,12 +1558,27 @@
     const policy = ttPolicy();
     try {
       target.innerHTML = policy ? policy.createHTML(markup) : markup;
+      return;
     } catch (e) {
-      try {
-        target.innerHTML = markup;
-      } catch (e2) {
-        target.textContent = markup;
+    }
+    try {
+      target.innerHTML = markup;
+      return;
+    } catch (e) {
+    }
+    try {
+      const doc = new DOMParser().parseFromString(markup, "text/html");
+      let node = doc.body.firstChild;
+      while (node) {
+        target.appendChild(node);
+        node = doc.body.firstChild;
       }
+      return;
+    } catch (e) {
+    }
+    try {
+      target.textContent = markup;
+    } catch (e2) {
     }
   }
   function clearHTML(target) {
