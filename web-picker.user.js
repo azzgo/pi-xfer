@@ -1540,6 +1540,8 @@
   // web-picker.src/tt.js
   var POLICY_NAME = "pi-xfer";
   var cached;
+  var enforced = false;
+  var detachedBroken = false;
   function ttPolicy() {
     if (cached !== void 0) return cached;
     cached = null;
@@ -1562,29 +1564,130 @@
     doc.body.innerHTML = markup;
     return doc;
   }
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var VOID_TAGS = /* @__PURE__ */ new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+  var RAW_TAGS = /* @__PURE__ */ new Set(["style", "script"]);
+  var NAMED_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", copy: "©", reg: "®", hellip: "…", mdash: "—", ndash: "–", laquo: "«", raquo: "»" };
+  function decodeEntities(s) {
+    if (s.indexOf("&") === -1) return s;
+    return s.replace(/&(#[xX]?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (m, body) => {
+      if (body[0] === "#") {
+        const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+      }
+      return Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, body) ? NAMED_ENTITIES[body] : m;
+    });
+  }
+  function miniParse(markup) {
+    const frag = document.createDocumentFragment();
+    const stack = [{ tag: null, el: frag, ns: null }];
+    const top = () => stack[stack.length - 1];
+    let i = 0;
+    const len = markup.length;
+    const addText = (raw) => {
+      if (raw) top().el.appendChild(document.createTextNode(decodeEntities(raw)));
+    };
+    while (i < len) {
+      const lt = markup.indexOf("<", i);
+      if (lt === -1) {
+        addText(markup.slice(i));
+        break;
+      }
+      addText(markup.slice(i, lt));
+      if (markup.startsWith("<!--", lt)) {
+        const end = markup.indexOf("-->", lt + 4);
+        i = end === -1 ? len : end + 3;
+        continue;
+      }
+      if (markup.startsWith("</", lt)) {
+        const gt2 = markup.indexOf(">", lt + 2);
+        const name = markup.slice(lt + 2, gt2 === -1 ? len : gt2).trim().toLowerCase();
+        for (let k = stack.length - 1; k > 0; k--) {
+          if (stack[k].tag === name) {
+            stack.length = k;
+            break;
+          }
+        }
+        i = gt2 === -1 ? len : gt2 + 1;
+        continue;
+      }
+      const nameMatch = /^([a-zA-Z][a-zA-Z0-9-]*)/.exec(markup.slice(lt + 1));
+      if (!nameMatch) {
+        addText("<");
+        i = lt + 1;
+        continue;
+      }
+      const tag = nameMatch[1].toLowerCase();
+      let j = lt + 1 + nameMatch[1].length;
+      const attrs = [];
+      let gt = -1;
+      let selfClose = false;
+      while (j < len) {
+        while (j < len && /\s/.test(markup[j])) j++;
+        if (markup[j] === ">") {
+          gt = j;
+          break;
+        }
+        if (markup[j] === "/" && markup[j + 1] === ">") {
+          gt = j + 1;
+          selfClose = true;
+          break;
+        }
+        const nameMatch2 = /^[^\s=/>]+/.exec(markup.slice(j));
+        if (!nameMatch2) {
+          j++;
+          continue;
+        }
+        const attrName = nameMatch2[0];
+        j += attrName.length;
+        let value = "";
+        while (j < len && /\s/.test(markup[j])) j++;
+        if (markup[j] === "=") {
+          j++;
+          while (j < len && /\s/.test(markup[j])) j++;
+          const q = markup[j];
+          if (q === '"' || q === "'") {
+            const end = markup.indexOf(q, j + 1);
+            value = markup.slice(j + 1, end === -1 ? len : end);
+            j = end === -1 ? len : end + 1;
+          } else {
+            const vm = /^[^\s>]+/.exec(markup.slice(j));
+            value = vm ? vm[0] : "";
+            j += value.length;
+          }
+        }
+        attrs.push([attrName, value]);
+      }
+      i = gt === -1 ? len : gt + 1;
+      const parent = top();
+      const ns = parent.ns || (tag === "svg" ? SVG_NS : null);
+      const el = ns ? document.createElementNS(ns, tag) : document.createElement(tag);
+      for (const [n, v] of attrs) el.setAttribute(n, decodeEntities(v));
+      parent.el.appendChild(el);
+      if (RAW_TAGS.has(tag)) {
+        const lower = markup.toLowerCase();
+        const close = lower.indexOf("</" + tag, i);
+        const raw = markup.slice(i, close === -1 ? len : close);
+        if (raw) el.appendChild(document.createTextNode(raw));
+        const closeGt = markup.indexOf(">", i + raw.length);
+        i = closeGt === -1 ? len : closeGt + 1;
+        continue;
+      }
+      if (!selfClose && !VOID_TAGS.has(tag)) {
+        stack.push({ tag, el, ns });
+      }
+    }
+    return frag;
+  }
   function setHTML(target, html) {
     if (!target) return;
     const markup = html == null ? "" : String(html);
-    try {
-      target.innerHTML = markup;
-      return;
-    } catch (e) {
-    }
-    {
-      const owner = target.setHTMLUnsafe === "function" ? target : typeof document !== "undefined" ? document.createElement("div") : null;
+    if (!enforced) {
       try {
-        if (owner === target) {
-          target.setHTMLUnsafe(markup);
-        } else if (owner) {
-          owner.setHTMLUnsafe(markup);
-          let node = owner.firstChild;
-          while (node) {
-            target.appendChild(node);
-            node = owner.firstChild;
-          }
-        }
-        if (owner) return;
+        target.innerHTML = markup;
+        return;
       } catch (e) {
+        enforced = true;
       }
     }
     try {
@@ -1595,14 +1698,29 @@
       }
     } catch (e) {
     }
-    try {
-      const doc = parseDetached(markup);
-      let node = doc.body.firstChild;
-      while (node) {
-        target.appendChild(node);
-        node = doc.body.firstChild;
+    if (!detachedBroken && typeof DOMParser === "function") {
+      try {
+        const doc = parseDetached(markup);
+        let node = doc.body.firstChild;
+        while (node) {
+          target.appendChild(node);
+          node = doc.body.firstChild;
+        }
+        return;
+      } catch (e) {
+        detachedBroken = true;
       }
-      return;
+    }
+    try {
+      if (typeof document !== "undefined" && document.createElement) {
+        const frag = miniParse(markup);
+        let node = frag.firstChild;
+        while (node) {
+          target.appendChild(node);
+          node = frag.firstChild;
+        }
+        return;
+      }
     } catch (e) {
     }
     try {
