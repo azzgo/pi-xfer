@@ -48985,6 +48985,19 @@ function sendNotify(target2, msg, xferDir) {
 init_constants();
 init_mesh_config();
 
+// handoff-kind.ts
+var KIND_LINE = /^kind:[ \t]*(task|notification)[ \t]*$/i;
+function formatHandoffKind(kind) {
+  return `kind: ${kind}`;
+}
+function stampHandoffKind(document2, kind) {
+  const lines = document2.replace(/\r\n/g, "\n").split("\n").filter((line) => !KIND_LINE.test(line.trim()));
+  while (lines.length > 0 && lines[0].trim() === "") lines.shift();
+  const stamped = lines.length > 0 && /^<!--\s*xfer:sender-cwd\b/.test(lines[0].trim());
+  lines.splice(stamped ? 1 : 0, 0, formatHandoffKind(kind));
+  return lines.join("\n");
+}
+
 // sender-cwd-stamp.ts
 var fs3 = __toESM(require("node:fs"), 1);
 var path3 = __toESM(require("node:path"), 1);
@@ -49614,8 +49627,8 @@ function fail(message) {
 var USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
   xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
-  xfer-adapterd send <target> <file> <summary> [--from N] [--dir D]
-  xfer-adapterd mesh send <target> <file> <summary> [--from N] [--dir D] [--mesh-config P]
+  xfer-adapterd send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D]
+  xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 async function main(argv = process.argv.slice(2)) {
@@ -49704,29 +49717,44 @@ async function runUp(argv, flags) {
 async function runSend(argv, flags) {
   const { target: target2, file: file2, summary } = splitSendArgs(argv);
   if (!target2 || !file2 || !summary) {
-    fail(`Usage: xfer-adapterd send <target> <file> <summary>`);
+    fail(`Usage: xfer-adapterd send <target> <file> <summary> --kind <task|notification>`);
     return;
   }
   if (!fs10.existsSync(file2)) {
     fail(`❌ handoff file not found: ${file2}`);
     return;
   }
+  const kind = readKind(str(flags.kind));
+  if (!kind) {
+    fail(`❌ --kind must be "task" or "notification" — see the xfer-agent skill; a handoff that declares no kind reads as a notification and never comes back`);
+    return;
+  }
   const dir = str(flags.dir) ?? XFER_DIR;
   const from = str(flags.from) ?? defaultAdapterName();
   const id = msgId();
-  const stamp = senderStamp(from, dir);
+  const body = fs10.readFileSync(file2, "utf-8");
   try {
     await sendNotify(target2, {
       type: "xfer-notify",
       msg_id: id,
       from,
-      file: stamp ? stampedCopy(file2, stamp, id) : path11.resolve(file2),
+      file: writeOutboundDoc(body, from, dir, kind, id),
       summary
     }, dir);
     log(id);
   } catch (err) {
     fail(`❌ send to "${target2}" failed: ${errorText2(err)}`);
   }
+}
+function readKind(value) {
+  return value === "task" || value === "notification" ? value : null;
+}
+function writeOutboundDoc(body, from, dir, kind, id) {
+  const stamp = senderStamp(from, dir);
+  const document2 = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
+  const target2 = path11.join(os3.tmpdir(), `xfer-adapterd-${id}.md`);
+  fs10.writeFileSync(target2, document2, { encoding: "utf-8", mode: 384 });
+  return target2;
 }
 function senderStamp(from, dir) {
   try {
@@ -49736,19 +49764,19 @@ function senderStamp(from, dir) {
     return null;
   }
 }
-function stampedCopy(file2, stamp, id) {
-  const target2 = path11.join(os3.tmpdir(), `xfer-adapterd-${id}.md`);
-  fs10.writeFileSync(target2, stampDocument(fs10.readFileSync(file2, "utf-8"), stamp), { encoding: "utf-8", mode: 384 });
-  return target2;
-}
 async function runMeshSend(argv, flags) {
   const { target: target2, file: file2, summary } = splitSendArgs(argv);
   if (!target2 || !file2 || !summary) {
-    fail(`Usage: xfer-adapterd mesh send <target> <file> <summary>`);
+    fail(`Usage: xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification>`);
     return;
   }
   if (!fs10.existsSync(file2)) {
     fail(`❌ handoff file not found: ${file2}`);
+    return;
+  }
+  const kind = readKind(str(flags.kind));
+  if (!kind) {
+    fail(`❌ --kind must be "task" or "notification" — see the xfer-agent skill; a handoff that declares no kind reads as a notification and never comes back`);
     return;
   }
   const { sendMeshHandoff: sendMeshHandoff2 } = await Promise.resolve().then(() => (init_mesh_engine(), mesh_engine_exports));
@@ -49763,15 +49791,16 @@ async function runMeshSend(argv, flags) {
   const dir = str(flags.dir) ?? XFER_DIR;
   const id = msgId();
   const from = str(flags.from) ?? defaultAdapterName();
-  const stamp = senderStamp(from, dir);
   const body = fs10.readFileSync(file2, "utf-8");
+  const stamp = senderStamp(from, dir);
+  const document2 = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   try {
     await sendMeshHandoff2(config3, target2, {
       id,
       from,
       to: target2,
       summary,
-      document: stamp ? stampDocument(body, stamp) : body
+      document: document2
     });
     log(id);
   } catch (err) {

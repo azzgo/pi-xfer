@@ -273,7 +273,7 @@ describe("xfer-adapterd CLI smoke", () => {
     }
   });
 
-  it("declares the sender's cwd in the delivered doc and leaves the original alone", async () => {
+  it("declares the sender's cwd and its own kind over the doc's, leaving the original alone", async () => {
     const dir = freshDir();
     const child = spawn(process.execPath, [bundle, "up", "--name", "agent-stamp", "--once", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
@@ -282,15 +282,15 @@ describe("xfer-adapterd CLI smoke", () => {
       await waitFor(() => fs.existsSync(endpointForName("agent-stamp", dir)), 10000);
       fs.writeFileSync(metadataForName("agent-sender", dir), JSON.stringify({ xferName: "agent-sender", cwd: "/srv/app" }));
       const doc = path.join(dir, "handoff.md");
-      fs.writeFileSync(doc, "kind: task\n# Doc\n");
-      const sender = spawn(process.execPath, [bundle, "send", "agent-stamp", doc, "s", "--from", "agent-sender", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+      fs.writeFileSync(doc, "kind: notification\n# Doc\n");
+      const sender = spawn(process.execPath, [bundle, "send", "agent-stamp", doc, "s", "--kind", "task", "--from", "agent-sender", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
       let sendErr = "";
       sender.stderr?.on("data", (chunk) => { sendErr += chunk.toString(); });
       assert.equal(await waitExit(sender), 0, `stderr: ${sendErr}`);
       assert.equal(await waitExit(child), 0, `stderr: ${stderr}`);
       const delivered = takeInbox(inboxPathForName("agent-stamp", dir))[0]?.document ?? "";
       assert.match(delivered, /^<!-- xfer:sender-cwd cwd=\/srv\/app project=app machine=[^ ]+ -->\nkind: task\n# Doc\n$/);
-      assert.equal(fs.readFileSync(doc, "utf-8"), "kind: task\n# Doc\n");
+      assert.equal(fs.readFileSync(doc, "utf-8"), "kind: notification\n# Doc\n");
     } finally {
       if (child.exitCode === null) child.kill("SIGKILL");
     }
@@ -305,13 +305,43 @@ describe("xfer-adapterd CLI smoke", () => {
       await waitFor(() => fs.existsSync(endpointForName("agent-plain", dir)), 10000);
       const doc = path.join(dir, "handoff.md");
       fs.writeFileSync(doc, "plain body");
-      const sender = spawn(process.execPath, [bundle, "send", "agent-plain", doc, "s", "--from", "agent-unknown", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+      const sender = spawn(process.execPath, [bundle, "send", "agent-plain", doc, "s", "--kind", "task", "--from", "agent-unknown", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
       assert.equal(await waitExit(sender), 0);
       assert.equal(await waitExit(child), 0, `stderr: ${stderr}`);
-      assert.equal(takeInbox(inboxPathForName("agent-plain", dir))[0]?.document, "plain body");
+      assert.equal(takeInbox(inboxPathForName("agent-plain", dir))[0]?.document, "kind: task\nplain body");
     } finally {
       if (child.exitCode === null) child.kill("SIGKILL");
     }
+  });
+
+  it("refuses to send without a kind, because silence is not a failure the sender sees", async () => {
+    const dir = freshDir();
+    const doc = path.join(dir, "handoff.md");
+    fs.writeFileSync(doc, "kind: task\nbody");
+    const child = spawn(
+      process.execPath,
+      [bundle, "send", "nowhere", doc, "summary", "--dir", dir],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    assert.equal(await waitExit(child), 1);
+    assert.match(stderr, /--kind must be "task" or "notification"/);
+  });
+
+  it("refuses a kind it does not recognise", async () => {
+    const dir = freshDir();
+    const doc = path.join(dir, "handoff.md");
+    fs.writeFileSync(doc, "body");
+    const child = spawn(
+      process.execPath,
+      [bundle, "send", "nowhere", doc, "summary", "--kind", "maybe", "--dir", dir],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    assert.equal(await waitExit(child), 1);
+    assert.match(stderr, /--kind must be "task" or "notification"/);
   });
 
   it("SIGTERM drains gracefully, removing socket and metadata", async () => {
@@ -334,7 +364,7 @@ describe("xfer-adapterd CLI smoke", () => {
     fs.writeFileSync(file, "body");
     const child = spawn(
       process.execPath,
-      [bundle, "mesh", "send", "remote", file, "summary", "--mesh-config", path.join(dir, "missing.json")],
+      [bundle, "mesh", "send", "remote", file, "summary", "--kind", "task", "--mesh-config", path.join(dir, "missing.json")],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     let stderr = "";

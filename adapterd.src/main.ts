@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { sendNotify } from "../client.ts";
 import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
 import { loadMeshConfig, parseMeshConfig } from "../mesh-config.ts";
+import { stampHandoffKind, type HandoffKind } from "../handoff-kind.ts";
 import { senderCwdStampFor, stampDocument, type SenderCwdStamp } from "../sender-cwd-stamp.ts";
 import { endpointForName, isEntryPoint, metadataForName, msgId } from "../utils.ts";
 import { defaultAdapterName, startAdapterd, type AdapterdHandle, type AdapterdMeshOptions } from "./daemon.ts";
@@ -73,8 +74,8 @@ function fail(message: string): void {
 const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
   xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
-  xfer-adapterd send <target> <file> <summary> [--from N] [--dir D]
-  xfer-adapterd mesh send <target> <file> <summary> [--from N] [--dir D] [--mesh-config P]
+  xfer-adapterd send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D]
+  xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 
@@ -168,29 +169,52 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
 async function runSend(argv: string[], flags: Flags): Promise<void> {
   const { target, file, summary } = splitSendArgs(argv);
   if (!target || !file || !summary) {
-    fail(`Usage: xfer-adapterd send <target> <file> <summary>`);
+    fail(`Usage: xfer-adapterd send <target> <file> <summary> --kind <task|notification>`);
     return;
   }
   if (!fs.existsSync(file)) {
     fail(`❌ handoff file not found: ${file}`);
     return;
   }
+  const kind = readKind(str(flags.kind));
+  if (!kind) {
+    fail(`❌ --kind must be "task" or "notification" — see the xfer-agent skill; a handoff that declares no kind reads as a notification and never comes back`);
+    return;
+  }
   const dir = str(flags.dir) ?? XFER_DIR;
   const from = str(flags.from) ?? defaultAdapterName();
   const id = msgId();
-  const stamp = senderStamp(from, dir);
+  const body = fs.readFileSync(file, "utf-8");
   try {
     await sendNotify(target, {
       type: "xfer-notify",
       msg_id: id,
       from,
-      file: stamp ? stampedCopy(file, stamp, id) : path.resolve(file),
+      file: writeOutboundDoc(body, from, dir, kind, id),
       summary,
     }, dir);
     log(id);
   } catch (err) {
     fail(`❌ send to "${target}" failed: ${errorText(err)}`);
   }
+}
+
+/** The declared kind, or null when the flag is missing or meaningless. */
+function readKind(value: string | undefined): HandoffKind | null {
+  return value === "task" || value === "notification" ? value : null;
+}
+
+/**
+ * The document to put on the wire: the sender's kind and cwd, both declared by
+ * this tool rather than left to whatever the agent wrote in the file. Written
+ * beside the original, so the file handed in stays untouched.
+ */
+function writeOutboundDoc(body: string, from: string, dir: string, kind: HandoffKind, id: string): string {
+  const stamp = senderStamp(from, dir);
+  const document = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
+  const target = path.join(os.tmpdir(), `xfer-adapterd-${id}.md`);
+  fs.writeFileSync(target, document, { encoding: "utf-8", mode: 0o600 });
+  return target;
 }
 
 /**
@@ -207,22 +231,21 @@ function senderStamp(from: string, dir: string): SenderCwdStamp | null {
   }
 }
 
-/** Writes a stamped copy beside the original, so the file handed in stays untouched. */
-function stampedCopy(file: string, stamp: SenderCwdStamp, id: string): string {
-  const target = path.join(os.tmpdir(), `xfer-adapterd-${id}.md`);
-  fs.writeFileSync(target, stampDocument(fs.readFileSync(file, "utf-8"), stamp), { encoding: "utf-8", mode: 0o600 });
-  return target;
-}
 
 
 async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   const { target, file, summary } = splitSendArgs(argv);
   if (!target || !file || !summary) {
-    fail(`Usage: xfer-adapterd mesh send <target> <file> <summary>`);
+    fail(`Usage: xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification>`);
     return;
   }
   if (!fs.existsSync(file)) {
     fail(`❌ handoff file not found: ${file}`);
+    return;
+  }
+  const kind = readKind(str(flags.kind));
+  if (!kind) {
+    fail(`❌ --kind must be "task" or "notification" — see the xfer-agent skill; a handoff that declares no kind reads as a notification and never comes back`);
     return;
   }
   const { sendMeshHandoff } = await import("../mesh-engine.ts");
@@ -239,15 +262,16 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   const dir = str(flags.dir) ?? XFER_DIR;
   const id = msgId();
   const from = str(flags.from) ?? defaultAdapterName();
-  const stamp = senderStamp(from, dir);
   const body = fs.readFileSync(file, "utf-8");
+  const stamp = senderStamp(from, dir);
+  const document = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   try {
     await sendMeshHandoff(config, target, {
       id,
       from,
       to: target,
       summary,
-      document: stamp ? stampDocument(body, stamp) : body,
+      document,
     });
     log(id);
   } catch (err) {
