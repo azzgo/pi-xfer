@@ -1570,6 +1570,23 @@
       return;
     } catch (e) {
     }
+    {
+      const owner = target.setHTMLUnsafe === "function" ? target : typeof document !== "undefined" ? document.createElement("div") : null;
+      try {
+        if (owner === target) {
+          target.setHTMLUnsafe(markup);
+        } else if (owner) {
+          owner.setHTMLUnsafe(markup);
+          let node = owner.firstChild;
+          while (node) {
+            target.appendChild(node);
+            node = owner.firstChild;
+          }
+        }
+        if (owner) return;
+      } catch (e) {
+      }
+    }
     try {
       const policy = ttPolicy();
       if (policy) {

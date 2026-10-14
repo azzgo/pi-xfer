@@ -36,19 +36,15 @@ export function ttEnabled() {
 
 /**
 /**
- * Write markup into `target` (element or shadow root) the way the page's CSP
  * allows. Escalating fallbacks, none of which throw:
- *   1. plain innerHTML (no enforcement — the common case; also avoids the
- *     console noise a createPolicy attempt causes on allow-list pages like
- *     Teams, whose `trusted-types` directive rejects every name we pick)
- *   2. policy-created TrustedHTML (YouTube-style enforcement)
- *   3. DOMParser parse in a detached document, then adopt the nodes —
- *     DOMParser is not a Trusted Types sink, so this works on pages like
- *     Teams whose `trusted-types` allow-list blocks every policy name we
- *     could create AND enforces require-trusted-types-for (where fallbacks
- *     1 and 2 throw too). Safe because our templates are first-party
- *     static markup.
- *   4. textContent — degraded but visible
+ *   1. plain innerHTML (no enforcement — the common case)
+ *   2. Element.setHTMLUnsafe — a Sanitizer API sink, NOT a Trusted Types
+ *     sink; survives pages like Teams whose trusted-types allow-list rejects
+ *     every policy name we could create and where enforcement even covers
+ *     DOMParser. ShadowRoot targets go through a temp container element.
+ *   3. policy-created TrustedHTML (YouTube-style enforcement)
+ *   4. DOMParser / implementation-document parse in a detached document
+ *   5. textContent — degraded but visible
  */
 /**
  * Parse markup in a detached document — not a Trusted Types sink, and not
@@ -73,6 +69,21 @@ export function setHTML(target, html) {
     target.innerHTML = markup;
     return;
   } catch (e) { /* TT enforcement or sink blocked */ }
+  {
+    const owner = target.setHTMLUnsafe === 'function'
+      ? target
+      : typeof document !== 'undefined' ? document.createElement('div') : null;
+    try {
+      if (owner === target) {
+        target.setHTMLUnsafe(markup);
+      } else if (owner) {
+        owner.setHTMLUnsafe(markup);
+        let node = owner.firstChild;
+        while (node) { target.appendChild(node); node = owner.firstChild; }
+      }
+      if (owner) return;
+    } catch (e) { /* stripped or signature-changed by the page */ }
+  }
   try {
     const policy = ttPolicy();
     if (policy) {
