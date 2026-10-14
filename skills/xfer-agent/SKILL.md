@@ -33,12 +33,23 @@ Read `document` (or the file at `file`) and act on it.
 
 ## Send a handoff
 
-Write the handoff as a markdown file, then send it:
+Write the handoff as a markdown file, then send it. Start the doc with the kind
+header line — it is what tells the other agent whether to come back to you:
+
+```md
+kind: task
+```
 
 ```sh
 xfer-adapterd send <target> <file> <summary>
 ```
 
+- `kind: task` asks the target for output: it sends exactly one handoff back
+  once it has a conclusion — done, blocked, or needing input.
+- `kind: notification` tells the target something and asks for nothing. It stays
+  silent unless it is missing information, or the doc conflicts with fact.
+- A doc with no `kind:` line reads as a notification, so an undeclared task
+  never comes back.
 - **Target search is LOCAL first.** `<target>` is another xfer node on this
   machine — the `.sock` siblings in `~/.pi/xfer/` (their `.json` sibling holds
   the human-readable `xferName`).
@@ -70,7 +81,12 @@ xfer-adapterd up --name <new-name>
 
 Local targets reach you by that name.
 
-## Handoffs are one-way
+## Handoffs are one-way; the kind decides the return
 
-xfer is fire-and-forget: only send a handoff when you have meaningful new
-information for the other agent. There is no reply wait.
+There is no reply wait — `send` exits once the target's socket acks the enqueue.
+The `kind:` line is the only thing that opens a return path, so declare it
+deliberately.
+
+Send back exactly one handoff when you hold a conclusion for a task, or when you
+are missing information you need, or when the doc conflicts with fact. Never
+send one to acknowledge: a receipt is not a reply.
