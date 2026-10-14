@@ -39,6 +39,8 @@ daemon owns this agent's socket and inbox at `~/.pi/xfer/`.
 xfer-adapterd inbox list
 ```
 
-An empty list (or the pending handoffs) means the daemon is up. The
+Exit code 0 means the daemon is up (empty output just means no pending
+handoffs). A non-zero exit printing `no daemon "X" — start one with
+\`xfer-adapterd up --name X\`` means that name was never started. The
 recommended launch command is regenerated on every install, so an agent never
 has to construct flags itself.

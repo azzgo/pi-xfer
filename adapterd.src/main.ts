@@ -15,7 +15,7 @@ import * as path from "node:path";
 import { sendNotify } from "../client.ts";
 import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
 import { loadMeshConfig, parseMeshConfig } from "../mesh-config.ts";
-import { isEntryPoint, msgId } from "../utils.ts";
+import { endpointForName, isEntryPoint, msgId } from "../utils.ts";
 import { defaultAdapterName, startAdapterd, type AdapterdHandle, type AdapterdMeshOptions } from "./daemon.ts";
 import { inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./inbox.ts";
 
@@ -74,7 +74,7 @@ const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
   xfer-adapterd send <target> <file> <summary> [--from N] [--dir D]
   xfer-adapterd mesh send <target> <file> <summary> [--from N] [--mesh-config P]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
-  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N]`;
+  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { positionals, flags } = parseArgs(argv);
@@ -239,11 +239,20 @@ function runInbox(sub: string | undefined, flags: Flags): void {
     return;
   }
   const dir = str(flags.dir) ?? XFER_DIR;
+  const name = str(flags.name);
+  const inboxFlag = str(flags.inbox);
   let inboxPath: string;
   try {
-    inboxPath = str(flags.inbox) ?? resolveInboxPath(dir, str(flags.name));
+    inboxPath = inboxFlag ?? resolveInboxPath(dir, name);
   } catch (err) {
     fail(`❌ ${errorText(err)}`);
+    return;
+  }
+  // An explicit --name must point at a daemon that exists — otherwise "empty
+  // inbox" is indistinguishable from "never started", and an empty list reads
+  // as a healthy signal. --inbox is trusted as given (explicit file path).
+  if (!inboxFlag && name && !fs.existsSync(endpointForName(name, dir))) {
+    fail(`no daemon "${name}" — start one with \`xfer-adapterd up --name ${name}\``);
     return;
   }
   let records: InboxRecord[];
@@ -288,7 +297,10 @@ function runInstall(flags: Flags, install: typeof import("./install.ts").install
   }
   const name = str(flags.name) ?? defaultAdapterName();
   const bundle = process.argv[1] ? path.resolve(process.argv[1]) : "xfer-adapterd.cjs";
-  const launchCommand = `node "${bundle}" up --name "${name}"`;
+  // Install exists to onboard non-pi hosts onto the network, so the generated
+  // command joins the mesh by default; --no-mesh is the explicit local-only opt-out.
+  const meshFlag = flags["no-mesh"] === true ? "" : " --mesh";
+  const launchCommand = `node "${bundle}" up --name "${name}"${meshFlag}`;
   try {
     const result = install({ host, into, name, launchCommand });
     log(`✅ installed ${host} skill into ${into}`);

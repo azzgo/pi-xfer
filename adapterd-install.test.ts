@@ -84,8 +84,31 @@ describe("xfer-agent installer", () => {
     const config = JSON.parse(fs.readFileSync(path.join(into, ".xfer-agent.json"), "utf-8"));
     assert.equal(config.host, "generic");
     assert.equal(config.name, "agent-cli");
-    assert.match(config.launchCommand, /xfer-adapterd\.cjs" up --name "agent-cli"/);
+    assert.match(config.launchCommand, /xfer-adapterd\.cjs" up --name "agent-cli" --mesh$/);
     assert.ok(fs.existsSync(path.join(into, "SKILL.md")));
     assert.ok(fs.readFileSync(path.join(into, "SKILL.md"), "utf-8").includes(config.launchCommand));
+  });
+});
+
+describe("adapterd install CLI: mesh flag", () => {
+  it("includes --mesh by default and honours --no-mesh", async () => {
+    const bundle = path.join(import.meta.dirname, "xfer-adapterd.cjs");
+    const run = async (...args: string[]): Promise<{ code: number | null; stdout: string }> => {
+      const into = freshDir();
+      const child = spawn(process.execPath, [bundle, "install", "--host", "generic", "--into", into, "--name", "agent-cli", ...args],
+        { stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      child.stdout!.on("data", (c: Buffer) => { stdout += c; });
+      const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+      const config = JSON.parse(fs.readFileSync(path.join(into, ".xfer-agent.json"), "utf-8")) as { launchCommand: string };
+      return { code: code ?? 1, stdout: config.launchCommand };
+    };
+    const withMesh = await run();
+    assert.equal(withMesh.code, 0);
+    assert.match(withMesh.stdout, / up --name "agent-cli" --mesh$/);
+    const withoutMesh = await run("--no-mesh");
+    assert.equal(withoutMesh.code, 0);
+    assert.match(withoutMesh.stdout, / up --name "agent-cli"$/);
+    assert.doesNotMatch(withoutMesh.stdout, /--mesh/);
   });
 });

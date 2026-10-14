@@ -7,6 +7,7 @@ import { after, before, describe, it } from "node:test";
 import { defaultAdapterName, startAdapterd } from "./adapterd.src/daemon.js";
 import { appendInbox, inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./adapterd.src/inbox.js";
 import { sendNotify } from "./client.js";
+import { encodeAgentName } from "./utils.js";
 import type { MeshEngine, MeshNodeInfo } from "./mesh-engine.js";
 import { endpointForName, metadataForName, msgId } from "./utils.js";
 
@@ -294,4 +295,40 @@ describe("xfer-adapterd CLI smoke", () => {
     assert.match(stderr, /mesh is not configured/);
   });
 
+});
+
+describe("adapterd CLI: inbox with an explicit --name", () => {
+  const bundle = path.join(import.meta.dirname, "xfer-adapterd.cjs");
+  const dirs: string[] = [];
+  after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
+  const freshDir = (): string => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-adapterd-inbox-")); dirs.push(d); return d; };
+
+  function runCli(args: string[], dir: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    const child = spawn(process.execPath, [bundle, ...args, "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout!.on("data", (c: Buffer) => { stdout += c; });
+    child.stderr!.on("data", (c: Buffer) => { stderr += c; });
+    return new Promise((resolve) => child.on("exit", (code) => resolve({ code, stdout, stderr })));
+  }
+
+  it("fails with a start hint when the named daemon never started", async () => {
+    const dir = freshDir();
+    const r = await runCli(["inbox", "list", "--name", "never-started"], dir);
+    assert.notEqual(r.code, 0);
+    assert.match(r.stderr, /no daemon "never-started"/);
+    assert.match(r.stderr, /up --name never-started/);
+
+    const t = await runCli(["inbox", "take", "--name", "never-started"], dir);
+    assert.notEqual(t.code, 0);
+    assert.match(t.stderr, /no daemon "never-started"/);
+  });
+
+  it("still succeeds with an empty list once the daemon exists", async () => {
+    const dir = freshDir();
+    fs.writeFileSync(path.join(dir, `${encodeAgentName("known")}.sock`), "");
+    const r = await runCli(["inbox", "list", "--name", "known"], dir);
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout, "");
+  });
 });

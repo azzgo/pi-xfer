@@ -96,11 +96,11 @@ immediately — e.g. post the summary to a Feishu webhook, wake the agent loop.
 
 ```bash
 xfer-adapterd up --name grok --mesh          # daemon only
-xfer-adapterd inbox take --name grok         # bot polls; takes one record (consume-on-read)
+xfer-adapterd inbox take --name grok         # bot polls; consumes every pending record (consume-on-read)
 xfer-adapterd inbox list --name grok         # peek without consuming
 ```
 
-The inbox is a local JSONL file; `take` atomically consumes one record. There
+The inbox is a local JSONL file; `take` atomically consumes every pending record. There
 is no retention — once read, it is gone. Polling is fine for a bot that wakes
 on a timer anyway.
 

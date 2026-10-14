@@ -14,7 +14,9 @@ flags yourself):
 ```
 
 Start it in the background at the beginning of a session. It owns the local
-socket and the inbox.
+socket and the inbox. The command joins the mesh (`--mesh`) by default —
+without it the daemon only has a local Unix socket and cannot reach mesh
+peers; only drop `--mesh` when mesh is intentionally not configured.
 
 ## Read your inbox
 
