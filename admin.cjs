@@ -40,7 +40,7 @@ __export(admin_main_exports, {
 module.exports = __toCommonJS(admin_main_exports);
 var fs8 = __toESM(require("node:fs"), 1);
 var http2 = __toESM(require("node:http"), 1);
-var path8 = __toESM(require("node:path"), 1);
+var path9 = __toESM(require("node:path"), 1);
 
 // board.ts
 var fs = __toESM(require("node:fs"), 1);
@@ -1989,6 +1989,10 @@ async function collectGarbage(xferDir) {
   return report;
 }
 
+// mesh-log.ts
+var path8 = __toESM(require("node:path"), 1);
+var MESH_LOG_PATH = path8.join(XFER_DIR, "mesh.log");
+
 // mesh-engine.ts
 function deriveActorStatus(actor) {
   if (actor.destroy_ts !== void 0 && actor.destroy_ts !== null) return "Destroyed";
@@ -1997,8 +2001,8 @@ function deriveActorStatus(actor) {
   if (actor.connectable_ts !== void 0 && actor.connectable_ts !== null) return "Running";
   return "Pending";
 }
-async function engineApi(config, method, path9, body) {
-  const url = new URL(path9, config.endpoint);
+async function engineApi(config, method, path10, body) {
+  const url = new URL(path10, config.endpoint);
   if (config.namespace) url.searchParams.set("namespace", config.namespace);
   const headers = {};
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
@@ -2023,7 +2027,7 @@ function deserializeKeyString(serialized) {
 var DEFAULT_ADMIN_PORT = 7788;
 var EXTENSION_VERSION = (() => {
   try {
-    return JSON.parse(fs8.readFileSync(path8.join(__dirname, "package.json"), "utf-8")).version ?? "?";
+    return JSON.parse(fs8.readFileSync(path9.join(__dirname, "package.json"), "utf-8")).version ?? "?";
   } catch {
     return "?";
   }
@@ -2063,7 +2067,7 @@ function processAlive2(pid) {
   }
 }
 async function meshView(xferDir) {
-  const configPath = path8.join(xferDir, "mesh.config.json");
+  const configPath = path9.join(xferDir, "mesh.config.json");
   if (!fs8.existsSync(configPath)) return { configured: false, error: null, nodes: [] };
   try {
     const nodes = await listMeshNodes(loadMeshConfig(configPath));
@@ -2478,7 +2482,7 @@ function createAdminServer(options) {
         redirect(res, back("/control"));
         for (const name of ["admin.pid", "admin.json"]) {
           try {
-            fs8.unlinkSync(path8.join(xferDir, name));
+            fs8.unlinkSync(path9.join(xferDir, name));
           } catch {
           }
         }
@@ -2548,7 +2552,7 @@ function startWatchers(xferDir, boardDir, publish) {
       const name = filename ?? "";
       if (name === "broker.json" || name === "broker.pid") {
         once(`broker:${name}`, () => {
-          const alive = fs8.existsSync(path8.join(xferDir, "broker.json"));
+          const alive = fs8.existsSync(path9.join(xferDir, "broker.json"));
           publish({
             t: now(),
             kind: "broker",
@@ -2561,7 +2565,7 @@ function startWatchers(xferDir, boardDir, publish) {
       if (name.endsWith(".sock") || name.endsWith(".json") && !SKIP_JSON.has(name)) {
         const peerName = name.replace(/\.sock$/, "").replace(/\.json$/, "");
         once(`peer:${peerName}`, () => {
-          const alive = fs8.existsSync(path8.join(xferDir, `${peerName}.sock`));
+          const alive = fs8.existsSync(path9.join(xferDir, `${peerName}.sock`));
           publish({
             t: now(),
             kind: "peer",
@@ -2579,7 +2583,7 @@ function startWatchers(xferDir, boardDir, publish) {
       const name = filename ?? "";
       if (!name.endsWith(".md")) return;
       once(`board:${name}`, () => {
-        const exists = fs8.existsSync(path8.join(boardDir, name));
+        const exists = fs8.existsSync(path9.join(boardDir, name));
         publish({
           t: now(),
           kind: "board",
@@ -2594,7 +2598,7 @@ function startWatchers(xferDir, boardDir, publish) {
 function parseArgs2(args) {
   let port = DEFAULT_ADMIN_PORT;
   let xferDir = XFER_DIR;
-  let boardDir = path8.join(xferDir, "board");
+  let boardDir = path9.join(xferDir, "board");
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--port") port = Number.parseInt(args[++i] ?? "", 10);
@@ -2646,8 +2650,8 @@ async function main2() {
       process.exit(1);
     }
     try {
-      fs8.unlinkSync(path8.join(xferDir, "admin.pid"));
-      fs8.unlinkSync(path8.join(xferDir, "admin.json"));
+      fs8.unlinkSync(path9.join(xferDir, "admin.pid"));
+      fs8.unlinkSync(path9.join(xferDir, "admin.json"));
     } catch {
     }
     console.error(`[admin] port ${port} is occupied by another program — falling back to an ephemeral port`);
@@ -2661,10 +2665,10 @@ async function main2() {
   }
   setPort(realPort);
   fs8.mkdirSync(xferDir, { recursive: true, mode: 448 });
-  fs8.writeFileSync(path8.join(xferDir, "admin.pid"), `${process.pid}
+  fs8.writeFileSync(path9.join(xferDir, "admin.pid"), `${process.pid}
 `, "utf-8");
   fs8.writeFileSync(
-    path8.join(xferDir, "admin.json"),
+    path9.join(xferDir, "admin.json"),
     JSON.stringify({ port: realPort, pid: process.pid, startedAt: (/* @__PURE__ */ new Date()).toISOString(), version: EXTENSION_VERSION }, null, 2),
     "utf-8"
   );
@@ -2674,8 +2678,8 @@ async function main2() {
     if (shutdownRequested) return;
     shutdownRequested = true;
     try {
-      fs8.unlinkSync(path8.join(xferDir, "admin.pid"));
-      fs8.unlinkSync(path8.join(xferDir, "admin.json"));
+      fs8.unlinkSync(path9.join(xferDir, "admin.pid"));
+      fs8.unlinkSync(path9.join(xferDir, "admin.json"));
     } catch {
     }
     process.exit(0);

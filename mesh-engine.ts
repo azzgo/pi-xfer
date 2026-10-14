@@ -1,4 +1,5 @@
 import { HANDOFF_QUEUE, XFER_INSTANCE_ACTOR, deserializeMeshKey, type MeshConfig } from "./mesh-config.ts";
+import { createMeshLogSink } from "./mesh-log.ts";
 import { ensureNativeRuntimeReady } from "./mesh-native.ts";
 
 /** Inline handoff payload carried by the mesh handoff queue. */
@@ -135,10 +136,19 @@ export interface RivetEngineDeps {
   importClient?: () => Promise<any>;
 }
 
+/**
+ * Where the mesh log of this engine goes. Only tests set it — production takes
+ * the default `<xfer-dir>/mesh.log`, keeping the log hermetic per test process.
+ */
+export interface RivetEngineOptions {
+  logPath?: string;
+}
+
 export function createRivetEngine(
   config: MeshConfig,
   onHandoff: (message: MeshHandoffMessage, selfKey: string) => void,
   deps: RivetEngineDeps = {},
+  options: RivetEngineOptions = {},
 ): MeshEngine {
   let registry: { shutdown(): Promise<void> } | null = null;
   let client: any = null;
@@ -175,6 +185,7 @@ export function createRivetEngine(
         token: config.token,
         runtime: "native",
         noWelcome: true,
+        logging: { baseLogger: createMeshLogSink({ path: options.logPath }) },
         ...(config.pool ? { envoy: { poolName: config.pool } } : {}),
       });
       const regAny = reg as unknown as { startAndWait(): Promise<void>; shutdown(): Promise<void> };
