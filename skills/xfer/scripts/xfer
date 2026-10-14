@@ -33,19 +33,21 @@ function expand(p) {
   return entries.flatMap((entry) => expand(path.join(dir, entry, rest)));
 }
 
+/** Every place the bundle may live, most specific first. */
+function bundleCandidates() {
+  const home = os.homedir();
+  return [
+    path.join(home, "dev", "personal", "pi-xfer", "xfer-adapterd.cjs"),
+    path.join(XFER_DIR, "xfer-adapterd.cjs"),
+    path.join(home, ".local/share/mise/installs/node/*/lib/node_modules/pi-xfer/xfer-adapterd.cjs"),
+    path.join(home, ".nvm/versions/node/*/lib/node_modules/pi-xfer/xfer-adapterd.cjs"),
+  ].flatMap((candidate) => (candidate.includes("*") ? expand(candidate) : [candidate]));
+}
+
 function resolveBundle() {
   const explicit = process.env.XFER_BUNDLE;
   if (explicit) return explicit;
-  const home = os.homedir();
-  const fixed = [
-    path.join(home, "dev", "personal", "pi-xfer", "xfer-adapterd.cjs"),
-    path.join(XFER_DIR, "xfer-adapterd.cjs"),
-  ];
-  const globbed = [
-    path.join(home, ".local/share/mise/installs/node/*/lib/node_modules/pi-xfer/xfer-adapterd.cjs"),
-    path.join(home, ".nvm/versions/node/*/lib/node_modules/pi-xfer/xfer-adapterd.cjs"),
-  ];
-  return [...fixed, ...globbed.flatMap(expand)].find((candidate) => fs.existsSync(candidate)) ?? null;
+  return bundleCandidates().find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 function readJson(file) {
@@ -238,8 +240,8 @@ async function main() {
   const bundle = resolveBundle();
   if (!bundle) {
     console.error(
-      "xfer: cannot find xfer-adapterd.cjs — set $XFER_BUNDLE, put `xfer-adapterd` on PATH, " +
-        "or keep the pi-xfer checkout at ~/dev/personal/pi-xfer",
+      "xfer: cannot find xfer-adapterd.cjs — set $XFER_BUNDLE or put `xfer-adapterd` on PATH. " +
+        `Looked in: ${bundleCandidates().join(", ")}`,
     );
     process.exit(1);
   }

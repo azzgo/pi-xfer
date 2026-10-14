@@ -7,9 +7,12 @@
  * `task` asks the target for output: it comes back with exactly one conclusion
  * (done, blocked, or needing input). `notification` informs and stays silent —
  * the target sends a reverse handoff only when it lacks information, or when
- * the document conflicts with fact. A missing line reads as `notification`, so
- * senders that predate the field go silent instead of producing a receipt
- * (docs/adr/0018-handoff-kind-sender-declares.md).
+ * the document conflicts with fact.
+ *
+ * The sending tool stamps the line from a required parameter, so a handoff
+ * never depends on the model writing the header itself; when a doc carries a
+ * hand-written line the tool's value replaces it. A doc with no line is a
+ * `notification`.
  *
  * The sending tool stamps the line from a required parameter, so a handoff
  * never depends on the model writing the header itself; when a doc carries a

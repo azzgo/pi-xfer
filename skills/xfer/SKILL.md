@@ -20,7 +20,7 @@ Everything goes through this skill's wrapper, which resolves the daemon bundle (
 ~/.agents/skills/xfer/scripts/xfer <args>
 ```
 
-The script is `scripts/xfer` beside this file; its canonical source is `skills/xfer/scripts/xfer` in the pi-xfer repo, which this skill ships from.
+The script is `scripts/xfer` beside this file.
 
 ## Discover who's out there
 
