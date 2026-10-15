@@ -23,6 +23,7 @@ documents it points to.
 - **Tests**: `npm test` must be green before every push. Tests must be hermetic — never depend on the developer's real `~/.pi/xfer` state.
 - **No runtime npm dependencies** for the extension itself; rivetkit stays out of the dependency list (see the ADR above).
 - **Verify visible changes**: `npm test` green is not verification for UI or interactive changes — after editing `admin-*.ts` pages or `commands.ts` flows, run the `.agents/skills/verify/` skill (chrome-devtools MCP for the admin page, tmux for command smoke). web-picker userscript stays out of scope (manual).
+- **One installed copy**: keep `npm:pi-xfer` as the only pi-xfer entry in `~/.pi/agent/settings.json` and upgrade it with `pi update --extensions`. Two copies in one session collide on `xfer_to` / `xfer_mesh_to` / `--xfer` and the second fails to load. Never `pi install <path to this repo>`; run the working tree with `pi -ne -e ./` (skip discovery, load this `index.ts`).
 - **Releases**: follow `docs/release.md` — `npm version` + `git push origin main --follow-tags`; never hand-edit the version and tag separately.
 
 ## Layout pointers
