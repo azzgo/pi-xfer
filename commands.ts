@@ -387,6 +387,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
           }
           return;
+        }
         if (sub === "setup") {
           try {
             const config = loadMeshConfig(MESH_CONFIG_PATH);
@@ -405,7 +406,6 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
           }
           return;
-        }
         }
         const target = sub;
         const requirement = parts.slice(2).join(" ").trim();
