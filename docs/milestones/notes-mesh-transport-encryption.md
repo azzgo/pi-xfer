@@ -120,3 +120,91 @@ construction, so it does not remove the need for 1 or 2.
 - rivetkit 2.3.26 source in `node_modules/rivetkit` (`combineUrlPath`, `buildActorGatewayUrl`,
   `buildWebSocketProtocols`, `common/actor-router-consts.ts`); local plaintext-WebSocket
   reproduction.
+
+## 8. Reference implementation: paseo-relay + Paseo's E2EE overlay
+
+Reviewed `github.com/azzgo/paseo-relay` (v0.5.0, read from a clone) and Paseo's `SECURITY.md` on
+the user's question "is this worth borrowing?"
+
+### The relay itself has no crypto
+
+`main.go` imports `crypto/rand` for one thing only: `randomHex` session IDs. There is no cipher, no
+key handling, and **no authentication**: `role`, `serverId`, and `connectionId` are caller-supplied
+query params, and `registry.get(serverId)` creates a session on demand for any unknown ID. Anyone
+who guesses a `serverId` can join as either side. Its security is entirely outsourced to the
+endpoints — the relay is a bounded frame forwarder by design, and that is the whole trick.
+
+### The E2EE scheme lives in Paseo, and it is directly portable
+
+From Paseo's `SECURITY.md`:
+
+- Daemon holds a **persistent Curve25519 keypair** (`$PASEO_HOME/daemon-keypair.json`, mode 0600).
+- The pairing QR/URL carries the daemon's public key **in the URL fragment**, so the web host never
+  sees it. That is the out-of-band trust anchor.
+- The client generates a **fresh ephemeral** Curve25519 keypair per connection and sends
+  `e2ee_hello` with its public key; the daemon processes no application message before the
+  handshake completes.
+- ECDH → shared key → **XSalsa20-Poly1305 (NaCl `box`)**, wire format `[24-byte nonce][ciphertext]`.
+- Known gap they state plainly: fresh keys per session make cross-session replay impossible, but
+  **within a live session there is no replay protection** (random nonces, no counters).
+
+### Why reusing the relay does not fit pi-xfer
+
+The friction the user hit is structural, not incidental:
+
+- **Online-only.** Sessions live in an in-memory registry with a 60 s / 5 min eviction sweep. The
+  frame buffer (200 frames, 64 MiB, evict-oldest) only covers the race while the daemon's data
+  socket is still connecting — not "this node has been off for six hours". pi-xfer's durable queue
+  and `/xfer mesh list` of offline nodes are exactly what the relay cannot do.
+- **No discoverable address.** Routing is by a random-hex `serverId` + `connectionId`: unguessable
+  by construction, and therefore discovery-hostile. pi-xfer addresses nodes as
+  `getOrCreate("xfer-instance", [name])` — a stable, listable, guessable name. That is what makes
+  engine-side discovery free, and what makes impersonation possible.
+- Replacing the engine with this relay would delete descriptions, offline delivery, and the board
+  model that ADR 0013 / 0014 / 0016 exist to provide.
+
+**So: borrow the crypto envelope, not the transport.** Keep the engine for discovery + durability;
+make what it stores opaque.
+
+### What to take, concretely, dependency-free
+
+Node's own `crypto` is enough — verified locally:
+
+- `generateKeyPairSync("x25519")` + `diffieHellman({privateKey, publicKey})` → 32-byte shared
+  secret.
+- `hkdfSync("sha256", shared, salt, "pi-xfer/1", 32)` → message key.
+- `createCipheriv("chacha20-poly1305", key, 12-byte nonce, {authTagLength: 16})` → AEAD.
+
+No new runtime dependency, no native addon, no libsodium. This is the Node equivalent of Paseo's
+NaCl box (ChaCha20-Poly1305 instead of XSalsa20-Poly1305; same guarantees).
+
+Shape for pi-xfer:
+
+1. Each node generates a persistent X25519 keypair on first `mesh up`, stored next to
+   `mesh.config.json` with mode 0600; the **public** key goes in `XferInstanceState` beside
+   `description` (engine-side, cross-machine for free).
+2. `xfer_mesh_to` encrypts `document` with a per-handoff ephemeral keypair against the recipient's
+   advertised public key and puts `{ epk, nonce, ciphertext }` in the message instead of
+   `document`. `onHandoff` decrypts. The engine only ever holds ciphertext, in transit and in its
+   RocksDB queue.
+3. Trust anchor: an out-of-band fingerprint exchange over the existing local socket, e.g.
+   `/xfer mesh trust <name> <fingerprint>`, TOFU on first contact (SSH-style). This is the same role
+   Paseo's pairing QR plays, and it **also closes the peer-identity gap** from
+   `notes-mesh-peer-identity.md`: a forged `xfer-instance` actor can advertise any public key, but
+   it cannot decrypt the handoff nor produce a message the trusted key accepts.
+4. Replay: include the handoff id and a nonce, and dedupe on id — Paseo's stated in-session gap is
+   the one thing not to copy.
+
+### The caveat that keeps TLS on the list
+
+E2EE protects *payloads*, not the control plane. An on-path attacker still steals the admin token
+(§5.1) and with it can read all metadata and queue sizes, destroy actors, DoS, and register a
+same-name `xfer-instance` actor to intercept traffic. So the ordering from §7 stands: TLS or a
+private network first, E2EE second as defense in depth plus peer authentication.
+
+### References
+
+- `github.com/azzgo/paseo-relay` — `main.go` (`registry.get` lazy session creation, `frameBuffer`
+  bounds), `CHANGELOG.md` v0.4.0/v0.5.0 hardening notes, README security section.
+- Paseo `SECURITY.md` — relay threat model, daemon keypair, `e2ee_hello`/`e2ee_ready`, NaCl box
+  wire format, stated replay gap.
