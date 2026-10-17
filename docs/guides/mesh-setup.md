@@ -2,6 +2,10 @@
 
 The Mesh is pi-xfer's opt-in transport for delivering handoffs between machines: each pi session that joins becomes a **Node** — one actor in a [RivetKit](https://rivet.dev) actor network, with engine-side discovery and a durable queue, so a handoff reaches a Node on another machine even if it's offline when sent. Local Unix-socket delivery is unaffected and stays the default. Why it's built this way: [`docs/adr/0013`](../adr/0013-xfer-mesh-rivetkit-transport.md).
 
+> **Before you deploy:** pi-xfer does not encrypt handoff payloads, and Rivet's engine speaks plain
+> HTTP unless you put TLS in front of it. Read
+> [Transport security is your responsibility](#transport-security-is-your-responsibility) first.
+
 ![Mesh architecture](assets/mesh-architecture.svg)
 
 The static image above is an export of the full interactive diagram — **[Open the interactive diagram](assets/mesh-architecture.html)** for pan/zoom, per-node source references, and a dark theme.
@@ -30,9 +34,9 @@ When the engine is up you need three things from your deployment:
 
 | You need | Where it comes from | Goes into |
 |---|---|---|
-| **Engine URL** reachable from every machine that will join (e.g. `https://engine.example.com` or `http://203.0.113.10:6420`) | Your reverse proxy / firewall config; the dashboard lives at `<engine-url>/ui` | `endpoint` |
+| **Engine URL** reachable from every machine that will join (e.g. `https://engine.example.com`; `http://` is only acceptable on a private network — see [Transport security](#transport-security-is-your-responsibility)) | Your reverse proxy / firewall config; the dashboard lives at `<engine-url>/ui` | `endpoint` |
 | **Namespace** (e.g. `default`) | Your engine's namespace setup | `namespace` |
-| **Token** (the admin token you configured) | Engine configuration — see the [configuration docs](https://rivet.dev/docs/deploy/self-host/control-plane/configuration/) | `token` (may be omitted when the engine is only reachable inside a private network — self-hosted engines accept unauthenticated traffic by default) |
+| **Token** (the admin token you configured) | Engine configuration — see the [configuration docs](https://rivet.dev/docs/deploy/self-host/control-plane/configuration/) | `token` (required by current engines — authentication is on by default since 2026-09-29; only an engine set to `auth.insecure_allow_unauthenticated: true` accepts anonymous traffic) |
 
 Note: a self-hosted engine may also require a one-time **runner config** per namespace before runners are accepted (see [Workers → Self-hosted](https://rivet.dev/actors/self-host/workers/)):
 
@@ -44,6 +48,55 @@ curl -X PUT "http://<engine-host>:6420/runner-configs/default?namespace=default"
 ```
 
 If `mesh up` connects and then the node fails to start, this is the usual suspect.
+
+## Transport security is your responsibility
+
+**pi-xfer does not encrypt anything, and Rivet does not encrypt anything for it.** Handoff documents
+travel as plaintext, the engine admin token travels as a plain `Authorization: Bearer …` header (and
+as a WebSocket subprotocol), and the durability you get for offline nodes is plaintext sitting in the
+engine's database. TLS is decided purely by your `endpoint` scheme: `https://` gives you `wss://`,
+`http://` gives you an unencrypted socket.
+
+That makes the transport a deployment decision you own. Two consequences follow:
+
+1. **Never expose the engine port (`6420`) directly to the internet.** Rivet's own docs say the
+   control plane "speaks plain HTTP" and expects a reverse proxy or load balancer to terminate TLS
+   in front of it, and that port `6420` is exposed publicly "behind TLS" or not at all.
+2. **A man-in-the-middle on that path gets more than your handoffs.** Whoever can read the wire can
+   read the admin token — which is the engine's root credential: every namespace, every actor, not
+   scopable, not revocable without restarting the engine. They can also read every handoff document,
+   rewrite it in flight (there is no integrity check), or register a same-named `xfer-instance`
+   actor to intercept traffic addressed to you.
+
+Acceptable shapes, cheapest first:
+
+| Shape | What it gives you | What it costs |
+|---|---|---|
+| **Private network** (WireGuard / Tailscale) | The engine is not on the public internet at all; no DNS or certificate needed | Every machine must join the VPN |
+| **TLS in front of `6420`** (Caddy / nginx + a real certificate) | `https://`/`wss://` end to end from each node to your proxy | A hostname, a certificate, a proxy that tolerates long-lived WebSockets |
+| **A TLS-terminating tunnel** (e.g. Cloudflare Tunnel) | No public inbound port, and HTTPS/WSS at the edge with no certificate work | The tunnel provider terminates TLS, so it can read your traffic; see below |
+
+Whichever you pick, **this is your responsibility, not pi-xfer's** — the extension cannot detect a
+missing TLS layer and will happily run over plain HTTP. If you are the only operator you can decide
+the risk is acceptable on a trusted network; anyone else reading this should assume it is not.
+
+### If you terminate TLS at an edge (Cloudflare Tunnel and friends)
+
+A tunnel hides the engine port and supplies HTTPS, but the edge is now part of your threat model:
+it decrypts the connection to forward it, so it sees the plaintext handoffs and the admin token just
+like a man-in-the-middle would. That is not a tunnel bug — it is what "TLS terminates here" means.
+If that is unacceptable, encrypt at the application layer (pi-xfer does not do this yet — E2EE is an
+open candidate item, not a shipped feature) or put the engine on a private network instead.
+
+Two operational caveats worth knowing before you commit to a tunnel:
+
+- **Long-lived WebSockets get cut.** Cloudflare documents an idle timeout on proxied WebSockets that
+  non-Enterprise plans cannot raise (widely observed at ~100 s of silence), and it restarts edge
+  servers on deploys, dropping connections. The mesh's runner and gateway sockets are idle most of
+  the time, so expect reconnects and plan a heartbeat or a tolerance for churn.
+- **The dashboard comes along.** The engine serves its admin UI at `<endpoint>/ui`. A public tunnel
+  to the engine exposes that too; gate the hostname behind the provider's access control or do not
+  publish it publicly at all.
 
 ## Step 2 — Configure `~/.pi/xfer/mesh.config.json`
 
@@ -151,4 +204,6 @@ Run `/xfer doctor` first — its **Mesh** line distinguishes config problems fro
 | Send to an offline node errors after ~30 s | Target never came online | Durable queue buffering starts only once the target actor has been created (i.e. it joined at least once). Bring the target online first. |
 | `mesh up` downloads files on first run | Expected | The native runtime is fetched from npm on first `mesh up` and cached locally (see ADR 0013). Needs network access. |
 | Want to see what the mesh did after the fact | The mesh runs quiet, so the pi screen shows nothing — but nothing is dropped either | Read `<xfer-dir>/mesh.log` (`tail -n 50 ~/.pi/xfer/mesh.log`): every `mesh up/down/send`, refusal, failure, inbound handoff and rivetkit JS log line, append-only. [docs/dev/mesh-log.md](../dev/mesh-log.md) explains what it holds and what it cannot. |
+| Connections drop every ~100 s (or on Cloudflare deploys) through a tunnel/edge proxy | The edge cuts idle WebSockets — the runner and gateway sockets are silent most of the time | Expect reconnects; keep the tunnel only if churn is tolerable, or use a private network / your own TLS proxy — [Transport security](#transport-security-is-your-responsibility) |
+| `mesh up` works but every handoff is readable by something on the path | You are on `http://`, or a TLS-terminating edge is in the path | Terminate TLS yourself or use a private network; pi-xfer has no payload encryption — [Transport security](#transport-security-is-your-responsibility) |
 | Want the RivetKit runtime's **native** logs (the Rust side, e.g. SQLite warnings) | Those never reach JS — they are written straight to the process's stdout, so they cannot be filed in `mesh.log` | Launch pi with `RIVET_LOG_LEVEL=warn` (or `debug`): a level you set yourself is respected, the welcome banner stays off. Expect the lines to smear the pi screen — that noise is why the default is `silent`. |
