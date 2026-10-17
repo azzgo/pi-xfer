@@ -27,8 +27,10 @@ never had to answer before:
    credential. The deployment guide now says so; the code still has no answer for "the transport is
    not trustworthy".
 
-Items 1–3 are the milestone. Everything else that was on the table is recorded as out of scope
-below, deliberately, so the next round does not relitigate it.
+Items 1–3 are the core of the milestone, with P0-D recording the posture they imply. P1-E (a
+Cloudflare actor as an ordinary mesh node) was added by the user after the first draft as an
+experimental deliverable: closed loop, docs, and a committed example. Everything else that was on
+the table is recorded as out of scope below, deliberately, so the next round does not relitigate it.
 
 ## Ordered list
 
@@ -129,11 +131,55 @@ it).
 Small, and it gates nothing — but it should land before P1-C changes the wire format, so the two
 documents do not contradict each other.
 
+### P1-E — Cloudflare actor as a mesh node (closed loop, docs, example)
+
+**Opportunity.** The first mesh node that costs nothing to keep alive: a serverless pool holds an
+`xfer-instance` implementation that bridges to a Pi Durable harness inside a Durable Object, so the
+node wakes when there is work and is otherwise absent. The intended use is the user's own: wake on a
+schedule, collect and summarize, and — when it is worth telling someone — send a handoff over the
+mesh to an always-on agent. Addressing stays `actor type + key`; a sender that omits `poolName`
+reaches it across pools. Background and the feasibility argument are in
+`notes-mesh-boundary-extension.md`.
+
+**Deliverables — three, and nothing beyond them.**
+
+1. **A verified closed loop.** The engine is already publicly reachable (`engine.example.com`), which is
+   the prerequisite the notes identified. Create a `serverless` runner-config pointing at the Worker
+   endpoint, deploy a bare `xfer-instance` actor to Cloudflare Workers, `mesh send` into it from a
+   local node, and get a handoff back out. **No agent logic in this step** — it only has to prove
+   that Cloudflare is an ordinary node on the mesh.
+2. **Documentation.** Pool kind and addressing; the discipline a serverless actor must follow (reply
+   on receipt — `submit` without waiting; no in-memory state across calls, so anything needed to
+   answer goes into actor SQLite); why such a node is a good *destination* for buffered work and a
+   bad *source* (it has no read side and no persistence once gone); the operational prerequisites and
+   the documented limits.
+3. **A committed example** under `examples/` (the directory does not exist yet; this item creates
+   it) — runnable, with the deploy steps, small enough to read in one sitting.
+
+**Explicitly experimental, not a supported feature.** No SLA, no network test in CI, and no promise
+that the example keeps working across rivetkit majors. Say so at the top of both the example and the
+docs page.
+
+**Open for design — the first one can sink the item.**
+
+- **Does rivetkit 2.3.26 support serverless workers at all?** Unverified. Confirm before anything
+  else. If it does not, this item becomes "documented negative result + what it would take", which
+  is still a legitimate deliverable but changes the shape of the milestone.
+- `getOrCreate` pins this host's own creation to `config.pool` (`mesh-engine.ts:197-200`); sending
+  across pools needs an explicit escape hatch, and adopted actors do not move pools (`mesh.ts:208`).
+- Whether the second step uses the real Pi Durable harness or a minimal stand-in for the reply path,
+  and how that return path authenticates.
+- The example may carry dependencies of its own — it is not the extension, so the "no runtime npm
+  dependencies" rule does not apply to it; say so explicitly so nobody later reads it as precedent.
+
+**Risk.** This is the item most likely to be blocked by an upstream we do not control. Schedule it
+last, and treat a written negative result as an acceptable outcome rather than letting it stall the
+milestone.
+
 ## Out of scope for this milestone
 
 | Item | Why not now |
 |---|---|
-| **Cloudflare + Pi Durable actor as a mesh node** (serverless pool) | Genuinely interesting and the first mesh node that costs nothing to keep alive, but it needs the engine publicly reachable and a new pool kind; it is a deployment-shape change, not a refinement. Recorded with a minimal verification path in `notes-mesh-boundary-extension.md`. Next milestone candidate. |
 | **Phone as a push-only input source** | Thought experiment only. Native iOS cannot host the runner (no native addon), Android/Termux is excluded by the user, so the only role left is a sensor input with no read side. Not this milestone. |
 | **Native runner on mobile** | Ruled out technically: rivetkit's envoy requires a native addon; wasm is not an option. |
 | **Engine-side always-on runner** | Rejected by ADR 0013; not reopened. |
@@ -150,3 +196,6 @@ documents do not contradict each other.
   bytes to the fake engine, assert the plaintext marker is absent.
 - The live deployment (`engine.example.com`) is available for end-to-end checks but must never be a
   test dependency.
+- P1-E is verified by a documented procedure, not by CI: the closed loop needs the public engine,
+  a deployed Worker and the tunnel. Keeping it out of `npm test` is deliberate — a green suite must
+  not depend on any of that.
