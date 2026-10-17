@@ -237,3 +237,51 @@ Still open, and belonging to the design node — not implemented:
 2. Whether the Cloudflare Tunnel topology needs a heartbeat in the mesh runner (idle WS cuts are a
    deployment-level risk, not a code bug, but reconnects should be verified).
 3. Key storage on disk (0600, next to `mesh.config.json`) and what `mesh down` must not destroy.
+
+## 10. Heartbeat cost on Cloudflare Tunnel (research, 2026-10-17)
+
+Question: a WebSocket heartbeat is acceptable, but does it create meaningful pressure on Cloudflare
+billing/usage statistics?
+
+**No. On the Tunnel path the heartbeat is effectively free, and it is not even counted as a
+request.** Details, all from Cloudflare's own docs:
+
+- **Tunnel is free.** Announced for all plans ("any organization can use … at no cost"); the account
+  limits page lists tunnels, routes, published apps, replicas — **no bandwidth entry**.
+- **Bandwidth is not billed at all.** "Bandwidth — Included in all plans. Cloudflare does not charge
+  for bandwidth", and there are no egress fees between Cloudflare and the origin.
+- **WebSockets are billed as one request.** "Cloudflare recognizes only the initial upgrade request
+  per WebSocket connection as an HTTP request … it will be counted as a single long-lived HTTP
+  request." Messages do not add requests. Bandwidth is measured only for Cloudflare → client
+  transfer, and is unbilled anyway.
+- **Analytics lag is the real effect.** Aggregated WebSocket usage shows up in Traffic Analytics /
+  GraphQL / HTTP request logs **after the connection closes**. A heartbeat that keeps the socket
+  open forever therefore keeps that connection out of the aggregate — the cost pressure the user
+  sensed is real but it is *observability*, not money. (Cloudflare's own WebSocket-handoff
+  limitation is similar: "lesser visibility (you are unable to view total bandwidth of websockets
+  in the zone)".)
+
+Size of the thing, for a 3-machine mesh with 30 s heartbeats: 3 long-lived sockets × 2 msg/min ×
+60 × 24 × 30 ≈ **259k messages/month**, a few bytes each — on the order of a couple of MB. At one
+upgrade request per socket, the request count is a rounding error on the 100k/day free tier.
+
+If the engine ever moves onto Cloudflare proper (the serverless-pool idea in
+`notes-mesh-boundary-extension.md`), the numbers still do not bite:
+
+- **Workers:** a WebSocket connection is one request; "WebSocket messages routed through a Worker do
+  not count as requests" at all.
+- **Durable Objects:** incoming WebSocket messages are billable at a **20:1** ratio (outgoing
+  messages and protocol pings are not charged). 259k messages/month ÷ 20 ≈ 13k billable requests —
+  inside the included 1M, or inside the Free plan's 100k/day.
+
+### What this changes (and does not)
+
+- No cost-driven reason to avoid a heartbeat.
+- The heartbeat may not even be ours to add: the long-lived socket is the **runner registration**
+  (`setup({ runtime: "native" })`), owned by RivetKit's native runtime — the JS bundle has no
+  application-level ping (`mesh-runtime.cjs`'s "ping" hits are substrings of "stopping"), and Node's
+  WebSocket auto-replies to peer pings without sending its own. Whether that native runner already
+  keeps the connection alive through a 100 s edge idle timeout is **unverified** and needs the
+  empirical tunnel test before any code is written.
+- Practical prerequisite: a named tunnel needs the domain on Cloudflare; `trycloudflare.com` quick
+  tunnels are ephemeral and not a deployment shape.
