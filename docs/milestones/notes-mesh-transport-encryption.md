@@ -285,3 +285,42 @@ If the engine ever moves onto Cloudflare proper (the serverless-pool idea in
   empirical tunnel test before any code is written.
 - Practical prerequisite: a named tunnel needs the domain on Cloudflare; `trycloudflare.com` quick
   tunnels are ephemeral and not a deployment shape.
+
+## 11. Live test on the real deployment (2026-10-17, after the Cloudflare Tunnel cutover)
+
+The tunnel went live as `https://engine.example.com/` (token embedded as URL auth, machine `laptop` pinning
+`pool=laptop`). Measurements taken from this host, read-only, against the running engine.
+
+**Tunnel path works end to end.** REST discovery returns 200; an actor RPC round-trip
+(`getDescription` on this host's own node) succeeds — **3.5 s cold** (waking a Sleeping actor) and
+**1758 / 1171 / 951 / 990 ms warm**. So the ~1 s figure is the tunnel's per-RPC cost, not a bug.
+
+**A cross-machine handoff actually landed.** `milestone` → `remote-node`, 391 bytes, kind `task`;
+the target echoed the nonce verbatim and reported inbound id, `from`, pool `remote-node`, and the same
+tunnel endpoint. First confirmed end-to-end delivery through the tunnel.
+
+**The runner already keeps itself alive — the heartbeat question is closed.** `/envoys` shows each
+live runner with `last_ping_ts` 1–3 s old and `last_rtt` 442 ms (`laptop`) / 565 ms (`remote-node`). The
+native runner pings continuously, so Cloudflare's ~100 s idle-WebSocket cut does not reach it. No
+heartbeat needs to be added on our side; §10's open item is settled by observation, not by a code
+change.
+
+**A failed target is indistinguishable from a live one in `mesh list`.** With four actors listed,
+`peers` reported all four as `Sleeping`; in fact only `laptop` and `remote-node` had runners attached. The
+`phone` actor carried `error: "no_envoys"` and failed every send after the documented 30 s
+timeout, while `remote-node` accepted one immediately. The engine's own actor record holds the
+distinguishing fact; `list` does not surface it. This is the "missing observation channel" from §9
+observed in the wild, and a concrete milestone candidate (`mesh list` / `peers` showing each node's
+status, or at least whether a runner is attached to its pool).
+
+**The dashboard is anonymously reachable through the tunnel** — the caveat in `mesh-setup.md`
+("the dashboard comes along") confirmed against the live host:
+
+```
+GET /ui                                    → 200  (dashboard HTML, no auth)
+GET /actors?name=xfer-instance&namespace=… → 401  invalid_token
+GET /health                                → 200  {"runtime":"engine","version":"2.3.26"}
+```
+
+The API is properly gated, but the console page and the version string are public. Gate `/ui` at
+Cloudflare Access, or do not publish the engine hostname publicly.
