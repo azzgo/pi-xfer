@@ -208,3 +208,32 @@ private network first, E2EE second as defense in depth plus peer authentication.
   bounds), `CHANGELOG.md` v0.4.0/v0.5.0 hardening notes, README security section.
 - Paseo `SECURITY.md` — relay threat model, daemon keypair, `e2ee_hello`/`e2ee_ready`, NaCl box
   wire format, stated replay gap.
+
+## 9. Direction recorded from the user (2026-10-17)
+
+The user's own deployment will be **Cloudflare Tunnel in front of the private engine port** (to hide
+it and borrow Cloudflare's HTTPS) **plus an E2EE layer** in pi-xfer. Because the tunnel is a personal
+solution, the private-deployment guide must state the MITM risk explicitly and make clear that
+external operators are on their own for transport security.
+
+Reflected in `docs/guides/mesh-setup.md` as of this note:
+
+- New section **"Transport security is your responsibility"** — pi-xfer/Rivet encrypt nothing; TLS is
+  a function of the `endpoint` scheme; the `6420`-must-not-be-public rule; the three acceptable
+  shapes (private network / own TLS proxy / TLS-terminating tunnel); the admin-token blast radius
+  and the plaintext handoff exposure; and an explicit "this is your responsibility, not pi-xfer's".
+- **Edge-termination subsection** — a tunnel hides the port but the provider decrypts, so it sits
+  inside the trust model; plus the two practical caveats (idle-WebSocket cuts, and `/ui` going public
+  with the engine).
+- Corrected the stale claim that self-hosted engines accept anonymous traffic by default (auth is on
+  by default since Rivet's 2026-09-29 change), and the unqualified `http://` example.
+- Two new troubleshooting rows (edge idle-timeout churn; "handoffs are readable on the path").
+
+Still open, and belonging to the design node — not implemented:
+
+1. Application-layer E2EE (§8): per-node X25519 keypair in actor state, one-shot sealed handoff
+   envelope, fingerprint trust anchored out-of-band. ADR-worthy, since it changes the wire format
+   and `XferInstanceState`.
+2. Whether the Cloudflare Tunnel topology needs a heartbeat in the mesh runner (idle WS cuts are a
+   deployment-level risk, not a code bug, but reconnects should be verified).
+3. Key storage on disk (0600, next to `mesh.config.json`) and what `mesh down` must not destroy.
