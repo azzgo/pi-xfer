@@ -52,16 +52,27 @@ undeliverable and names the reason, and does not label a runner-less node the sa
 Tests cover status derivation for every combination the engine can report.
 
 **Open for design.** Whether this extends `mesh list` or becomes `/xfer mesh status`; whether to show
-`last_rtt`/latency; whether `peers` (the adapter-side surface) gets the same information.
+`last_rtt`/latency; whether `peers` (the adapter-side surface) gets the same information. **The
+engine's persisted `error` field is stale** — on 2026-10-17 `agent-grok` still read `no_envoys`
+while its pool had a live runner — so the surface must reconcile the actor record against live
+`/envoys` data rather than trusting the error field alone.
 
 **Note.** This is user-visible output in a TUI → the `verify` skill applies.
 
 ### P0-B — Peer authenticity and a fast pre-send check
 
-**Problem.** Two halves of one gap. Discovery trusts an actor type name, so a forged `xfer-instance`
-in the same namespace is indistinguishable from a real node (`notes-mesh-peer-identity.md`). And a
-send to a target that is not a pi-xfer node fails the same way as a send to a node that is merely
-asleep: 30 s, then "target may be offline or stuck" (`mesh-engine.ts:237,279`).
+**Problem.** Three faces of one gap.
+
+- Discovery trusts an actor type name, so a forged `xfer-instance` in the same namespace is
+  indistinguishable from a real node (`notes-mesh-peer-identity.md`).
+- A send to a target that is not a pi-xfer node fails the same way as a send to a node that is
+  merely asleep: 30 s, then "target may be offline or stuck" (`mesh-engine.ts:237,279`).
+- **And that failure is ambiguous, not negative.** Proven live on 2026-10-17: the handoff
+  `mvbsq4ja-5dnpgd` to `agent-grok` was reported as a 30 s enqueue failure, and it was delivered
+  anyway once a runner appeared in that pool — `agent-grok` echoed the nonce and named that exact
+  id. `mesh.log` has the error and no success line. So today a sender is told "failed" about a
+  message that arrives, and the obvious user reaction (retry) produces a second, genuinely
+  duplicate delivery with a fresh id.
 
 **Direction.** A protocol marker in actor state alongside `description` (e.g. `protocol:
 "pi-xfer/1"`), read at discovery/probe time, and a pre-send probe that fails in milliseconds with a
@@ -71,11 +82,16 @@ P1-C's job; say that plainly in the docs rather than overselling it.
 
 **Acceptance.** Sending to a foreign actor errors in well under a second naming the real cause;
 sending to a runner-less node names the runner, not "stuck"; an existing node that predates the
-marker still works (it is absent-state, not a hard failure).
+marker still works (it is absent-state, not a hard failure). **A timeout must never be presented as
+"not delivered"** — the three outcomes are *delivered*, *definitely not delivered*, and *unknown,
+may still arrive*, and only the middle one may invite a retry. The receiver must dedupe on handoff
+id so that a retry (or a re-delivery) cannot be applied twice.
 
 **Open for design.** Probe surface (`getDescription` reuse vs a new action) and its cost — a probe is
 a full RPC, and measured RPC round-trips through the tunnel are ~1 s; whether to cache probe results
-per session; whether `/xfer doctor` reuses this check.
+per session; whether `/xfer doctor` reuses this check. Also: how long the sender waits before calling
+it "unknown", and whether the receiver-side dedupe belongs here or in P1-C (a retry is a new id, so
+id-dedupe alone does not catch it — decide whether the sender persists "sent, outcome unknown").
 
 ### P1-C — End-to-end encryption of the handoff envelope
 

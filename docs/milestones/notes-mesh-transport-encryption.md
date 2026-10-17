@@ -324,3 +324,37 @@ GET /health                                → 200  {"runtime":"engine","version
 
 The API is properly gated, but the console page and the version string are public. Gate `/ui` at
 Cloudflare Access, or do not publish the engine hostname publicly.
+
+### Follow-up (2026-10-17, later the same day): a reported failure is not a non-delivery
+
+`agent-grok` came online and replied to the **first** test — the one that had already been reported
+as a failure:
+
+```
+handoff id  mvbsq4ja-5dnpgd        ← the id of the send that timed out
+nonce       MESH-TEST-7f3a91-kappa ← echoed verbatim
+from        milestone              transport mesh        kind task
+```
+
+`mesh.log` on this host holds the error and **no** success line for that id:
+
+```
+2026-10-17T02:47:48.650Z level=error msg="mesh send failed" … to=agent-grok id=mvbsq4ja-5dnpgd
+```
+
+So the 30 s `QUEUE_SEND_TIMEOUT_MS` window is **ambiguous, not negative**: the client gives up, the
+engine still delivers. The user-visible consequence is the worst kind of lie — "failed" about a
+message that arrives — and the natural reaction (retry) creates a second delivery under a fresh id,
+because each send mints a new one.
+
+Two consequences for the milestone:
+
+- **P0-B** now requires three outcomes (*delivered* / *definitely not delivered* / *unknown, may
+  still arrive*), and only the middle may invite a retry; the receiver needs id-based dedupe.
+- **P0-A** cannot trust the actor record's persisted `error`: at the time of writing `agent-grok`
+  still reads `no_envoys` while its pool has a live envoy. Status has to reconcile against
+  `/envoys`.
+
+Also recorded: with `agent-grok` up, all four nodes are reachable in principle, and this host's own
+actor reads `connectable=yes` while the others sit at `sleep=yes` — sleeping actors are normal, and
+`sleep_ts` is not a health signal.
