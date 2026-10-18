@@ -131,6 +131,30 @@ Minimal example:
 }
 ```
 
+### Editor completion: point `$schema` at the repository's schema
+
+The shape of this file is published as a JSON Schema, so you can get key
+completion and validation while you type. Add one line at the top:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/azzgo/pi-xfer/main/mesh.config.schema.json",
+  "endpoint": "http://engine.example.com:6420/",
+  "namespace": "default",
+  "token": "!pass show mesh-token",
+  "pool": "workstation"
+}
+```
+
+Editors that speak JSON Schema (VS Code, JetBrains, Neovim + `jsonls`) then
+complete `endpoint`/`namespace`/`token`/`pool`, flag a typo such as `tokn`, and
+show the descriptions — including the three token forms below. pi-xfer itself
+**ignores** `$schema`; it is an editor hint and never becomes part of the config.
+
+The raw URL tracks `main`, so it serves whatever was last pushed — a schema
+change is live once it lands on the branch. To pin a version, substitute a tag or
+commit for `main`.
+
 ### Values that are not literals
 
 `token` (and `namespace`) accept the same three forms as `apiKey` in pi's own
