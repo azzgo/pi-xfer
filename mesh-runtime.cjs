@@ -48488,11 +48488,13 @@ function missingEnvName(value, env = process.env) {
 function expandTemplate(value, env) {
   return parseTemplate(value).map((part) => part.type === "literal" ? part.value : env[part.name] ?? "").join("");
 }
-async function runTokenCommand(command, timeoutMs = TOKEN_COMMAND_TIMEOUT_MS, env = process.env) {
+async function runTokenCommand(command, timeoutMs = TOKEN_COMMAND_TIMEOUT_MS, env = process.env, cwd = process.cwd()) {
   const shell = process.env.SHELL || "/bin/sh";
+  const where = `cwd ${jsonish(cwd)}, shell ${shell}`;
   const child = (0, import_node_child_process.spawn)(shell, ["-c", command], {
     stdio: ["ignore", "pipe", "pipe"],
     env,
+    cwd,
     shell: false
   });
   const collect = (async () => {
@@ -48506,16 +48508,23 @@ async function runTokenCommand(command, timeoutMs = TOKEN_COMMAND_TIMEOUT_MS, en
     });
     const outcome = await new Promise((resolve, reject) => {
       child.once("error", (err) => {
-        reject(new Error(`mesh token command "!${command}" could not be started — ${err.message}`));
+        reject(new Error(`mesh token command "!${command}" could not be started (${where}) — ${err.message}`));
       });
       child.once("close", (code, signal) => resolve({ code, signal }));
     });
+    const said = stderr.trim();
     if (outcome.code !== 0) {
       const reason = outcome.signal ? `killed by ${outcome.signal}` : `exit code ${outcome.code}`;
-      throw new Error(`mesh token command "!${command}" produced no token (${reason})${stderr.trim() ? ` — ${stderr.trim()}` : ""}`);
+      throw new Error(
+        `mesh token command "!${command}" produced no token (${reason}; ${where})${said ? ` — ${said}` : ""}` + (looksLikePathFailure(said) ? ` — a relative path inside the command resolves against the cwd above; use an absolute path or $HOME` : "")
+      );
     }
     const token = stdout.trim();
-    if (!token) throw new Error(`mesh token command "!${command}" produced an empty token`);
+    if (!token) {
+      throw new Error(
+        `mesh token command "!${command}" produced an empty token (${where})` + (said ? ` — it wrote to stderr: ${said}` : "") + ` — check it prints the token on stdout and resolves any relative path against the cwd above`
+      );
+    }
     return token;
   })();
   try {
@@ -48523,10 +48532,17 @@ async function runTokenCommand(command, timeoutMs = TOKEN_COMMAND_TIMEOUT_MS, en
   } catch (err) {
     child.kill("SIGKILL");
     if (err instanceof Error && err.message.startsWith("timed out after")) {
-      throw new Error(`mesh token command "!${command}" did not finish within ${timeoutMs} ms`);
+      throw new Error(`mesh token command "!${command}" did not finish within ${timeoutMs} ms (${where})`);
     }
     throw err;
   }
+}
+function jsonish(value) {
+  return JSON.stringify(value);
+}
+function looksLikePathFailure(stderr) {
+  if (stderr === "") return false;
+  return /no such file or directory|not found|command not found|没有那个文件或目录|无法找到|not found in/i.test(stderr);
 }
 async function resolveMeshConfig(config3, options = {}) {
   if (!config3.tokenExpression && !config3.namespaceExpression) return config3;
@@ -48536,7 +48552,13 @@ async function resolveMeshConfig(config3, options = {}) {
   const resolved = { ...rest };
   if (tokenExpression !== void 0) {
     if (isCommandValue(tokenExpression)) {
-      resolved.token = await runTokenCommand(tokenExpression.slice(1), timeoutMs, env);
+      const command = tokenExpression.slice(1);
+      const cwd = options.cwd ?? process.cwd();
+      try {
+        resolved.token = await runTokenCommand(command, timeoutMs, env, cwd);
+      } catch (err) {
+        throw new Error(`mesh config "token": ${err instanceof Error ? err.message : String(err)}`);
+      }
     } else {
       const missing = missingEnvName(tokenExpression, env);
       if (missing) {

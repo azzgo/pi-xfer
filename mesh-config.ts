@@ -254,6 +254,15 @@ function expandTemplate(value: string, env: Record<string, string | undefined>):
  * its write permission is code-execution permission. Documented in
  * `docs/guides/mesh-setup.md`.
  *
+ * **cwd is the caller's cwd, and it is stated in every error.** Like a shell
+ * line typed by hand, the command inherits the process's working directory — so
+ * a relative path inside it (`./get-token.sh`) means "relative to wherever pi
+ * happens to be running", which is the repo you opened, not the one your config
+ * lives in. Two repositories, two answers from one config. That is not fixable by
+ * choosing a directory for the user (there is no honest candidate: the config
+ * file is not code, and pi does not run `models.json` commands from the config's
+ * directory either); it is fixable by *saying so*, which every failure below does.
+ *
  * Asynchronous (`spawn`, never `execSync`) because this runs on the extension's
  * thread: pi may afford a blocking call in its own config path, but a mesh
  * operation must not freeze the TUI while a secret manager unlocks.
@@ -262,11 +271,16 @@ export async function runTokenCommand(
   command: string,
   timeoutMs = TOKEN_COMMAND_TIMEOUT_MS,
   env: Record<string, string | undefined> = process.env,
+  cwd: string = process.cwd(),
 ): Promise<string> {
   const shell = process.env.SHELL || "/bin/sh";
+  // `where` is quoted into every message: without it, "not found" and "empty"
+  // read as a broken config when the real answer is "you are in another repo".
+  const where = `cwd ${jsonish(cwd)}, shell ${shell}`;
   const child = spawn(shell, ["-c", command], {
     stdio: ["ignore", "pipe", "pipe"],
     env: env as NodeJS.ProcessEnv,
+    cwd,
     shell: false,
   });
 
@@ -277,16 +291,26 @@ export async function runTokenCommand(
     child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
     const outcome = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
       child.once("error", (err: NodeJS.ErrnoException) => {
-        reject(new Error(`mesh token command "!${command}" could not be started — ${err.message}`));
+        reject(new Error(`mesh token command "!${command}" could not be started (${where}) — ${err.message}`));
       });
       child.once("close", (code, signal) => resolve({ code, signal }));
     });
+    const said = stderr.trim();
     if (outcome.code !== 0) {
       const reason = outcome.signal ? `killed by ${outcome.signal}` : `exit code ${outcome.code}`;
-      throw new Error(`mesh token command "!${command}" produced no token (${reason})${stderr.trim() ? ` — ${stderr.trim()}` : ""}`);
+      throw new Error(
+        `mesh token command "!${command}" produced no token (${reason}; ${where})${said ? ` — ${said}` : ""}` +
+          (looksLikePathFailure(said) ? ` — a relative path inside the command resolves against the cwd above; use an absolute path or $HOME` : ""),
+      );
     }
     const token = stdout.trim();
-    if (!token) throw new Error(`mesh token command "!${command}" produced an empty token`);
+    if (!token) {
+      throw new Error(
+        `mesh token command "!${command}" produced an empty token (${where})` +
+          (said ? ` — it wrote to stderr: ${said}` : "") +
+          ` — check it prints the token on stdout and resolves any relative path against the cwd above`,
+      );
+    }
     return token;
   })();
 
@@ -295,10 +319,26 @@ export async function runTokenCommand(
   } catch (err) {
     child.kill("SIGKILL");
     if (err instanceof Error && err.message.startsWith("timed out after")) {
-      throw new Error(`mesh token command "!${command}" did not finish within ${timeoutMs} ms`);
+      throw new Error(`mesh token command "!${command}" did not finish within ${timeoutMs} ms (${where})`);
     }
     throw err;
   }
+}
+
+/** Quote a path for a one-line error, so an empty or space-riddled cwd is visible rather than implied. */
+function jsonish(value: string): string {
+  return JSON.stringify(value);
+}
+
+/**
+ * Does the shell's own message read like a path that was not found? Covers the
+ * usual English/GNU and macOS/zsh shapes plus the localized Chinese one this was
+ * first reported with; anything else still gets the cwd in the message, just
+ * without the extra hint.
+ */
+function looksLikePathFailure(stderr: string): boolean {
+  if (stderr === "") return false;
+  return /no such file or directory|not found|command not found|没有那个文件或目录|无法找到|not found in/i.test(stderr);
 }
 
 /**
@@ -319,7 +359,7 @@ export async function runTokenCommand(
  */
 export async function resolveMeshConfig(
   config: MeshConfig,
-  options: { timeoutMs?: number; env?: Record<string, string | undefined> } = {},
+  options: { timeoutMs?: number; env?: Record<string, string | undefined>; cwd?: string } = {},
 ): Promise<MeshConfig> {
   if (!config.tokenExpression && !config.namespaceExpression) return config;
   const env = options.env ?? process.env;
@@ -329,7 +369,16 @@ export async function resolveMeshConfig(
 
   if (tokenExpression !== undefined) {
     if (isCommandValue(tokenExpression)) {
-      resolved.token = await runTokenCommand(tokenExpression.slice(1), timeoutMs, env);
+      const command = tokenExpression.slice(1);
+      const cwd = options.cwd ?? process.cwd();
+      try {
+        resolved.token = await runTokenCommand(command, timeoutMs, env, cwd);
+      } catch (err) {
+        // Wrapped once, here, so every caller (the CLI, the daemon, doctor, a send)
+        // carries the same facts: which config field failed, the command as written
+        // and where it ran. A silent fallback here is what made this bug invisible.
+        throw new Error(`mesh config "token": ${err instanceof Error ? err.message : String(err)}`);
+      }
     } else {
       const missing = missingEnvName(tokenExpression, env);
       if (missing) {
