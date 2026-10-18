@@ -83,6 +83,53 @@ Rules:
   `capture-pane` instead of waiting on the command.
 - Replace `/xfer list` with whatever command you changed. A startup screen
   alone is not a pass; the changed command must produce visible output.
+- **A tmux pane is a real pi process, not a test.** If the command you are
+  verifying starts with `/xfer mesh`, it will reach the engine in
+  `~/.pi/xfer/mesh.config.json` — read the next section before typing it.
+
+## Never verify against a live deployment
+
+Verification is **local, always**. The machine's `~/.pi/xfer/mesh.config.json`
+points at a real engine; a working-tree session reads it by default, so the
+moment you run a mesh command in that session you are talking to production.
+
+This is not only about writes. **A read counts.** A `/xfer mesh list` or
+`/xfer mesh status` typed into a tmux pane sends `GET /actors` and `GET /envoys`
+to that engine, with its token, leaving a trail on a system that belongs to
+somebody's deployment. Read-only is still access.
+
+Rules:
+
+- **Ask first, every time.** Any access to the engine named in
+  `~/.pi/xfer/mesh.config.json` — GET included, tmux interactive session
+  included — is a human decision. Say which command you want to run and why,
+  and wait for a yes. Do not decide it is harmless on your own.
+- `npm test` is not subject to this: `mesh-guard.ts` arms itself on
+  `NODE_TEST_CONTEXT` and refuses any non-loopback endpoint, so the suite
+  cannot reach a deployment even by mistake. Whatever your test does, the
+  guard decides.
+- An interactive tmux session is **not** covered by that guard — it is a normal
+  pi process, so it is exactly the case that needs the rule above. "It is only
+  a smoke test" is not an exemption.
+- Prefer a channel that never touches the mesh: most command smoke tests
+  (`/xfer list`, `/xfer board …`, `/xfer broker …`, admin pages) need no engine
+  at all. Only `/xfer mesh …` does.
+
+### Verifying mesh surfaces without a deployment
+
+For `/xfer mesh list`, `/xfer mesh status`, the delivery verdicts or the admin
+mesh panel, pick one of these instead of pointing at a real engine:
+
+| Approach | How |
+|---|---|
+| **Hermetic stub** (default) | `npm test` — `mesh-guard.test.ts` and the `mesh.test.ts` suites drive every verdict branch from stubbed `/actors` + `/envoys` responses. This is the coverage for the *logic*. |
+| **Local loopback engine** | Run a control plane on this machine and point a throwaway config at it: `{"endpoint": "http://127.0.0.1:6420"}`. Loopback is allowed by the guard and costs nobody anything. `XFER_MESH_CONFIG=/tmp/mesh.local.json` selects it for a test; for an interactive session, pass `--mesh-config` where the CLI accepts one or back up and swap the real config — and put it back. |
+| **Inspect the rendered HTML** | When no browser is available, `curl` the admin page and read the markup. Say plainly that this is not a screenshot and does not verify layout. |
+
+Standing up a loopback engine is Rivet's own self-host path — see
+[Rivet → self-host](https://rivet.dev/docs/deploy/self-host/control-plane/)
+and [Local development vs production](#local-development-vs-production) in the
+mesh guide.
 
 ## Manual smoke checklist (release)
 
