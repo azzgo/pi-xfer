@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/azzgo/pi-xfer/main/mesh.config.schema.json",
+  "title": "pi-xfer mesh config",
+  "description": "Configuration for pi-xfer's mesh transport, stored at ~/.pi/xfer/mesh.config.json. Adding a \"$schema\" key pointing at this file gives key completion and validation in editors that speak JSON Schema. pi-xfer itself ignores unknown keys, so \"$schema\" is harmless at runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["endpoint"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional editor hint. Point it at this schema's raw URL for completion and validation; pi-xfer ignores it.",
+      "examples": ["https://raw.githubusercontent.com/azzgo/pi-xfer/main/mesh.config.schema.json"]
+    },
+    "endpoint": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Control-plane URL of the mesh engine — a plain literal. Credentials inside the URL (https://namespace:token@host) are refused: put the namespace in \"namespace\" and the token in \"token\". Can be self-hosted (http://host:6420) or Rivet Cloud (https://api.rivet.dev).",
+      "examples": ["http://192.168.101.230:6420/", "https://api.rivet.dev"]
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Isolated environment your nodes live in. A literal or a $ENV_VAR reference; a leading \"!command\" is rejected here — a namespace is a short identifier and does not need a command. Defaults to the engine-side \"default\".",
+      "examples": ["default", "$RIVET_NAMESPACE"]
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Auth token for the engine (an sk_… API key from Rivet Cloud, or the admin token on a self-hosted engine), sent as an Authorization: Bearer header. Three forms, the same as apiKey in pi's models.json: a literal; $NAME or ${NAME} environment interpolation ($$ and $! escape a literal $ and !); or a leading !command, whose trimmed stdout is used. A command runs through a shell each time the mesh talks to the engine and is not cached, so a rotated secret is picked up on the next operation. An unset $VAR is an error, never an empty token. Security: a !command executes with your own permissions, so write permission on this file is equivalent to permission to execute code as you — keep it 0600 and out of any repository.",
+      "examples": ["your-admin-token", "$RIVET_ADMIN_TOKEN", "!pass show mesh-token", "!secret-tool lookup service rivet-engine"]
+    },
+    "pool": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Envoy/runner pool this host's runners join (the machine or host name on a mixed fleet), so the engine can only schedule this Node's actor onto this machine. Unset = the engine-wide default pool, where the engine may place the actor on any host. An existing actor does not move pools by itself.",
+      "examples": ["arch", "dev-mac"]
+    }
+  }
+}

@@ -312,6 +312,70 @@ describe("mesh config: values that are not literals (pi models.json semantics)",
   });
 });
 
+describe("mesh config schema", () => {
+  const schemaPath = path.join(import.meta.dirname, "mesh.config.schema.json");
+  const readSchema = () => JSON.parse(fs.readFileSync(schemaPath, "utf-8"));
+
+  it("ignores a $schema key, so an editor hint cannot break a config", async () => {
+    // Every user of the schema puts this key in the file; parsing must shrug.
+    const config = parseMeshConfig({
+      $schema: "https://raw.githubusercontent.com/azzgo/pi-xfer/main/mesh.config.schema.json",
+      endpoint: "http://localhost:6420",
+      namespace: "default",
+      token: "!echo the-real-token",
+      pool: "arch",
+    });
+    assert.equal("$schema" in config, false, "an editor hint must not become config state");
+    assert.equal(config.endpoint, "http://localhost:6420");
+    assert.equal(config.tokenExpression, "!echo the-real-token");
+    // And it still evaluates: a command token survives the extra key untouched.
+    assert.equal((await resolveMeshConfig(config, { env: {} })).token, "the-real-token");
+  });
+
+  it("is a valid draft 2020-12 schema describing exactly the fields the parser accepts", () => {
+    const schema = readSchema();
+    assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema");
+    assert.deepEqual(schema.required, ["endpoint"]);
+    assert.deepEqual(
+      Object.keys(schema.properties).sort(),
+      ["$schema", "endpoint", "namespace", "pool", "token"],
+    );
+    for (const field of ["$schema", "endpoint", "namespace", "token", "pool"]) {
+      assert.equal(schema.properties[field].type, "string", `${field} is a string in the parser too`);
+    }
+  });
+
+  it("allows $schema under additionalProperties: false", () => {
+    // The schema forbids unknown keys; if it forgot $schema, pointing a config at
+    // it would produce a validation error on the very key that enabled completion.
+    const schema = readSchema();
+    assert.equal(schema.additionalProperties, false);
+    assert.ok("$schema" in schema.properties, "$schema must be explicitly allowed");
+  });
+
+  it("parses the parser's whole surface, so schema and code cannot drift apart", async () => {
+    const schema = readSchema();
+    const config = parseMeshConfig({
+      $schema: schema.$id,
+      endpoint: "http://localhost:6420",
+      namespace: "default",
+      token: "sk_literal",
+      pool: "arch",
+    });
+    for (const key of Object.keys(config)) {
+      assert.ok(
+        key in schema.properties || ["tokenExpression", "namespaceExpression"].includes(key),
+        `parser produced "${key}", which the schema does not describe`,
+      );
+    }
+  });
+
+  it("stays out of the npm package (a repository asset, not a runtime file)", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "package.json"), "utf-8"));
+    assert.equal(pkg.files.includes("mesh.config.schema.json"), false);
+  });
+});
+
 describe("rivet engine wiring", () => {
   interface Recorded {
     runtimeReady: number;
