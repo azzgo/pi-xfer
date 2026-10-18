@@ -20,7 +20,7 @@
  *    the dedupe window). Whatever the agent needs later is the DO's business,
  *    and it is persisted there (see `agent-do.ts`).
  *
- * Experimental: see `examples/cf-actor/README.md`.
+ * Experimental: see `examples/pi-durable-cf/README.md`.
  */
 import { actor, queue } from "rivetkit";
 

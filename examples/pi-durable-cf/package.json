@@ -1,9 +1,9 @@
 {
-  "name": "pi-xfer-cf-actor-example",
+  "name": "pi-xfer-pi-durable-cf-example",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Example: a Cloudflare Worker + Durable Object playing one pi-xfer mesh node. Not part of the pi-xfer extension and not a dependency precedent for it.",
+  "description": "Example: a Pi Durable agent on Cloudflare (Worker + Durable Object) that joins the pi-xfer mesh as an ordinary node. Not part of the pi-xfer extension and not a dependency precedent for it.",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

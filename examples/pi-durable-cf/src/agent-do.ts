@@ -15,7 +15,7 @@
  * DeepSeek branch is behind `DEEPSEEK_API_KEY`: present, the same round trip
  * goes through a real model instead; absent, nothing changes.
  *
- * Experimental: see `examples/cf-actor/README.md`.
+ * Experimental: see `examples/pi-durable-cf/README.md`.
  */
 import type { MeshHandoffMessage } from "./mesh-actor.ts";
 
