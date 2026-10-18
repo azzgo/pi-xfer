@@ -53,11 +53,16 @@ POOL_NAME = "cloudflare"
 # it), with no trailing slash: the engine POSTs <this>/api/rivet. Set it per
 # environment.
 WORKER_PUBLIC_URL = "https://pi-durable.azzgo.top"
-# How long one serverless request may live, in ms, for both the registry's own
-# pool upsert and the in-Worker registration, so the two never disagree.
-# The engine-side runner-config in VERIFICATION.md step 1 carries the same value
-# as `request_lifespan` (seconds).
-SERVERLESS_REQUEST_LIFESPAN_MS = 30000
+# The pool's timing is NOT a var. It lives in `SERVERLESS_POOL_TIMING` in
+# `src/worker.ts` because the value is a contract between three writers (the
+# registry's `configurePool`, the Worker's own runner-config PUT, and the
+# out-of-band runner-config in VERIFICATION.md step 1), all of which must carry
+# the same numbers. Both fields are in SECONDS — the engine's unit and
+# RivetKit's unit — and `drain_grace_period` must be strictly less than
+# `request_lifespan`: the engine's default grace is 1800 s, so the pool is
+# refused outright unless the grace period is stated and smaller.
+#   request_lifespan   30000
+#   drain_grace_period   600
 # MESH_ENDPOINT, MESH_NAMESPACE and MESH_TOKEN are secrets, not vars:
 #   npx wrangler secret put MESH_ENDPOINT
 #   npx wrangler secret put MESH_NAMESPACE     # optional

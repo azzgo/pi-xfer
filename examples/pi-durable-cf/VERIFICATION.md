@@ -79,20 +79,28 @@ curl -sS -X PUT "https://<engine-host>/runner-configs/cloudflare?namespace=<ns>"
   -d '{"datacenters":{"default":{"serverless":{
         "url":"https://<worker-domain>/api/rivet",
         "headers":{},
-        "request_lifespan":30000}}}}'
+        "request_lifespan":30000,
+        "drain_grace_period":600}}}}'
 ```
 
-Three things about that body:
+Four things about that body:
 
 - **`url` is the Worker's public URL plus `/api/rivet`** — the address the engine POSTs `/start`
   to. It is *not* the engine's endpoint. The Worker's own `configurePool` carries the same value, so
   keep them identical; a Worker that points at the engine makes the engine call itself, and the
   attempt fails as an empty `serverless start payload`.
-- **`request_lifespan` is in seconds** here (`30000` ms in `wrangler.toml` as
-  `SERVERLESS_REQUEST_LIFESPAN_MS`). It is what a serverless request may live up to.
+- **Both fields are in seconds** — the engine's unit, and RivetKit's unit in
+  `requestLifespan`/`drainGracePeriod`. There is no milliseconds anywhere: `30000` means
+  thirty thousand seconds. Both numbers live in one place, `SERVERLESS_POOL_TIMING` in
+  `src/pool-config.ts`, and the Worker's own registration uses them verbatim.
+- **`drain_grace_period` must be present and strictly less than `request_lifespan`.** Omitted, the
+  engine applies its default of 1800 s, and a lifetime below that is refused with
+  `drain_grace_period must be less than request_lifespan` — an *illegal config*, not a slow start.
+  `600` is the example's value; anything under `30000` and ≥ 0 is accepted.
 - **Register first, then deploy.** The out-of-band config is what bootstraps a cold pool; the
   registry's own `configurePool` upsert only runs when the engine starts a runner, which needs a
-  runner to exist. Both write the same record, idempotently.
+  runner to exist. Both write the same record, and the Worker only re-writes it when what the
+  engine holds differs from what it would write — one GET per isolate on a warm pool.
 
 Then confirm the engine holds it (a read against the deployment — also 🔴):
 
@@ -126,7 +134,9 @@ npx wrangler deploy
 
 `RIVET_ENDPOINT` / `RIVET_NAMESPACE` in `[vars]` are the same engine, published on RivetKit's own
 env-var channel — parts of the wasm runtime read that instead of the config object, so the two must
-agree. `SERVERLESS_REQUEST_LIFESPAN_MS` is the in-Worker pool registration's lifespan.
+agree. The pool's timing is deliberately **not** a var: it lives in `SERVERLESS_POOL_TIMING` in
+`src/pool-config.ts` so the in-Worker registration, `configurePool` and this step's curl cannot drift
+apart. Change it there and in step 1 together.
 
 **A custom domain, not `workers.dev`.** An engine on a mainland-China network cannot connect to
 `*.workers.dev` (the connection times out), and it is the engine that must reach this Worker. Put the
@@ -284,6 +294,8 @@ see, not what you would expect.
 | Engine answers `endpoint_mismatch` when starting the runner | no `topology.datacenters[].public_url` (or it is not the hostname clients use) | mount the config file from §0 and restart the engine |
 | Worker answers 500 with an **empty** message | a config/protocol error inside `registry.handler` | `curl <WORKER_PUBLIC_URL>/api/rivet/health` (and `wrangler tail`) — the Worker now returns `err.message` in the 500 body precisely so this is readable |
 | First request after a deploy fails with a Zod/config error | registry built without `endpoint` (no `MESH_ENDPOINT` secret and no `RIVET_ENDPOINT` var) | set one of them; `configurePool` cannot register without it |
+| Engine returns 400 `drain_grace_period must be less than request_lifespan` | the pool body was written without a grace period (engine default 1800 s) or with one ≥ the lifespan. **This is the Worker's own registration, not your step-1 curl** — the step-1 body above is already legal | the timing lives in `SERVERLESS_POOL_TIMING` (`src/pool-config.ts`), seconds; keep `drainGracePeriod < requestLifespan` and re-deploy. The engine keeps the last good config, so this is repairable without a `DELETE` |
+| `wrangler tail` shows `in-Worker pool registration failed` on **every** invocation, and Cloudflare starts answering `Too many subrequests` | the registration retried a rejection: a 400 is not transient, so retrying only spends the invocation's subrequest budget (41 attempts did). It also starves the engine's actor wake-up scheduling while it lasts, so unrelated sends to this node time out | already fixed: the Worker attempts registration **at most once per isolate** and never retries. If you see it, you are running an older build — redeploy; then check the 400's message (row above) instead of retrying |
 | `mesh send` refuses: `no runner in pool "cloudflare"` | correct behaviour on a cold serverless pool — the engine starts runners only for pending deliveries | first send from a bare client (§4), or wait, then retry |
 | Actor is stuck: `/actors` shows an `error` no restart clears | the actor record's `error` is sticky — it is not cleared when a runner appears | destroy and recreate: `DELETE /actors/<id>?namespace=<ns>`, then `getOrCreate` again (§4 does it) |
 | Listing shows the node but the runner never starts | self-registration is unproven; the actor may exist with no runner behind it | treat the listing as presence only; the runner arrives on the first delivery (§4) |

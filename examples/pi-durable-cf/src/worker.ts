@@ -27,6 +27,12 @@ import * as wasmBindings from "@rivetkit/rivetkit-wasm";
 import wasmModule from "@rivetkit/rivetkit-wasm/rivetkit_wasm_bg.wasm";
 import { AgentDurableObject, poolName, type AgentReply, type AgentStorage, type Env } from "./agent-do.ts";
 import { createXferInstance, type MeshHandoffMessage } from "./mesh-actor.ts";
+import {
+  poolRegistrationBody,
+  poolRegistrationMatches,
+  poolServerlessBody,
+  SERVERLESS_POOL_TIMING,
+} from "./pool-config.ts";
 
 /** Actor type and queue the extension uses; keep these in lockstep with mesh-config.ts. */
 const XFER_INSTANCE_ACTOR = "xfer-instance";
@@ -134,44 +140,58 @@ function registerSelf(env: Env): Promise<unknown> {
   return registered;
 }
 
+/** This Worker's pool body — the timing and shape live in `pool-config.ts`. */
+function serverlessBody(env: Env): Record<string, unknown> {
+  return poolServerlessBody(env, SERVERLESS_BASE_PATH);
+}
+
 /**
  * Register this node's pool from inside the Worker as well. RivetKit's own
  * `configurePool` upsert runs when the engine POSTs `/start` — which it cannot
  * do before a runner exists — so on a cold pool it is the out-of-band
  * runner-config that bootstraps it, and a drift between the two shows up only
  * after the first send. Doing it here means the first `/start` already finds
- * the right URL. Failure is logged, not fatal: the engine-side registration may
- * still be correct, and the node can serve the request either way.
+ * the right URL.
+ *
+ * **At most one attempt per isolate, and no retries.** A wrong body is not a
+ * transient failure: the engine answered 400 and will keep answering 400, so
+ * retrying only burns the invocation's subrequest budget (41 attempts did, and
+ * the resulting flood dragged the engine's actor wake-up scheduling down with
+ * it). Re-registering on a *later* isolate costs one GET. Failures are logged
+ * and swallowed — the out-of-band runner-config may still be right, and the
+ * node can serve the request either way.
  */
 async function configurePoolSelf(env: Env): Promise<void> {
-  const token = env.MESH_TOKEN;
   const headers = {
     "content-type": "application/json",
-    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(env.MESH_TOKEN ? { authorization: `Bearer ${env.MESH_TOKEN}` } : {}),
   };
   // The engine API is the endpoint root (RivetKit appends paths to it directly)
   // and the namespace is a query parameter on every call.
   const base = rivetEndpoint(env)!.replace(/\/+$/, "");
   const query = apiQuery(env, "?");
+  const poolPath = `${base}/runner-configs/${encodeURIComponent(poolName(env))}${query}`;
+  const serverless = serverlessBody(env);
   try {
+    const existing = await fetch(poolPath, { headers });
+    if (existing.ok) {
+      const config = await existing.json().catch(() => null);
+      if (poolRegistrationMatches(config, serverless, [])) return;
+    }
     const datacentersResponse = await fetch(`${base}/datacenters${query}`, { headers });
     if (!datacentersResponse.ok) throw new Error(`GET /datacenters ${datacentersResponse.status}`);
     const { datacenters } = (await datacentersResponse.json()) as { datacenters: Array<{ name: string }> };
-    const serverless = {
-      url: `${env.WORKER_PUBLIC_URL}${SERVERLESS_BASE_PATH}`,
-      headers: token ? { "x-rivet-token": token } : {},
-      request_lifespan: env.SERVERLESS_REQUEST_LIFESPAN_MS ?? 30000,
-    };
-    const pool = await fetch(`${base}/runner-configs/${encodeURIComponent(poolName(env))}${query}`, {
+    const pool = await fetch(poolPath, {
       method: "PUT",
       headers,
-      body: JSON.stringify({
-        datacenters: Object.fromEntries(datacenters.map((dc) => [dc.name, { serverless, metadata: {} }])),
-      }),
+      body: JSON.stringify(poolRegistrationBody(serverless, datacenters.map((dc) => dc.name))),
     });
     if (!pool.ok) throw new Error(`PUT /runner-configs ${pool.status} ${await pool.text().catch(() => "")}`);
   } catch (err) {
-    console.error("in-Worker pool registration failed — the out-of-band runner-config stands", err);
+    console.error(
+      "in-Worker pool registration failed — not retried in this isolate; the out-of-band runner-config stands",
+      err,
+    );
   }
 }
 
@@ -211,10 +231,12 @@ export function createRegistry(env: Env) {
       ? {
           configurePool: {
             name: poolName(env),
+            // RivetKit takes seconds here, like the engine does; the numbers come
+            // from SERVERLESS_POOL_TIMING so the two registrations cannot drift,
+            // and the grace period must stay below the lifespan.
             url: `${env.WORKER_PUBLIC_URL}${SERVERLESS_BASE_PATH}`,
-            ...(env.SERVERLESS_REQUEST_LIFESPAN_MS
-              ? { requestLifespan: env.SERVERLESS_REQUEST_LIFESPAN_MS / 1000 }
-              : {}),
+            requestLifespan: SERVERLESS_POOL_TIMING.requestLifespan,
+            drainGracePeriod: SERVERLESS_POOL_TIMING.drainGracePeriod,
           },
         }
       : {}),
