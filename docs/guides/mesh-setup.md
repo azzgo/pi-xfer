@@ -213,6 +213,83 @@ Local-side steps (`mesh.config.json` parsing, `mesh up` refusal on name conflict
 
 The note lives in the node's own actor state on the engine, so it survives `mesh down` / `mesh up` and stays readable while that node is offline. It is unverified self-declaration: a claim, not a contract. Nothing in pi-xfer routes or schedules on it — listings stay names-only, and a consumer that wants a capability map loops the per-node describe RPC and caches the result itself. The one convenience is the web picker's `targets` query, which attaches each target's description to its entry (omitted when that node's actor cannot be reached).
 
+## Local development vs production
+
+Two lines that must not blur. The same commands serve both, so the difference
+is entirely **which config they read** — and that file is the switch.
+
+| | Local development / verification | Production |
+|---|---|---|
+| **Config** | a throwaway file pointing at a loopback engine (`http://127.0.0.1:6420`) or a stub | `~/.pi/xfer/mesh.config.json` pointing at your real engine |
+| **Who reaches the network** | nobody — loopback only | your machines, deliberately |
+| **How it is enforced** | `mesh-guard.ts` refuses any non-loopback endpoint in a test run | no guard: a real process talks to whatever the config says |
+
+### The guard
+
+`mesh-guard.ts` exists so "tests never touch a deployment" is a property of the
+code rather than a rule people remember. It **arms itself when
+`NODE_TEST_CONTEXT` is set** — which is exactly what `node --test` puts in each
+worker, and in any process a test spawns. Nothing else arms it: an installed
+extension, `/xfer mesh up`, the admin daemon and the adapter daemon run unarmed
+and see no change at all.
+
+Armed, it:
+
+- **Refuses every non-loopback endpoint** from both outbound planes — the REST
+  calls (`engineApi`, over `fetch`) and the socket transport (`createClient`
+  from `rivetkit/client`, including the broker's description lookups). The
+  refusal happens *before* the request, so nothing leaves the machine.
+- **Lets loopback through**: `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`,
+  `host.docker.internal`. An endpoint it cannot parse is refused rather than
+  guessed at.
+- **Stops inheriting your real config**: in a test run the default path is not
+  `~/.pi/xfer/mesh.config.json` but a non-existent temp path, so a test that
+  forgot to inject anything fails loudly instead of quietly reading production.
+- **Counts its decisions** (`unguarded` / `loopback` / `allowed` / `blocked`),
+  so a suite can assert it granted zero remote allowances.
+
+Two environment variables are the whole interface:
+
+| Variable | Effect |
+|---|---|
+| `XFER_ALLOW_REMOTE=1` | The **only** way through while armed. Meant for the one test that deliberately exercises the guard; `mesh-guard.test.ts` asserts repo-wide that no test enables it. |
+| `XFER_MESH_CONFIG=/path/to/config.json` | Point a test run at a specific config instead of the non-existent default. |
+
+One case the guard does **not** cover, on purpose: an interactive session
+(a tmux pane, your own pi) is a normal process, so `/xfer mesh list` there
+really does talk to whatever your config names. Treat that as production
+access: **read-only included**. See the `verify` skill's *Never verify against a
+live deployment* section.
+
+### Standing up a loopback engine
+
+For verifying mesh surfaces yourself — `/xfer mesh list`, `/xfer mesh status`,
+the admin mesh panel — run the control plane locally instead of borrowing a
+deployment. Take the single-container path from
+[Deploy a self-hosted control plane](https://rivet.dev/docs/deploy/self-host/control-plane/)
+— the same shape as *Route B* above, on `127.0.0.1` instead of a VPS, with its
+default port exposed on this machine.
+
+This guide does not pin the image name or flags: they belong to that page, and a
+copy here would rot. All pi-xfer needs is a reachable endpoint.
+
+Then a throwaway config — never your real one:
+
+```json
+{ "endpoint": "http://127.0.0.1:6420", "namespace": "default" }
+```
+
+Use it with `XFER_MESH_CONFIG=/tmp/mesh.local.json npm test`, or point a
+working-tree session at it (`pi -ne -e ./`) after backing up
+`~/.pi/xfer/mesh.config.json` — and put it back afterwards. Authentication is on
+by default in current engines, so put the admin token you started the container
+with in `token` (or embed it as URL auth, exactly as Route A shows). Either way
+nothing you do on loopback can reach anyone else.
+
+If even that is too much for what you are checking, do not run the command:
+the verdict-derivation logic is covered hermetically by `npm test`, and that is
+the coverage that matters for the code.
+
 ## Troubleshooting
 
 Run `/xfer doctor` first — its **Mesh** line distinguishes config problems from engine problems:
