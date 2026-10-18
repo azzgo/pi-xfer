@@ -26,3 +26,8 @@ Considered: 纯 Tailscale 自写注册/路由/缓冲（全要手造，durable qu
 后续：ADR 0016 将本文的「同 key 先查后占、拒绝」细化为 status-aware adoption——同名 actor 若为 Sleeping/Crashed/Pending 则接管（不销毁），仅 Running 才拒绝；pi 与 adapter daemon 共用同一行为，无 `--takeover`。
 
 后续：ADR 0017 为多机混布补上 per-host runner pool（`MeshConfig.pool` → `setup().envoy.poolName` + 自身 actor 的 `getOrCreate(..., { poolName })`），把 actor 的调度钉在本机 runner 上；发现、desc、跨池 `mesh send` 保持不限定 pool。
+
+**后续决定（2026-10-17）**：应用层加密（原 P1-C 的 E2EE 信封）经 ROI 评估后**不做**——信封只保护 handoff
+载荷，而 Tailscale / EasyTier 这类协议层隧道以零代码成本保护整条链路（载荷、admin token、控制面、RPC
+元数据）。因此本文中"文档内联进队列消息"是**已决边界**，不是加密的前置条件；传输安全完全由部署方式承担，
+详见 ADR 0019（transport security posture）。

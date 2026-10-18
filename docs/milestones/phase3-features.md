@@ -27,7 +27,9 @@ never had to answer before:
    credential. The deployment guide now says so; the code still has no answer for "the transport is
    not trustworthy".
 
-Items 1–3 are the core of the milestone, with P0-D recording the posture they imply. P1-E (a
+Items 1–3 are the core of the milestone, with P0-D recording the posture they imply. Item 3 was
+resolved by **declining** application-layer encryption on 2026-10-17 (see P1-C below) — transport
+security stays a deployment concern, and P0-D's ADR is where that decision is recorded. P1-E (a
 Cloudflare actor as an ordinary mesh node) was added by the user after the first draft as an
 experimental deliverable: closed loop, docs, and a committed example. Everything else that was on
 the table is recorded as out of scope below, deliberately, so the next round does not relitigate it.
@@ -78,7 +80,7 @@ while its pool had a live runner — so the surface must reconcile the actor rec
 "pi-xfer/1"`), read at discovery/probe time, and a pre-send probe that fails in milliseconds with a
 distinguishable message: *not a pi-xfer agent* / *no runner attached* / *offline, buffered*. The
 marker is self-declared, so it prevents misconfiguration and honest mistakes, not malice — malice is
-P1-C's job; say that plainly in the docs rather than overselling it.
+nobody's job any more (P1-C was declined); say that plainly in the docs rather than overselling it.
 
 **Acceptance.** Sending to a foreign actor errors in well under a second naming the real cause;
 sending to a runner-less node names the runner, not "stuck"; an existing node that predates the
@@ -90,45 +92,45 @@ id so that a retry (or a re-delivery) cannot be applied twice.
 **Open for design.** Probe surface (`getDescription` reuse vs a new action) and its cost — a probe is
 a full RPC, and measured RPC round-trips through the tunnel are ~1 s; whether to cache probe results
 per session; whether `/xfer doctor` reuses this check. Also: how long the sender waits before calling
-it "unknown", and whether the receiver-side dedupe belongs here or in P1-C (a retry is a new id, so
-id-dedupe alone does not catch it — decide whether the sender persists "sent, outcome unknown").
+it "unknown", and where the receiver-side dedupe lives (it stays in this item now that P1-C is
+declined; because a retry reuses the original id, id-dedupe is now a workable key — decide what
+record keeps it and for how long).
 
-### P1-C — End-to-end encryption of the handoff envelope
+### P1-C — Declined: no application-layer encryption (decided 2026-10-17)
 
-**Problem.** The engine holds handoffs in plaintext, in transit and at rest, and an on-path attacker
-or a compromised/misconfigured engine can read them, rewrite them (no integrity check), or register
-a same-name actor to intercept. TLS fixes the wire but not a TLS-terminating edge (which is exactly
-what the user's Cloudflare Tunnel is); a private network is not available to every operator.
+**Status: declined on ROI, not deferred and not shed under pressure.** Read this section as a
+decision record; do not re-open it without new evidence.
 
-**Direction.** Treat the engine as an untrusted transport and keep ADR 0013's model: it still does
-discovery, durability, and wake-up; it just stores opaque bytes. Per node: a persistent X25519
-keypair, public half in actor state beside `description`. Per handoff: an ephemeral sender keypair,
-ECDH against the recipient's static key, HKDF-SHA256, ChaCha20-Poly1305 — all built into Node's
-`crypto`, so no new runtime dependency and no native addon. Trust anchored out of band, SSH-style:
-`/xfer mesh trust <name> <fingerprint>` over the existing local socket, TOFU on first contact.
+**What was proposed.** A per-node X25519 keypair published in actor state, a per-handoff ephemeral
+sender key, ECDH → HKDF-SHA256 → ChaCha20-Poly1305, and out-of-band trust via
+`/xfer mesh trust <name> <fingerprint>` with TOFU on first contact.
 
-This also closes P0-B's malicious half: a forged actor may advertise any public key, but it cannot
-decrypt the payload, and it cannot produce a message the trusted key accepts.
+**Why it was declined.** The comparison is asymmetric in the wrong direction:
 
-**Scope boundary (explicit).** Single recipient; no key rotation; no multi-device per node; no
-group handoffs; the board and local sockets are untouched.
+| Approach | Protects | Cost |
+|---|---|---|
+| E2EE envelope | the handoff payload only | keypair lifecycle, a TOFU window exploitable by construction, envelope format to version forever, replay handling, a new ADR, ongoing maintenance |
+| Tailscale / EasyTier | the **entire link** — payload, admin token, control plane, RPC metadata | install once, zero code |
+| TLS-terminating edge (Cloudflare Tunnel) | the wire | zero code, but the edge operator can read everything |
 
-**Ordering.** Depends on P0-B for the protocol marker and the probe (you cannot seal to a key you
-have no way to look up or trust). It is the largest item here — if the milestone has to shed
-something, it sheds P1-C, not P0-A/P0-B.
+The cheapest option protects more. The envelope would also have added a permanent security surface
+— key material at rest, a first-contact trust window, a versioned format — for a deployment that is
+one operator's own machines, not a shared multi-tenant control plane.
 
-**Acceptance.** A handoff enqueued for a node is unreadable in the engine's store (grep the data
-directory for a marker string — the check that §5.4 of the notes asserted but never ran); a
-forged `xfer-instance` actor registered in the same namespace receives ciphertext it cannot open;
-the recipient's fingerprint mismatch is a hard refusal, not a warning.
+**Consequence that is accepted, not fixed.** A foreign `xfer-instance` actor in a live pool remains
+indistinguishable from a real node (the impersonation half of P0-B). The envelope was what would
+have closed it. This is now a **documented accepted risk**, mitigated only at the deployment level
+(keep the engine off untrusted networks). Do not file it as a bug.
 
-**Open for design.** Envelope encoding (JSON + base64 vs CBOR); where the key file lives and with
-what mode (alongside `mesh.config.json` at 0600 is the obvious answer); what `mesh down` must never
-destroy; replay handling (handoff id + nonce dedupe — Paseo's stated gap is the one thing not to
-copy); how `mesh.log` avoids writing plaintext or key material.
+**What moved elsewhere.**
+- **Receiver-side dedupe survives** as its own item under P0-B. It was never an encryption concern:
+  P0-B's retry reuses the original handoff id for traceability, and the durable queue can redeliver
+  a message whose runner died before acking — so the same handoff can be applied twice.
+- **P0-D's ADR now carries the decision**, including the deployment-shape ordering and the accepted
+  impersonation risk. There is no successor document to point at.
 
-**Required decision record.** A new ADR: the envelope format, the trust model, and the accepted risk
-that a first-contact TOFU window is exploitable. ADR 0013 gets a pointer to it.
+**What this does not reopen.** ADR 0013's transport choice stands; the burden simply shifts onto
+the deployment, which is why P0-D's ADR must be explicit about acceptable shapes.
 
 ### P0-D — Record the transport-security posture (docs only)
 
@@ -144,8 +146,11 @@ transport. Include the deployment shapes that are acceptable, and the two tunnel
 here (per-RPC cost ~1 s; the native runner pings continuously, so an edge idle timeout does not reach
 it).
 
-Small, and it gates nothing — but it should land before P1-C changes the wire format, so the two
-documents do not contradict each other.
+This ADR is now the **only** place the encryption posture lives (P1-C was declined), so it must
+state the boundary as settled and carry the deployment-shape ordering: protocol-level tunnel
+(Tailscale/EasyTier) over a TLS-terminating edge, because the edge operator sits inside the trust
+model. It must also record the accepted open risk that a foreign `xfer-instance` actor is
+indistinguishable from a real node.
 
 ### P1-E — Cloudflare actor as a mesh node (closed loop, docs, example)
 
@@ -199,8 +204,8 @@ milestone.
 | **Phone as a push-only input source** | Thought experiment only. Native iOS cannot host the runner (no native addon), Android/Termux is excluded by the user, so the only role left is a sensor input with no read side. Not this milestone. |
 | **Native runner on mobile** | Ruled out technically: rivetkit's envoy requires a native addon; wasm is not an option. |
 | **Engine-side always-on runner** | Rejected by ADR 0013; not reopened. |
-| **Reusing paseo-relay's transport** | Its session model is online-only with random-hex IDs — no durable queue, no discoverable names, so it would delete precisely what ADR 0013 provides. Only the E2EE envelope idea is borrowed (P1-C). |
-| **Key rotation, multi-device, group handoffs** | Deliberate boundary of P1-C; revisit only when a real need appears. |
+| **Reusing paseo-relay's transport** | Its session model is online-only with random-hex IDs — no durable queue, no discoverable names, so it would delete precisely what ADR 0013 provides. Its E2EE envelope was the one idea borrowed, and it was then declined on ROI (P1-C). |
+| **Key rotation, multi-device, group handoffs** | Moot: with application-layer encryption declined (P1-C) there is no key material to rotate or share. Revisit only if encryption is ever revisited. |
 | **`/ui` exposure through the tunnel** | An operator action (gate it at Cloudflare Access), not a code change. Documented in the setup guide. |
 
 ## Verification duties
@@ -208,8 +213,8 @@ milestone.
 - `npm test` green per AGENTS.md, hermetic — the mesh tests must not touch the developer's real
   `~/.pi/xfer` state or the live engine.
 - P0-A is visible TUI output: run the `verify` skill.
-- P1-C needs a new hermetic test that proves ciphertext-at-rest without a network: seal, hand the
-  bytes to the fake engine, assert the plaintext marker is absent.
+- The receiver-side dedupe (P0-B) needs a hermetic test: deliver the same handoff id twice and
+  assert it is applied once — no network, no real `~/.pi/xfer`.
 - The live deployment (`engine.example.com`) is available for end-to-end checks but must never be a
   test dependency.
 - P1-E is verified by a documented procedure, not by CI: the closed loop needs the public engine,
