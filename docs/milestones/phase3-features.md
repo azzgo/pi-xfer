@@ -44,20 +44,23 @@ distinguishing fact is already fetched and thrown away: `MeshNodeInfo.status` fr
 plus `/envoys` (per-pool live runners, `last_ping_ts`, `last_rtt`). A user's only signal today is a
 30 s timeout after they hit send.
 
-**Direction.** Surface reachability, not just existence. A node whose pool has no live envoy should
-read as *not deliverable* with the reason, distinct from *offline-but-buffered* and *unknown*. The
-data source question (actor `error` field vs `/envoys` vs both) is a design decision, not a
-brainstorm one.
+**Direction (settled).** `mesh list` becomes a four-state table — `●` running/deliverable, `◐`
+sleeping/deliverable, `○` no runner in its pool, `⚠` the pool has a runner but the actor record
+disagrees — and a new self-only `mesh status` answers "what is *my* state", working **with or without
+`up`** (as does `list`). A `✕ destroyed` state was designed and cut: both listing paths filter
+`destroy_ts`, so it can never render. Data comes from `/actors` + `/envoys` in parallel, 6 s each.
 
-**Acceptance.** With one pool's runner stopped, `mesh list` (or its successor) marks that node as
-undeliverable and names the reason, and does not label a runner-less node the same as a live one.
-Tests cover status derivation for every combination the engine can report.
+**Acceptance.** With one pool's runner stopped, the surface marks that node's verdict as *no runner*
+and names the pool — never the node — as the reason; a live node is never labelled the same as a
+runner-less one. A failed `/envoys` renders every row with `?`, never "offline" and never "no nodes".
+Hermetic tests cover the four-state derivation from the raw fields (`connectable_ts`, `sleep_ts`,
+`error`, `runner_name_selector`) joined with a fake `/envoys`.
 
-**Open for design.** Whether this extends `mesh list` or becomes `/xfer mesh status`; whether to show
-`last_rtt`/latency; whether `peers` (the adapter-side surface) gets the same information. **The
-engine's persisted `error` field is stale** — on 2026-10-17 `agent-grok` still read `no_envoys`
-while its pool had a live runner — so the surface must reconcile the actor record against live
-`/envoys` data rather than trusting the error field alone.
+**Constraints discovered.** `deriveActorStatus` maps **any** non-null `error` to `"Crashed"`
+(`mesh-engine.ts:79`) — wrong for `no_envoys`, where the actor is `sleep_ts`-sleeping and the failure
+is scheduling. The surface must derive from the raw fields, not that helper. `listMeshNodes`
+(`mesh-engine.ts:328`) also **drops `pool`**, the join key to `/envoys`; it must gain it, and t011's
+observer path needs the same field. `slots` is remaining capacity, not liveness — never surfaced.
 
 **Note.** This is user-visible output in a TUI → the `verify` skill applies.
 
@@ -66,7 +69,8 @@ while its pool had a live runner — so the surface must reconcile the actor rec
 **Problem.** Three faces of one gap.
 
 - Discovery trusts an actor type name, so a forged `xfer-instance` in the same namespace is
-  indistinguishable from a real node (`notes-mesh-peer-identity.md`).
+  indistinguishable from a real node (`notes-mesh-peer-identity.md`). **Accepted, not fixed** — see
+  P1-C's decline; it is mitigated only at the deployment level.
 - A send to a target that is not a pi-xfer node fails the same way as a send to a node that is
   merely asleep: 30 s, then "target may be offline or stuck" (`mesh-engine.ts:237,279`).
 - **And that failure is ambiguous, not negative.** Proven live on 2026-10-17: the handoff
@@ -76,25 +80,29 @@ while its pool had a live runner — so the surface must reconcile the actor rec
   message that arrives, and the obvious user reaction (retry) produces a second, genuinely
   duplicate delivery with a fresh id.
 
-**Direction.** A protocol marker in actor state alongside `description` (e.g. `protocol:
-"pi-xfer/1"`), read at discovery/probe time, and a pre-send probe that fails in milliseconds with a
-distinguishable message: *not a pi-xfer agent* / *no runner attached* / *offline, buffered*. The
-marker is self-declared, so it prevents misconfiguration and honest mistakes, not malice — malice is
-nobody's job any more (P1-C was declined); say that plainly in the docs rather than overselling it.
+**Direction (settled).** A hard pre-send check, not a probe: `/actors` + `/envoys` in parallel with
+**6 s each**, blocking the send when the target's pool has no runner — **no override path**. This
+costs ~1 s and wakes nothing. No protocol probe is built: the actor type name already classifies the
+peer, and `/actors` exposes no state (`include_state` → 400), so reading a marker would cost a 4.4 s
+actor wake per node. A self-declared `protocol` field is still written for future use and diagnosis,
+but **no logic reads it**, and the rule that governs it is: **a missing field means unknown, never
+unsupported.**
 
-**Acceptance.** Sending to a foreign actor errors in well under a second naming the real cause;
-sending to a runner-less node names the runner, not "stuck"; an existing node that predates the
-marker still works (it is absent-state, not a hard failure). **A timeout must never be presented as
-"not delivered"** — the three outcomes are *delivered*, *definitely not delivered*, and *unknown,
-may still arrive*, and only the middle one may invite a retry. The receiver must dedupe on handoff
-id so that a retry (or a re-delivery) cannot be applied twice.
+**A finding that reframed the mechanism:** the gateway's own actor-ready wait is ~30 s — the same as
+`QUEUE_SEND_TIMEOUT_MS` — and returns `503 guard.actor_ready_timeout`. Elapsed time therefore cannot
+separate "client timed out" from "engine says this pool has no runner"; only the error **code** can.
+`queueSend` currently discards it, stringifying every failure into "target may be offline or stuck".
 
-**Open for design.** Probe surface (`getDescription` reuse vs a new action) and its cost — a probe is
-a full RPC, and measured RPC round-trips through the tunnel are ~1 s; whether to cache probe results
-per session; whether `/xfer doctor` reuses this check. Also: how long the sender waits before calling
-it "unknown", and where the receiver-side dedupe lives (it stays in this item now that P1-C is
-declined; because a retry reuses the original id, id-dedupe is now a workable key — decide what
-record keeps it and for how long).
+**Acceptance.** A send to a runner-less pool returns in ~1 s naming the pool, not "stuck". A send
+accepted and then answered with `guard.actor_ready_timeout` is **not delivered** (the engine says it
+never entered the queue). A send accepted whose client wait expires is **unknown**, and must be
+presented as such — never "not delivered", never "retry". Retry is user-initiated only, reuses the
+**original handoff id**, and is labelled a recovery probe, not a fix.
+
+**Receiver side.** Dedupe on handoff id: a **3-entry sliding window in actor state** (revisit to 10
+if real logs disagree), recorded **after** deliver so a crash repeats work rather than losing a
+handoff. A hit is dropped with one `mesh duplicate` log line, checked before the `/tmp` document is
+written. Window-edge redelivery is accepted by decision.
 
 ### P1-C — Declined: no application-layer encryption (decided 2026-10-17)
 
@@ -162,40 +170,53 @@ mesh to an always-on agent. Addressing stays `actor type + key`; a sender that o
 reaches it across pools. Background and the feasibility argument are in
 `notes-mesh-boundary-extension.md`.
 
+**Feasibility: confirmed (2026-10-17).** rivetkit 2.3.26 ships a first-class serverless path:
+`registry.handler(request)` and `registry.serve()` are public, and edge hosts auto-select the wasm
+runtime (`src/registry/native.ts:229`) without touching the native addon. The three wasm refusals
+(`startAndWait` → "do not host an envoy"; `listen()`; local SQLite) are scoped to the envoy and the
+listener, so ADR 0013's prohibition does not reach a serverless registry. Queue, state and action
+surface all have wasm parity — an `xfer-instance` actor ports without a shape change.
+
 **Deliverables — three, and nothing beyond them.**
 
-1. **A verified closed loop.** The engine is already publicly reachable (`engine.example.com`), which is
-   the prerequisite the notes identified. Create a `serverless` runner-config pointing at the Worker
-   endpoint, deploy a bare `xfer-instance` actor to Cloudflare Workers, `mesh send` into it from a
-   local node, and get a handoff back out. **No agent logic in this step** — it only has to prove
-   that Cloudflare is an ordinary node on the mesh.
+1. **A verified closed loop.** Deploy an `xfer-instance` actor to Cloudflare Workers, register a
+   `serverless` runner-config pointing at it, `mesh send` into it from a local node, and get a handoff
+   back out.
 2. **Documentation.** Pool kind and addressing; the discipline a serverless actor must follow (reply
-   on receipt — `submit` without waiting; no in-memory state across calls, so anything needed to
-   answer goes into actor SQLite); why such a node is a good *destination* for buffered work and a
-   bad *source* (it has no read side and no persistence once gone); the operational prerequisites and
-   the documented limits.
-3. **A committed example** under `examples/` (the directory does not exist yet; this item creates
-   it) — runnable, with the deploy steps, small enough to read in one sitting.
+   on receipt — enqueue without blocking the run loop; no in-memory state across calls, so anything
+   needed later goes through the DO's own persistence); why such a node is a good *destination* for
+   buffered work and a poor *source* (no read side, no presence once asleep); the operational
+   prerequisites and the documented limits. It must not blur the two persistence layers: rivetkit's
+   actor state lives engine-side in remote SQLite (forced under wasm), while the agent's own state
+   lives in the Durable Object.
+3. **A committed example** under `examples/` — a Quick Start: a Durable Object running a **DeepSeek
+   agent loop**, receiving a handoff and replying to its sender. Runnable without an API key first (a
+   fixed echo), so the mesh path can be proven before any credential is provisioned.
+
+**Scope line.** This repository guarantees **an agent that can join the xfer mesh and work**. What
+that agent actually does — cron wake-ups, collection, summarisation — is platform-specific and belongs
+to the reader's own agent repository, so the example stops at the round trip.
 
 **Explicitly experimental, not a supported feature.** No SLA, no network test in CI, and no promise
-that the example keeps working across rivetkit majors. Say so at the top of both the example and the
-docs page.
+across rivetkit majors. **Where the banner goes:** the docs page and code comments, but **not** the
+README — what will churn is Pi Durable's interface and package names, while the capability itself is
+stable, so the README states support plainly. The example may carry its own npm dependencies (it is
+not the extension); say so explicitly so it is never read as precedent.
 
-**Open for design — the first one can sink the item.**
+**Open / constraints found in design.**
 
-- **Does rivetkit 2.3.26 support serverless workers at all?** Unverified. Confirm before anything
-  else. If it does not, this item becomes "documented negative result + what it would take", which
-  is still a legitimate deliverable but changes the shape of the milestone.
-- `getOrCreate` pins this host's own creation to `config.pool` (`mesh-engine.ts:197-200`); sending
-  across pools needs an explicit escape hatch, and adopted actors do not move pools (`mesh.ts:208`).
-- Whether the second step uses the real Pi Durable harness or a minimal stand-in for the reply path,
-  and how that return path authenticates.
-- The example may carry dependencies of its own — it is not the extension, so the "no runtime npm
-  dependencies" rule does not apply to it; say so explicitly so nobody later reads it as precedent.
-
-**Risk.** This is the item most likely to be blocked by an upstream we do not control. Schedule it
-last, and treat a written negative result as an acceptable outcome rather than letting it stall the
-milestone.
+- **Bundling is the untested risk.** npm ships the `--target web` wasm binding only; the Cloudflare
+  `pkg-cloudflare` target is a build script, not an artifact, and `@rivetkit/cloudflare-workers` is
+  not a 2.3.26 dependency — so the bare `runtime: "wasm"` + `registry.handler()` path is the one to
+  use.
+- **`ensureRunnerPool()` hardcodes `{ normal: {} }`** (`mesh-engine.ts:311-325`) and cannot create a
+  serverless pool. The CF pool is registered out of band; no command may be pointed at it.
+- **Cross-pool sends need no escape hatch** — verified live: `get` addresses an actor by key
+  regardless of its pool (a request from one pool to a node in another returned 200). The concern
+  above is withdrawn.
+- **Verification is the one live-deployment exception** (recorded in `AGENTS.md`): a Durable Object
+  has no local stand-in, so the closed loop is proven by a manual, written-down procedure kept out of
+  `npm test` and out of every script.
 
 ## Out of scope for this milestone
 
@@ -215,8 +236,9 @@ milestone.
 - P0-A is visible TUI output: run the `verify` skill.
 - The receiver-side dedupe (P0-B) needs a hermetic test: deliver the same handoff id twice and
   assert it is applied once — no network, no real `~/.pi/xfer`.
-- The live deployment (`engine.example.com`) is available for end-to-end checks but must never be a
-  test dependency.
+- The live deployment is available for end-to-end checks but must never be a test dependency, and is
+  never wired into a script or a sub-agent's default instructions (see `AGENTS.md`). The one carve-out
+  is P1-E's example, which cannot be exercised any other way.
 - P1-E is verified by a documented procedure, not by CI: the closed loop needs the public engine,
   a deployed Worker and the tunnel. Keeping it out of `npm test` is deliberate — a green suite must
   not depend on any of that.
