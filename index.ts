@@ -194,7 +194,10 @@ export default function (pi: ExtensionAPI) {
           structuredContent: { handoff_id: id, target, status: "sent" },
         };
       } catch (err: any) {
-        throw new Error(`xfer mesh: failed to send to "${target}" — ${err.message}`);
+        // An unknown outcome has its own headline in the error text; prefixing it
+        // with "failed" here would re-assert what the triage just refused to.
+        if (err?.kind === "not-delivered" || err?.kind === "unknown" || err?.kind === "failed") throw err;
+        throw new Error(`xfer mesh: could not send to "${target}" — ${err.message}`);
       }
     },
   });

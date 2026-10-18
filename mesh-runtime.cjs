@@ -48816,10 +48816,7 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
       } catch (err) {
-        throw new Error(
-          `mesh: enqueue to "${target2}" failed — ${err instanceof Error ? err.message : String(err)} (target may be offline or stuck; the durable queue buffers only after the actor is reachable)`,
-          { cause: err instanceof Error ? err : void 0 }
-        );
+        throw meshSendError(target2, message, err);
       }
     },
     async setDescription(value) {
@@ -48960,8 +48957,72 @@ async function preflightMeshSend(config3, target2, timeoutMs = PREFLIGHT_TIMEOUT
   if (verdict.blocked) throw new MeshPreflightError(target2, pool, `${verdict.blocked}. Nothing was sent — ${preflightRemedy(pool)}`);
   return { target: target2, state, pool, warning: verdict.warning };
 }
+var ACTOR_READY_TIMEOUT_CODE = "guard.actor_ready_timeout";
+function errorFacts(err, depth = 0) {
+  if (typeof err === "string") return { code: "", message: err };
+  if (!err || typeof err !== "object") return { code: "", message: String(err) };
+  const record2 = err;
+  const stringField = (value) => typeof value === "string" ? value : "";
+  const code = stringField(record2.code) || stringField(record2.data?.code) || stringField(record2.name);
+  const message = stringField(record2.message) || code;
+  const cause = depth === 0 ? record2.cause : void 0;
+  return { code, message, causeMessage: cause === void 0 ? void 0 : errorFacts(cause, depth + 1).message };
+}
+function classifyMeshSendFailure(err) {
+  const { code, message, causeMessage } = errorFacts(err);
+  const haystack = `${code} ${message} ${causeMessage ?? ""}`;
+  if (haystack.includes(ACTOR_READY_TIMEOUT_CODE)) {
+    return { kind: "not-delivered", code: ACTOR_READY_TIMEOUT_CODE, detail: message };
+  }
+  if (isTimeoutFailure(code, haystack)) return { kind: "unknown", code: code || "(no code)", detail: message };
+  return { kind: "failed", code: code || "(no code)", detail: message };
+}
+function isTimeoutFailure(code, message) {
+  return code === "AbortError" || code === "TimeoutError" || /timed? ?out|timeout/i.test(message);
+}
+var MeshSendError = class extends Error {
+  target;
+  kind;
+  code;
+  handoffId;
+  recovery;
+  constructor(target2, message, failure2) {
+    super(`mesh: ${meshSendFailureText(target2, message, failure2)}`, { cause: failure2.detail || void 0 });
+    this.name = "MeshSendError";
+    this.target = target2;
+    this.kind = failure2.kind;
+    this.code = failure2.code;
+    this.handoffId = message.id;
+    this.recovery = meshSendRecovery(target2, message, failure2.kind);
+  }
+};
+function meshSendFailureText(target2, message, failure2) {
+  return `${meshSendFailureHeadline(target2, message, failure2)}. ${meshSendRecovery(target2, message, failure2.kind)}`;
+}
+function meshSendFailureHeadline(target2, message, failure2) {
+  const shown = failure2.detail ? ` (engine said: ${failure2.detail})` : "";
+  if (failure2.kind === "not-delivered") {
+    return `enqueue to "${target2}" was refused by the engine${shown}: no runner is serving the target's pool, so handoff ${message.id} never entered its queue and nothing was sent`;
+  }
+  if (failure2.kind === "unknown") {
+    return `enqueue of handoff ${message.id} to "${target2}" got no answer before the client stopped waiting${shown}, so delivery is UNKNOWN — the engine may have accepted it and may still deliver it once a runner appears`;
+  }
+  return `enqueue of handoff ${message.id} to "${target2}" failed${shown}, and whether it reached the target is unknown`;
+}
+function meshSendRecovery(target2, message, kind) {
+  if (kind === "not-delivered") {
+    return `A recovery probe — re-sending the same handoff under id ${message.id} — re-attempts the enqueue, and reusing the id keeps a later copy deduplicated on arrival. It is a probe, not a fix`;
+  }
+  if (kind === "unknown") {
+    return `Check whether "${target2}" holds handoff ${message.id} before doing anything else (that node's mesh log or inbox). A recovery probe — re-sending it under the same id ${message.id} — is deduplicated on arrival, so it cannot become a second copy; it is a probe, not a fix, and the original may still arrive`;
+  }
+  return `A recovery probe — re-sending the same handoff under id ${message.id} — is deduplicated on arrival, so a copy the engine did queue cannot become a second one. It is a probe, not a fix`;
+}
 function preflightRemedy(pool) {
   return `start a runner for pool "${pool}" on that machine (open pi there) and retry`;
+}
+function meshSendError(target2, message, err) {
+  return new MeshSendError(target2, message, classifyMeshSendFailure(err));
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

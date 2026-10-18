@@ -304,11 +304,7 @@ export function createRivetEngine(
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
       } catch (err) {
-        throw new Error(
-          `mesh: enqueue to "${target}" failed — ${err instanceof Error ? err.message : String(err)} ` +
-          `(target may be offline or stuck; the durable queue buffers only after the actor is reachable)`,
-          { cause: err instanceof Error ? err : undefined },
-        );
+        throw meshSendError(target, message, err);
       }
     },
     async setDescription(value: string) {
@@ -348,11 +344,7 @@ export async function sendMeshHandoff(
   try {
     await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
-    throw new Error(
-      `mesh: enqueue to "${target}" failed — ${err instanceof Error ? err.message : String(err)} ` +
-      `(target may be offline or stuck; the durable queue buffers only after the actor is reachable)`,
-      { cause: err instanceof Error ? err : undefined },
-    );
+    throw meshSendError(target, message, err);
   }
   return preflight;
 }
@@ -611,7 +603,162 @@ export async function preflightMeshSend(
   return { target, state, pool, warning: verdict.warning };
 }
 
+/**
+ * Tri-state outcome of one enqueue, and the whole reason it exists: a failed
+ * enqueue is genuinely ambiguous. Proven live on 2026-10-17 — a handoff reported
+ * as a 30 s failure was delivered anyway once a runner appeared in the target's
+ * pool. The engine's own actor-ready wait is ~30 s, the same as
+ * {@link QUEUE_SEND_TIMEOUT_MS}, so elapsed time cannot tell the two apart; only
+ * the engine's error code can.
+ *
+ * - `not-delivered`: the engine answered `guard.actor_ready_timeout` — nothing
+ *   entered the queue, so saying "not sent" is honest.
+ * - `unknown`: the enqueue was never answered to completion (client wait expired,
+ *   connection dropped). It may arrive. Never presented as "not delivered" and
+ *   never followed by "retry".
+ * - `failed`: any other engine/transport refusal, reported as it came.
+ */
+export type MeshSendFailureKind = "not-delivered" | "unknown" | "failed";
+
+/** Engine error code for "the actor was not ready in time"; the pool has no runner that can take it. */
+export const ACTOR_READY_TIMEOUT_CODE = "guard.actor_ready_timeout";
+
+export interface MeshSendFailure {
+  kind: MeshSendFailureKind;
+  /** Engine code or the error's own name when one classed the failure, "" otherwise. */
+  code: string;
+  /** The captured error's message, verbatim. */
+  detail: string;
+}
+
+/** What an error carries across a rivetkit transport boundary: its code, its text, one level of cause. */
+function errorFacts(err: unknown, depth = 0): { code: string; message: string; causeMessage?: string } {
+  if (typeof err === "string") return { code: "", message: err };
+  if (!err || typeof err !== "object") return { code: "", message: String(err) };
+  const record = err as { name?: unknown; message?: unknown; code?: unknown; data?: { code?: unknown }; cause?: unknown };
+  const stringField = (value: unknown) => (typeof value === "string" ? value : "");
+  const code = stringField(record.code) || stringField(record.data?.code) || stringField(record.name);
+  const message = stringField(record.message) || code;
+  const cause = depth === 0 ? record.cause : undefined;
+  return { code, message, causeMessage: cause === undefined ? undefined : errorFacts(cause, depth + 1).message };
+}
+
+/**
+ * Triage a captured enqueue error into the three presentations. The code, not
+ * the elapsed time, separates "the engine refused it" from "we stopped waiting":
+ * attributing either case to the wrong side is exactly how a delivered handoff
+ * gets reported as lost.
+ */
+export function classifyMeshSendFailure(err: unknown): MeshSendFailure {
+  const { code, message, causeMessage } = errorFacts(err);
+  const haystack = `${code} ${message} ${causeMessage ?? ""}`;
+  if (haystack.includes(ACTOR_READY_TIMEOUT_CODE)) {
+    return { kind: "not-delivered", code: ACTOR_READY_TIMEOUT_CODE, detail: message };
+  }
+  if (isTimeoutFailure(code, haystack)) return { kind: "unknown", code: code || "(no code)", detail: message };
+  return { kind: "failed", code: code || "(no code)", detail: message };
+}
+
+function isTimeoutFailure(code: string, message: string): boolean {
+  return code === "AbortError" || code === "TimeoutError" || /timed? ?out|timeout/i.test(message);
+}
+
+/**
+ * Raised by both enqueue paths. `kind: "unknown"` is the load-bearing one: the
+ * message must never claim the handoff is gone and must never call for a retry,
+ * because a second send of the same content is what turns an ambiguity into a
+ * real duplicate. `recovery` is a probe, and it says so.
+ */
+export class MeshSendError extends Error {
+  readonly target: string;
+  readonly kind: MeshSendFailureKind;
+  readonly code: string;
+  readonly handoffId: string;
+  readonly recovery: string;
+
+  constructor(target: string, message: MeshHandoffMessage, failure: MeshSendFailure) {
+    super(`mesh: ${meshSendFailureText(target, message, failure)}`, { cause: failure.detail || undefined });
+    this.name = "MeshSendError";
+    this.target = target;
+    this.kind = failure.kind;
+    this.code = failure.code;
+    this.handoffId = message.id;
+    this.recovery = meshSendRecovery(target, message, failure.kind);
+  }
+}
+
+/**
+ * What a failure reads as on the sender's screen. Every branch states whether
+ * the handoff is in the queue or unknown; none of them asserts delivery either
+ * way beyond what the engine code licenses.
+ */
+export function meshSendFailureText(
+  target: string,
+  message: MeshHandoffMessage,
+  failure: MeshSendFailure,
+): string {
+  return `${meshSendFailureHeadline(target, message, failure)}. ${meshSendRecovery(target, message, failure.kind)}`;
+}
+
+function meshSendFailureHeadline(target: string, message: MeshHandoffMessage, failure: MeshSendFailure): string {
+  const shown = failure.detail ? ` (engine said: ${failure.detail})` : "";
+  if (failure.kind === "not-delivered") {
+    return (
+      `enqueue to "${target}" was refused by the engine${shown}: no runner is serving the target's pool, ` +
+      `so handoff ${message.id} never entered its queue and nothing was sent`
+    );
+  }
+  if (failure.kind === "unknown") {
+    return (
+      `enqueue of handoff ${message.id} to "${target}" got no answer before the client stopped waiting${shown}, ` +
+      `so delivery is UNKNOWN — the engine may have accepted it and may still deliver it once a runner appears`
+    );
+  }
+  return `enqueue of handoff ${message.id} to "${target}" failed${shown}, and whether it reached the target is unknown`;
+}
+
+/**
+ * What to do about a failed enqueue. The unknown branch offers a recovery probe
+ * (the same handoff id, so the receiver's dedupe window covers it) and refuses
+ * to call it a fix: the original may still arrive.
+ */
+export function meshSendRecovery(target: string, message: MeshHandoffMessage, kind: MeshSendFailureKind): string {
+  if (kind === "not-delivered") {
+    return (
+      `A recovery probe — re-sending the same handoff under id ${message.id} — re-attempts the enqueue, ` +
+      `and reusing the id keeps a later copy deduplicated on arrival. It is a probe, not a fix`
+    );
+  }
+  if (kind === "unknown") {
+    return (
+      `Check whether "${target}" holds handoff ${message.id} before doing anything else (that node's mesh log or inbox). ` +
+      `A recovery probe — re-sending it under the same id ${message.id} — is deduplicated on arrival, so it cannot ` +
+      `become a second copy; it is a probe, not a fix, and the original may still arrive`
+    );
+  }
+  return (
+    `A recovery probe — re-sending the same handoff under id ${message.id} — is deduplicated on arrival, ` +
+    `so a copy the engine did queue cannot become a second one. It is a probe, not a fix`
+  );
+}
+
 /** What to do about a refused send, worded for the person holding the other machine. */
 export function preflightRemedy(pool: string): string {
   return `start a runner for pool "${pool}" on that machine (open pi there) and retry`;
+}
+
+/** Both enqueue sites funnel here: one classification, one wording, one error type. */
+function meshSendError(target: string, message: MeshHandoffMessage, err: unknown): MeshSendError {
+  return new MeshSendError(target, message, classifyMeshSendFailure(err));
+}
+
+/**
+ * The log fields a failed send carries, so `mesh.log` records the verdict rather
+ * than only the error text — the 2026-10-17 false failure left exactly that gap:
+ * an error line and no way to tell "refused" from "we stopped waiting".
+ */
+export function meshSendFailureFields(err: unknown): Record<string, unknown> {
+  if (err instanceof MeshSendError) return { verdict: err.kind, code: err.code };
+  const failure = classifyMeshSendFailure(err);
+  return { verdict: failure.kind, code: failure.code };
 }

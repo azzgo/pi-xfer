@@ -6,10 +6,13 @@ import { after, before, describe, it } from "node:test";
 import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js";
 import { parseMeshConfig, serializeMeshKey, deserializeMeshKey, XFER_INSTANCE_ACTOR } from "./mesh-config.js";
 import {
+  ACTOR_READY_TIMEOUT_CODE,
   NO_ENVOYS_ERROR,
   PREFLIGHT_TIMEOUT_MS,
   MeshPreflightError,
+  MeshSendError,
   applyDescriptionAction,
+  classifyMeshSendFailure,
   createRivetEngine,
   deriveActorStatus,
   deriveMeshNodeState,
@@ -19,6 +22,7 @@ import {
   meshListing,
   meshPoolName,
   meshPreflightVerdict,
+  meshSendFailureText,
   normalizeNodeDescription,
   preflightMeshSend,
   readDescriptionAction,
@@ -62,6 +66,8 @@ interface FakeEngineState {
   preflightBlocked: string[];
   /** Targets that reached the enqueue, in order — one entry per send attempt. */
   queued: string[];
+  /** Error the enqueue rejects with; absent = the enqueue succeeds. */
+  enqueueFailure?: unknown;
 }
 
 function fakeState(): FakeEngineState {
@@ -106,6 +112,7 @@ function fakeEngine(state: FakeEngineState): MeshEngine {
     queueSend: (async (target: string, message: MeshHandoffMessage, verified?: MeshPreflight | null) => {
       state.queued.push(target);
       if (!verified) await fakeEngine(state).preflight(target);
+      if (state.enqueueFailure !== undefined) throw state.enqueueFailure;
       state.sent.push({ target, message });
     }) as MeshEngine["queueSend"],
     async setDescription(value) {
@@ -637,6 +644,148 @@ describe("mesh node lifecycle", () => {
   });
 });
 
+describe("mesh send failure triage", () => {
+  const message: MeshHandoffMessage = { id: "mvbsq4ja-5dnpgd", from: "web", to: "phone", summary: "s", document: "d" };
+
+  /** An engine 503 as rivetkit surfaces it: the code rides in the message, sometimes in `code`. */
+  function actorReadyTimeout(): Error {
+    return new Error("guard.actor_ready_timeout: actor did not become ready within 30000ms");
+  }
+
+  /** What `AbortSignal.timeout` produces when the client's own wait expires. */
+  function clientWaitExpired(): Error {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    return err;
+  }
+
+  it("reads the engine code, not the elapsed time: actor_ready_timeout is not delivered", () => {
+    const triage = classifyMeshSendFailure(actorReadyTimeout());
+    assert.equal(triage.kind, "not-delivered");
+    assert.equal(triage.code, ACTOR_READY_TIMEOUT_CODE);
+    assert.match(triage.detail, /actor did not become ready/);
+  });
+
+  it("reads the code off a structured rivetkit error and off its cause", () => {
+    assert.equal(classifyMeshSendFailure({ code: ACTOR_READY_TIMEOUT_CODE, message: "not ready" }).kind, "not-delivered");
+    assert.equal(classifyMeshSendFailure({ data: { code: ACTOR_READY_TIMEOUT_CODE } }).kind, "not-delivered");
+    const wrapped = new Error("request failed");
+    wrapped.cause = actorReadyTimeout();
+    assert.equal(classifyMeshSendFailure(wrapped).kind, "not-delivered");
+  });
+
+  it("treats a client wait that expired as unknown — the engine never said it was refused", () => {
+    assert.equal(classifyMeshSendFailure(clientWaitExpired()).kind, "unknown");
+    const abort = new Error("This operation was aborted");
+    abort.name = "AbortError";
+    assert.equal(classifyMeshSendFailure(abort).kind, "unknown");
+    assert.equal(classifyMeshSendFailure(new Error("timed out after 30000ms")).kind, "unknown");
+  });
+
+  it("leaves every other error an ordinary failure, reported as it came", () => {
+    const triage = classifyMeshSendFailure(new Error("connect ECONNREFUSED 127.0.0.1:6420"));
+    assert.equal(triage.kind, "failed");
+    assert.equal(triage.detail, "connect ECONNREFUSED 127.0.0.1:6420");
+    assert.equal(classifyMeshSendFailure("plain string failure").kind, "failed");
+    assert.equal(classifyMeshSendFailure(undefined).kind, "failed");
+  });
+
+  it("never says 'not delivered' or 'retry' about an unknown outcome, and names it unknown", () => {
+    const err = new MeshSendError("phone", message, classifyMeshSendFailure(clientWaitExpired()));
+    assert.equal(err.kind, "unknown");
+    assert.equal(err.handoffId, message.id);
+    assert.match(err.message, /UNKNOWN/);
+    assert.match(err.message, /may have accepted it and may still deliver it/);
+    assert.doesNotMatch(err.message, /not delivered|nothing was sent|retry/i);
+    assert.match(err.recovery, /recovery probe/);
+    assert.match(err.recovery, /not a fix/);
+  });
+
+  it("says nothing was sent only when the engine refused the enqueue", () => {
+    const err = new MeshSendError("phone", message, classifyMeshSendFailure(actorReadyTimeout()));
+    assert.match(err.message, /no runner is serving the target's pool/);
+    assert.match(err.message, /never entered its queue and nothing was sent/);
+    assert.doesNotMatch(err.message, /retry when the engine|target may be offline or stuck/);
+  });
+
+  it("reuses the original handoff id wherever a resend is named", () => {
+    for (const err of [
+      new MeshSendError("phone", message, classifyMeshSendFailure(clientWaitExpired())),
+      new MeshSendError("phone", message, classifyMeshSendFailure(actorReadyTimeout())),
+      new MeshSendError("phone", message, classifyMeshSendFailure(new Error("boom"))),
+    ]) {
+      assert.match(err.recovery, new RegExp(`id ${message.id}`));
+      assert.match(err.recovery, /probe|duplicate/, `"${err.kind}" explains why the id is reused`);
+    }
+  });
+
+  it("is a plain Error carrying its own verdict, so a caller can rethrow it without rewording", () => {
+    const err = new MeshSendError("phone", message, classifyMeshSendFailure(clientWaitExpired()));
+    assert.ok(err instanceof Error);
+    assert.equal(err.name, "MeshSendError");
+    assert.ok(!/failed to send/i.test(err.message), "the message is the whole verdict, not a fragment to re-prefix");
+  });
+  /** A connected engine whose enqueue rejects with the given failure. */
+  async function engineWithFailingEnqueue(err: unknown): Promise<MeshEngine> {
+    const engine = createRivetEngine({ endpoint: "http://localhost:6420" }, () => {}, {
+      ensureRuntimeReady: async () => {},
+      importRivetkit: async () => ({
+        actor: (definition: unknown) => ({ definition }),
+        queue: () => ({}),
+        setup: () => ({ startAndWait: async () => {}, shutdown: async () => {} }),
+      }),
+      importClient: async () => ({
+        createClient: () => ({
+          getOrCreate: () => ({ resolve: async () => {} }),
+          get: () => ({ send: async () => { throw err; }, action: async () => "" }),
+        }),
+      }),
+    });
+    await engine.ensureNode("web");
+    return engine;
+  }
+
+  it("triages what queueSend throws: the engine's code classes the enqueue", async () => {
+    const verified: MeshPreflight = { target: "phone", state: "Sleeping", pool: "host-b", warning: null };
+    const refused = await engineWithFailingEnqueue(actorReadyTimeout());
+    await assert.rejects(
+      () => refused.queueSend("phone", message, verified),
+      (err: any) => err instanceof MeshSendError && err.kind === "not-delivered" && /nothing was sent/.test(err.message),
+    );
+    const expired = await engineWithFailingEnqueue(clientWaitExpired());
+    await assert.rejects(
+      () => expired.queueSend("phone", message, verified),
+      (err: any) =>
+        err instanceof MeshSendError &&
+        err.kind === "unknown" &&
+        /UNKNOWN/.test(err.message) &&
+        !/not delivered|nothing was sent|retry/i.test(err.message),
+    );
+  });
+
+  it("the daemon's one-shot send triages with the same function, since both sites funnel into it", () => {
+    const failure = classifyMeshSendFailure(actorReadyTimeout());
+    assert.equal(new MeshSendError("phone", message, failure).message, `mesh: ${meshSendFailureText("phone", message, failure)}`);
+    assert.equal(classifyMeshSendFailure(clientWaitExpired()).kind, "unknown");
+  });
+
+  it("records the verdict in the mesh log, so an error line is diagnosable later", async () => {
+    const logPath = meshLogPath("triage");
+    const state: FakeEngineState = {
+      ...fakeState(),
+      nodes: [{ name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" }],
+      envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }],
+      enqueueFailure: actorReadyTimeout(),
+    };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state), [], logPath);
+    await node.up("web");
+    await assert.rejects(() => node.send("phone", { summary: "s", document: "d" }), /guard\.actor_ready_timeout/);
+    const log = fs.readFileSync(logPath, "utf-8");
+    assert.match(log, /msg="mesh send failed".*verdict=not-delivered/);
+    assert.match(log, new RegExp(`code=${ACTOR_READY_TIMEOUT_CODE}`));
+    assert.ok(!log.includes('msg="mesh send"'), "a failed send is not recorded as a success");
+  });
+});
 describe("mesh messaging", () => {
   it("send enqueues the full inline payload with id/from/summary/document", async () => {
     const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" }], envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }] };
@@ -655,6 +804,18 @@ describe("mesh messaging", () => {
   it("send requires being online", async () => {
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(fakeState()));
     await assert.rejects(() => node.send("phone", { summary: "s", document: "d" }), /not online/);
+  });
+
+  it("re-sends under the original id, so a recovery probe cannot read as a new handoff", async () => {
+    const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" }], envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    const first = await node.send("phone", { summary: "s", document: "d" });
+    const probe = await node.send("phone", { summary: "s", document: "d" }, first.id);
+    assert.equal(probe.id, first.id, "the probe carries the id the receiver deduplicates on");
+    assert.deepEqual(state.sent.map((s) => s.message.id), [first.id, first.id]);
+    const fresh = await node.send("phone", { summary: "s", document: "d" });
+    assert.notEqual(fresh.id, first.id, "an unrelated send still mints its own id");
   });
 
   it("refuses a send whose target's pool has no runner, and never enqueues it", async () => {
