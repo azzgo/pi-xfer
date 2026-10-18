@@ -11,6 +11,7 @@
  * This is the read side only: one named node in, one description out. No bulk
  * fan-out, no listing integration — listings stay names-only by design.
  */
+import { guardMeshConfig } from "./mesh-guard.ts";
 import { XFER_INSTANCE_ACTOR, loadMeshConfig } from "./mesh-config.ts";
 import type { TargetDescriber } from "./targets.ts";
 
@@ -46,7 +47,7 @@ async function connect(configPath: string): Promise<MeshClient | null> {
     // be inlined by esbuild and drag the whole mesh runtime into broker.cjs.
     const specifier = ["rivetkit", "client"].join("/");
     const { createClient } = (await import(specifier)) as { createClient(config: unknown): MeshClient["client"] };
-    return { client: createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token }) };
+    return { client: createClient(guardMeshConfig({ endpoint: config.endpoint, namespace: config.namespace, token: config.token })) };
   } catch {
     return null;
   }

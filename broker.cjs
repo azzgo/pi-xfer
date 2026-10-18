@@ -48,15 +48,79 @@ module.exports = __toCommonJS(broker_main_exports);
 var fs3 = __toESM(require("node:fs"), 1);
 var http = __toESM(require("node:http"), 1);
 var net = __toESM(require("node:net"), 1);
-var os2 = __toESM(require("node:os"), 1);
-var path4 = __toESM(require("node:path"), 1);
+var os3 = __toESM(require("node:os"), 1);
+var path5 = __toESM(require("node:path"), 1);
 
 // constants.ts
+var os2 = __toESM(require("node:os"), 1);
+var path2 = __toESM(require("node:path"), 1);
+
+// mesh-guard.ts
 var os = __toESM(require("node:os"), 1);
 var path = __toESM(require("node:path"), 1);
-var XFER_DIR = path.join(os.homedir(), ".pi", "xfer");
-var MESH_CONFIG_PATH = path.join(XFER_DIR, "mesh.config.json");
-var MESH_CACHE_DIR = path.join(XFER_DIR, "cache");
+var MeshRemoteBlockedError = class extends Error {
+  endpoint;
+  constructor(endpoint, message) {
+    super(message);
+    this.name = "MeshRemoteBlockedError";
+    this.endpoint = endpoint;
+  }
+};
+var TEST_CONTEXT_ENV = "NODE_TEST_CONTEXT";
+var ALLOW_REMOTE_ENV = "XFER_ALLOW_REMOTE";
+var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0", "host.docker.internal"]);
+var ledger = { unguarded: 0, loopback: 0, allowed: [], blocked: [] };
+function inTestContext(env = process.env) {
+  return Boolean(env[TEST_CONTEXT_ENV]);
+}
+function remoteExplicitlyAllowed(env = process.env) {
+  return env[ALLOW_REMOTE_ENV] === "1";
+}
+function endpointHost(endpoint) {
+  try {
+    return new URL(endpoint).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+function isLoopbackEndpoint(endpoint) {
+  const host = endpointHost(endpoint);
+  return host !== null && LOOPBACK_HOSTS.has(host);
+}
+function assertEndpointReachable(endpoint, env = process.env) {
+  if (!inTestContext(env)) {
+    ledger.unguarded += 1;
+    return;
+  }
+  if (isLoopbackEndpoint(endpoint)) {
+    ledger.loopback += 1;
+    return;
+  }
+  if (remoteExplicitlyAllowed(env)) {
+    ledger.allowed.push(endpoint);
+    return;
+  }
+  ledger.blocked.push(endpoint);
+  throw new MeshRemoteBlockedError(
+    endpoint,
+    `mesh: refusing to reach "${endpoint}" from a test run — tests must be hermetic (loopback only). Inject a seam or a stub fetch instead; set ${ALLOW_REMOTE_ENV}=1 only when the test is deliberately exercising this guard`
+  );
+}
+function guardMeshConfig(config, env = process.env) {
+  assertEndpointReachable(config.endpoint, env);
+  return config;
+}
+function resolveMeshConfigPath(realPath, env = process.env) {
+  if (!inTestContext(env)) return realPath;
+  const override = env.XFER_MESH_CONFIG;
+  if (override) return override;
+  return path.join(os.tmpdir(), `pi-xfer-test-${process.pid}-no-mesh.config.json`);
+}
+
+// constants.ts
+var XFER_DIR = path2.join(os2.homedir(), ".pi", "xfer");
+var MESH_CONFIG_PATH = resolveMeshConfigPath(path2.join(XFER_DIR, "mesh.config.json"));
+var MESH_CACHE_DIR = path2.join(XFER_DIR, "cache");
 var CONNECT_TIMEOUT_MS = 5e3;
 var ACK_TIMEOUT_MS = 5e3;
 var MAX_FRAME_BYTES = 1024 * 1024;
@@ -314,7 +378,7 @@ async function connect(configPath) {
     const config = loadMeshConfig(configPath);
     const specifier = ["rivetkit", "client"].join("/");
     const { createClient } = await import(specifier);
-    return { client: createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token }) };
+    return { client: createClient(guardMeshConfig({ endpoint: config.endpoint, namespace: config.namespace, token: config.token })) };
   } catch {
     return null;
   }
@@ -322,10 +386,10 @@ async function connect(configPath) {
 
 // targets.ts
 var fs2 = __toESM(require("node:fs"), 1);
-var path3 = __toESM(require("node:path"), 1);
+var path4 = __toESM(require("node:path"), 1);
 
 // utils.ts
-var path2 = __toESM(require("node:path"), 1);
+var path3 = __toESM(require("node:path"), 1);
 function encodeAgentName(name) {
   return encodeURIComponent(name);
 }
@@ -339,7 +403,7 @@ function decodeAgentName(name) {
 function isEntryPoint(names) {
   const invoked = process.argv[1];
   if (!invoked) return false;
-  return names.includes(path2.basename(invoked));
+  return names.includes(path3.basename(invoked));
 }
 
 // targets.ts
@@ -368,7 +432,7 @@ function listTargets(xferDir = XFER_DIR) {
   }
   return entries.filter((file) => file.endsWith(".sock")).map((sockFile) => {
     const base = sockFile.replace(/\.sock$/, "");
-    return { name: decodeAgentName(base), ...readSiblingMetadata(path3.join(xferDir, `${base}.json`)) };
+    return { name: decodeAgentName(base), ...readSiblingMetadata(path4.join(xferDir, `${base}.json`)) };
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 async function listTargetsWithDescriptions(xferDir = XFER_DIR, describe) {
@@ -616,7 +680,7 @@ Sec-WebSocket-Accept: ${acceptKey(key)}\r
 // broker-main.ts
 var VERSION = (() => {
   try {
-    return JSON.parse(fs3.readFileSync(path4.join(__dirname, "package.json"), "utf-8")).version ?? "?";
+    return JSON.parse(fs3.readFileSync(path5.join(__dirname, "package.json"), "utf-8")).version ?? "?";
   } catch {
     return "?";
   }
@@ -684,7 +748,7 @@ function writeFileAtomic(filePath, content) {
 }
 function readPidFile(xferDir) {
   try {
-    const raw = fs3.readFileSync(path4.join(xferDir, "broker.pid"), "utf-8").trim();
+    const raw = fs3.readFileSync(path5.join(xferDir, "broker.pid"), "utf-8").trim();
     const pid = Number.parseInt(raw, 10);
     return Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
@@ -694,16 +758,16 @@ function readPidFile(xferDir) {
 function unlinkBrokerFiles(xferDir) {
   for (const name of ["broker.pid", "broker.json"]) {
     try {
-      fs3.unlinkSync(path4.join(xferDir, name));
+      fs3.unlinkSync(path5.join(xferDir, name));
     } catch {
     }
   }
 }
 function writeBrokerFiles(xferDir, port, startedAt) {
-  writeFileAtomic(path4.join(xferDir, "broker.pid"), `${process.pid}
+  writeFileAtomic(path5.join(xferDir, "broker.pid"), `${process.pid}
 `);
   writeFileAtomic(
-    path4.join(xferDir, "broker.json"),
+    path5.join(xferDir, "broker.json"),
     `${JSON.stringify({ port, pid: process.pid, startedAt, version: VERSION }, null, 2)}
 `
   );
@@ -730,7 +794,7 @@ function nextRequestId() {
 }
 function pushXferNotify(xferDir, target, msg) {
   return new Promise((resolve, reject) => {
-    const endpoint = path4.join(xferDir, `${encodeAgentName(target)}.sock`);
+    const endpoint = path5.join(xferDir, `${encodeAgentName(target)}.sock`);
     if (!fs3.existsSync(endpoint)) {
       reject(Object.assign(new Error(`peer "${target}" not found`), { code: ERR_TARGET_NOT_FOUND }));
       return;
@@ -824,7 +888,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
     return;
   }
   const msgId = nextMsgId();
-  const doc = path4.join(os2.tmpdir(), `pi-xfer-${msgId}.md`);
+  const doc = path5.join(os3.tmpdir(), `pi-xfer-${msgId}.md`);
   const pageRaw = typeof frame.page === "object" && frame.page !== null ? frame.page : {};
   const page = {
     url: typeof pageRaw.url === "string" ? pageRaw.url : "",
@@ -843,7 +907,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
       // follow-up command directly runnable (compose passes it too — the two
       // render paths must not drift).
       fromTarget: targetName,
-      brokerCliPath: path4.join(__dirname, "broker-main.ts")
+      brokerCliPath: path5.join(__dirname, "broker-main.ts")
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -910,7 +974,7 @@ function handleAnnotationCompose(connection, frame) {
       picks,
       record: record ?? void 0,
       fromTarget: targetName,
-      brokerCliPath: path4.join(__dirname, "broker-main.ts")
+      brokerCliPath: path5.join(__dirname, "broker-main.ts")
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -930,7 +994,7 @@ function parseRecord(raw) {
   return raw;
 }
 async function handleTargetsList(connection, frame, xferDir) {
-  const describe = createMeshDescriber(path4.join(xferDir, "mesh.config.json"));
+  const describe = createMeshDescriber(path5.join(xferDir, "mesh.config.json"));
   const targets = await listTargetsWithDescriptions(xferDir, describe);
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_TARGETS_RESULT, id: frameId(frame), targets });
   const described = targets.filter((t) => t.description).length;
@@ -1293,7 +1357,7 @@ async function runPageToolCommand(args) {
   const xferDir = parseArgs(process.argv.slice(2)).xferDir;
   let port;
   try {
-    const raw = JSON.parse(fs3.readFileSync(path4.join(xferDir, "broker.json"), "utf-8"));
+    const raw = JSON.parse(fs3.readFileSync(path5.join(xferDir, "broker.json"), "utf-8"));
     const info = raw;
     if (typeof info.port !== "number" || info.port <= 0 || info.port > 65535) throw new Error("bad port");
     port = info.port;
