@@ -57,9 +57,15 @@ declares it via `configurePool`, so the actor is placed in that pool when the re
 
 ## 2. Deploy the Worker 🔴
 
+Before deploying, `npm run check` runs `wrangler deploy --dry-run`: it parses
+`wrangler.toml`, resolves the Durable Object binding and vars, and builds the
+bundle locally — nothing is uploaded. A config typo surfaces there instead of
+halfway through the real deploy.
+
 ```bash
 cd examples/pi-durable-cf
 npm install
+npm run check                             # local config + build check, no upload
 npx wrangler secret put MESH_ENDPOINT     # https://<engine-host>
 npx wrangler secret put MESH_NAMESPACE    # if your engine uses one
 npx wrangler secret put MESH_TOKEN        # if your engine requires one
