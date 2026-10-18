@@ -327,13 +327,11 @@ interface FakeMeshNode {
   online: { name: string } | null;
 }
 
-function fakeMeshNode(options: { upError?: string; upDelayMs?: number } = {}): FakeMeshNode {
+function fakeMeshNode(): FakeMeshNode {
   const state: FakeMeshNode = { node: null as unknown as MeshNode, ups: [], downs: 0, online: null };
   state.node = {
     status: () => (state.online ? { online: true, name: state.online.name } : { online: false }),
     up: async (name: string) => {
-      if (options.upDelayMs) await new Promise((resolve) => setTimeout(resolve, options.upDelayMs));
-      if (options.upError) throw new Error(options.upError);
       state.ups.push(name);
       state.online = { name };
     },
@@ -368,9 +366,7 @@ describe("admin mesh control — presence grouping", () => {
       assert.match(res.body, /pool host-b/);
       assert.match(res.body, /pool \(default\)/);
       assert.match(res.body, /<b class="mono">mesh<\/b><span class="muted">3 node\(s\) · 3 pool\(s\)<\/span>/, "SERVICES counts nodes and distinct pools");
-      assert.equal((res.body.match(/<form method="post" action="\/control\/mesh\/up"/g) ?? []).length, 1, "the only up action lives in MESH CONTROL");
-      assert.match(res.body, /<form method="post" action="\/control\/mesh\/up"/, "the up action carries a name field");
-      assert.match(res.body, /class="btn sm primary">up</);
+      assert.doesNotMatch(res.body, /\/control\/mesh\/up/, "no up control is rendered");
     } finally { stub.restore(); }
   });
 
@@ -409,55 +405,38 @@ describe("admin mesh control — presence grouping", () => {
   });
 });
 
-describe("admin mesh control — up / down actions", () => {
-  it("up brings this daemon online under the submitted name and reports it", async () => {
+describe("admin mesh control — down action only", () => {
+  it("offers no up control and no mesh control panel", async () => {
     const mesh = fakeMeshNode();
+    mesh.online = { name: "phone" };
     const h = makeHarness({ meshNode: mesh.node });
     writeMeshConfig(h.xferDir, { pool: "host-a" });
-    const stub = stubEngine([]);
+    const stub = stubEngine([{ name: "phone", actorId: "a9", status: "Sleeping" }, { name: "tablet", actorId: "a10", status: "Pending" }]);
     try {
       const port = await listen(h);
-      const res = await get(port, "/control/mesh/up", "POST", "name=laptop");
-      assert.equal(res.status, 303);
-      assert.match(res.location ?? "", /^\/control\?notice=ok%7C/);
-      assert.deepEqual(mesh.ups, ["laptop"]);
-      await waitFor(() => h.published.some((e) => e.kind === "mesh"), "the mesh up event");
-      assert.match(h.published.find((e) => e.kind === "mesh")!.text, /mesh node went up — laptop/);
-      const page = await get(port, res.location ?? "/control");
-      assert.match(page.body, /<div class="notice ok">[^<]*laptop[^<]*is online<\/div>/, "the notice lands on the page it redirects to");
-      assert.deepEqual(mesh.ups, ["laptop"], "the daemon went online under the submitted name");
-      assert.match(page.body, /<b class="mono">mesh<\/b><span class="muted">0 node\(s\) · 0 pool\(s\)<\/span>/, "SERVICES counts the engine listing, not the local node");
-      assert.doesNotMatch(page.body, /<span class="dim">not online<\/span>/, "SERVICES no longer carries the self slot");
-      assert.doesNotMatch(page.body, /<b class="mono">mesh<\/b>[\s\S]{0,200}?(not online|this node)/, "SERVICES stays a statistic, not an action slot");
+      const res = await get(port, "/control");
+      assert.equal(res.status, 200);
+      assert.doesNotMatch(res.body, /\/control\/mesh\/up/, "no up endpoint is rendered");
+      assert.doesNotMatch(res.body, /mesh control/i, "the mesh control panel is gone");
+      assert.doesNotMatch(res.body, /<button class="btn sm primary">up<\/button>/, "no up button anywhere");
+      assert.match(res.body, /action="\/control\/mesh\/down"/, "the per-node down action stays");
+      assert.equal((res.body.match(/action="\/control\/mesh\/down"/g) ?? []).length, 2, "one down action per node");
+      assert.match(res.body, /<span class="pill" style="color:#8250df;background:#fbefff">this node<\/span>/, "the row still marks the daemon's own node");
     } finally { stub.restore(); }
   });
 
-  it("up refuses without a bound mesh node and says so on the page", async () => {
-    const h = makeHarness();
-    writeMeshConfig(h.xferDir);
-    const stub = stubEngine([]);
-    try {
-      const port = await listen(h);
-      const res = await get(port, "/control/mesh/up", "POST", "name=laptop");
-      assert.equal(res.status, 303);
-      assert.match(decodeURIComponent(res.location ?? ""), /no mesh lifecycle bound to the daemon/);
-      const page = await get(port, res.location ?? "/control");
-      assert.match(page.body, /<div class="notice warn">mesh up is unavailable in this build/);
-    } finally { stub.restore(); }
-  });
-
-  it("up surfaces a refusal (e.g. already Running elsewhere) as a warning notice", async () => {
-    const mesh = fakeMeshNode({ upError: 'mesh node "laptop" is already Running on another host' });
+  it("rejects a POST to /control/mesh/up instead of bringing anything online", async () => {
+    const mesh = fakeMeshNode();
     const h = makeHarness({ meshNode: mesh.node });
     writeMeshConfig(h.xferDir);
     const stub = stubEngine([]);
     try {
       const port = await listen(h);
       const res = await get(port, "/control/mesh/up", "POST", "name=laptop");
-      assert.equal(res.status, 303);
-      assert.match(decodeURIComponent(res.location ?? ""), /already Running on another host/);
-      await waitFor(() => h.published.some((e) => e.kind === "mesh"), "the refusal event");
-      assert.match(h.published.find((e) => e.kind === "mesh")!.text, /mesh up failed — laptop/, "an engine-side refusal is reported as a failed up");
+      assert.equal(res.status, 404);
+      assert.match(res.body, /not found/);
+      assert.deepEqual(mesh.ups, [], "nothing was brought online");
+      assert.deepEqual(h.published, [], "no mesh event was published");
     } finally { stub.restore(); }
   });
 

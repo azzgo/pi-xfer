@@ -11,12 +11,11 @@
  *
  * Write operations on board content are NEVER handled in-page — the pages
  * only GET; the sole mutating endpoints are the control actions (gc, broker
- * start/stop, admin stop, mesh node up/down, self-check) and the two
+ * start/stop, admin stop, mesh node down, self-check) and the two
  * open-delegations (open folder / open in editor), which shell out to the
- * system. Mesh up/down run through this daemon's own MeshNode so a node
- * started here outlives the browser tab that asked for it; the engine side
- * (destroy an actor) is reached through the injected mesh seam, never through
- * the render path.
+ * system. Mesh down destroys an actor through the injected mesh seam, never
+ * through the render path; bringing a node online stays a pi-side command
+ * (/xfer mesh up), so the console never owns a node lifecycle.
  *
  * Events are fire-and-forget: an in-memory SSE hub pushes to whatever
  * browsers are connected right now; nothing is buffered server-side.
@@ -66,15 +65,13 @@ export interface AdminServerOptions {
   openPath?: (targetPath: string, isFile: boolean) => void;
   /** SSE heartbeat interval in ms; default 15000. */
   heartbeatMs?: number;
-  /** Mesh lifecycle bound to this daemon; outlives a browser tab. */
+  /** A mesh node this daemon may own; its `down()` is the path taken for that node. */
   meshNode?: MeshNode;
   /** Destroy one mesh actor; defaults to the engine REST call. */
   destroyMeshNode?: (config: MeshConfig, actorId: string) => Promise<void>;
 }
 
-const MESH_UP_TIMEOUT_MS = 60_000;
 const MESH_DOWN_TIMEOUT_MS = 30_000;
-const MESH_UP_NAME_MAX = 64;
 
 // ---------- SSE hub ----------
 
@@ -443,16 +440,6 @@ const meshViewBody = (mesh: MeshView): string => {
   return `${STATUS_LEGEND}${rows || `<div class="empty">no mesh nodes</div>`}`;
 };
 
-const meshUpForm = (mesh: MeshView, daemonName: string): string => {
-  const placeholder = mesh.config?.pool ?? "(default)";
-  return `<form method="post" action="/control/mesh/up" class="row" style="margin-top:12px;gap:8px">` +
-    `<input name="name" required maxlength="${MESH_UP_NAME_MAX}" placeholder="node name (e.g. ${esc(placeholder)})" ` +
-    `style="flex:1;min-width:0;border:1px solid var(--soft);border-radius:99px;padding:7px 14px;font:inherit;font-size:13px;background:#fff">` +
-    `<button class="btn sm primary">up</button></form>` +
-    `<div class="muted" style="margin-top:8px;font-size:12.5px">` +
-    `brings this daemon online as that node${daemonName ? ` (currently "${esc(daemonName)}")` : ""}</div>`;
-};
-
 const presenceRows = (peers: PeerRow[]): string =>
   peers.length === 0
     ? `<div class="empty">no local peers</div>`
@@ -521,14 +508,6 @@ const controlPage = (ctx: RenderContext, peers: PeerRow[], mesh: MeshView, broke
             <form method="post" action="/control/admin/stop"><button class="btn sm danger">stop</button></form></div>
           <div class="row" style="padding:6px 0"><span class="dot" style="background:${meshPoint}"></span>
             <b class="mono">mesh</b><span class="muted">${meshSummary}</span></div>
-        </div>
-        <div class="panel" style="margin-bottom:14px"><h2>mesh control</h2>
-          ${meshUpForm(mesh, mesh.self?.name ?? "")}
-          <div class="muted" style="margin-top:12px;font-size:12.5px">
-            "down" destroys that node's actor — the same path /xfer mesh down takes. A node that is Running on
-            another host is destroyed only after an explicit confirmation.</div>
-          <div class="muted" style="margin-top:6px;font-size:12.5px">
-            Up needs this engine's runner in the node's pool; adoption keeps the actor's description.</div>
         </div>
         <div class="panel"><h2>maintenance</h2>
           <div class="row"><form method="post" action="/control/gc"><button class="btn">run gc</button></form>
@@ -747,10 +726,6 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
         redirect(res, back("/control?selfcheck=1"));
         return;
       }
-      if (url.pathname === "/control/mesh/up") {
-        await handleMeshUp(form.get("name") ?? "", res, back);
-        return;
-      }
       if (url.pathname === "/control/mesh/down") {
         await handleMeshDown(form.get("name") ?? "", form.get("actor") ?? "", res, back);
         return;
@@ -781,30 +756,6 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
       // An unread oversized body would hold the keep-alive socket open.
       res.writeHead(status, { "content-type": "text/plain", connection: "close" });
       res.end(`admin: action failed — ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  async function handleMeshUp(name: string, res: http.ServerResponse, back: (fallback: string) => string): Promise<void> {
-    const target = name.trim();
-    const refuse = (text: string): void => {
-      publish({ t: now(), kind: "mesh", text: `mesh up refused — ${target || "(no name)"}`, detail: text });
-      redirect(res, back(`/control?${meshNoticeParam("warn", text)}`));
-    };
-    if (!meshNode) return refuse("mesh up is unavailable in this build — no mesh lifecycle bound to the daemon");
-    if (target === "") return refuse("mesh up needs a node name");
-    if (target.length > MESH_UP_NAME_MAX) return refuse(`mesh up refused — node names are at most ${MESH_UP_NAME_MAX} characters`);
-    if (meshBusy) return refuse(`mesh is busy — ${meshBusy} is still in flight`);
-    try {
-      meshBusy = `up "${target}"`;
-      await withTimeout(meshNode.up(target), MESH_UP_TIMEOUT_MS);
-      publish({ t: now(), kind: "mesh", text: `mesh node went up — ${target}`, detail: "started via admin" });
-      redirect(res, back(`/control?${meshNoticeParam("ok", `mesh node "${target}" is online`)}`));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      publish({ t: now(), kind: "mesh", text: `mesh up failed — ${target}`, detail: message });
-      redirect(res, back(`/control?${meshNoticeParam("warn", message)}`));
-    } finally {
-      meshBusy = null;
     }
   }
 

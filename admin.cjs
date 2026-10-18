@@ -2064,9 +2064,7 @@ var EXTENSION_VERSION = (() => {
     return "?";
   }
 })();
-var MESH_UP_TIMEOUT_MS = 6e4;
 var MESH_DOWN_TIMEOUT_MS = 3e4;
-var MESH_UP_NAME_MAX = 64;
 var EventHub = class {
   clients = /* @__PURE__ */ new Set();
   add(res) {
@@ -2346,10 +2344,6 @@ var meshViewBody = (mesh) => {
   const rows = mesh.nodes.map((node) => meshNodeRow(node, mesh.self)).join("");
   return `${STATUS_LEGEND}${rows || `<div class="empty">no mesh nodes</div>`}`;
 };
-var meshUpForm = (mesh, daemonName) => {
-  const placeholder = mesh.config?.pool ?? "(default)";
-  return `<form method="post" action="/control/mesh/up" class="row" style="margin-top:12px;gap:8px"><input name="name" required maxlength="${MESH_UP_NAME_MAX}" placeholder="node name (e.g. ${esc(placeholder)})" style="flex:1;min-width:0;border:1px solid var(--soft);border-radius:99px;padding:7px 14px;font:inherit;font-size:13px;background:#fff"><button class="btn sm primary">up</button></form><div class="muted" style="margin-top:8px;font-size:12.5px">brings this daemon online as that node${daemonName ? ` (currently "${esc(daemonName)}")` : ""}</div>`;
-};
 var presenceRows = (peers) => peers.length === 0 ? `<div class="empty">no local peers</div>` : peers.map((p) => {
   const col = p.online ? "#1a7f37" : "#cf222e";
   return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">
@@ -2411,14 +2405,6 @@ var controlPage = (ctx, peers, mesh, broker, selfCheck) => {
             <form method="post" action="/control/admin/stop"><button class="btn sm danger">stop</button></form></div>
           <div class="row" style="padding:6px 0"><span class="dot" style="background:${meshPoint}"></span>
             <b class="mono">mesh</b><span class="muted">${meshSummary}</span></div>
-        </div>
-        <div class="panel" style="margin-bottom:14px"><h2>mesh control</h2>
-          ${meshUpForm(mesh, mesh.self?.name ?? "")}
-          <div class="muted" style="margin-top:12px;font-size:12.5px">
-            "down" destroys that node's actor — the same path /xfer mesh down takes. A node that is Running on
-            another host is destroyed only after an explicit confirmation.</div>
-          <div class="muted" style="margin-top:6px;font-size:12.5px">
-            Up needs this engine's runner in the node's pool; adoption keeps the actor's description.</div>
         </div>
         <div class="panel"><h2>maintenance</h2>
           <div class="row"><form method="post" action="/control/gc"><button class="btn">run gc</button></form>
@@ -2616,10 +2602,6 @@ function createAdminServer(options) {
         redirect(res, back("/control?selfcheck=1"));
         return;
       }
-      if (url.pathname === "/control/mesh/up") {
-        await handleMeshUp(form.get("name") ?? "", res, back);
-        return;
-      }
       if (url.pathname === "/control/mesh/down") {
         await handleMeshDown(form.get("name") ?? "", form.get("actor") ?? "", res, back);
         return;
@@ -2649,29 +2631,6 @@ function createAdminServer(options) {
       const status = err.statusCode ?? 500;
       res.writeHead(status, { "content-type": "text/plain", connection: "close" });
       res.end(`admin: action failed — ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  async function handleMeshUp(name, res, back) {
-    const target = name.trim();
-    const refuse = (text) => {
-      publish({ t: now(), kind: "mesh", text: `mesh up refused — ${target || "(no name)"}`, detail: text });
-      redirect(res, back(`/control?${meshNoticeParam("warn", text)}`));
-    };
-    if (!meshNode) return refuse("mesh up is unavailable in this build — no mesh lifecycle bound to the daemon");
-    if (target === "") return refuse("mesh up needs a node name");
-    if (target.length > MESH_UP_NAME_MAX) return refuse(`mesh up refused — node names are at most ${MESH_UP_NAME_MAX} characters`);
-    if (meshBusy) return refuse(`mesh is busy — ${meshBusy} is still in flight`);
-    try {
-      meshBusy = `up "${target}"`;
-      await withTimeout(meshNode.up(target), MESH_UP_TIMEOUT_MS);
-      publish({ t: now(), kind: "mesh", text: `mesh node went up — ${target}`, detail: "started via admin" });
-      redirect(res, back(`/control?${meshNoticeParam("ok", `mesh node "${target}" is online`)}`));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      publish({ t: now(), kind: "mesh", text: `mesh up failed — ${target}`, detail: message });
-      redirect(res, back(`/control?${meshNoticeParam("warn", message)}`));
-    } finally {
-      meshBusy = null;
     }
   }
   async function handleMeshDown(name, actorId, res, back) {
