@@ -1,0 +1,37 @@
+# Cloudflare Worker hosting one pi-xfer mesh node.
+#
+# Experimental — see README.md. This `package.json` (and `node_modules/`) belongs
+# to the example, not to the pi-xfer extension: the extension itself ships no
+# runtime dependencies, and nothing here sets a precedent for adding one.
+name: "pi-xfer-cf-actor"
+main: "src/worker.ts"
+compatibility_date: "2025-10-01"
+# nodejs_compat is required: rivetkit's logger (pino) reaches for Node builtins
+# at module scope even under the wasm runtime. See README "Bundling".
+compatibility_flags: ["nodejs_compat"]
+
+durable_objects:
+  bindings:
+    # The agent side. One DO instance per node name — see `selfName` in worker.ts.
+    - name: "AGENT"
+      class_name: "AgentDurableObjectEntry"
+
+migrations:
+  # DO classes cannot be renamed in place; a rename is a new migration tag.
+  - tag: "v1"
+    new_sqlite_classes: ["AgentDurableObjectEntry"]
+
+# The mesh engine calls back into this Worker, so it must be public. This is the
+# deployment-shape change ADR 0013's serverless exception accepts: the engine
+# reaches the node, not the other way round, and the control plane is plain HTTP.
+[vars]
+NODE_NAME = "cf-node"
+# WORKER_PUBLIC_URL must equal the deployed URL below; set it per environment.
+WORKER_PUBLIC_URL = "https://pi-xfer-cf-actor.<your-subdomain>.workers.dev"
+# MESH_ENDPOINT, MESH_NAMESPACE and MESH_TOKEN are secrets, not vars:
+#   npx wrangler secret put MESH_ENDPOINT
+#   npx wrangler secret put MESH_NAMESPACE     # optional
+#   npx wrangler secret put MESH_TOKEN        # when the engine requires one
+# DEEPSEEK_API_KEY stays unset for the echo path; set it to enable the model:
+#   npx wrangler secret put DEEPSEEK_API_KEY
+#   npx wrangler secret put DEEPSEEK_MODEL    # optional, defaults to deepseek-chat

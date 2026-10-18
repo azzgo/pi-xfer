@@ -1,0 +1,20 @@
+{
+  "name": "pi-xfer-cf-actor-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Example: a Cloudflare Worker + Durable Object playing one pi-xfer mesh node. Not part of the pi-xfer extension and not a dependency precedent for it.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "rivetkit": "2.3.26"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251001.0",
+    "typescript": "^5.9.2",
+    "wrangler": "^4.0.0"
+  }
+}
