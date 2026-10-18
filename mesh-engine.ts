@@ -1,4 +1,5 @@
 import { HANDOFF_QUEUE, XFER_INSTANCE_ACTOR, deserializeMeshKey, type MeshConfig } from "./mesh-config.ts";
+import { MeshRemoteBlockedError, assertEndpointReachable, guardMeshConfig } from "./mesh-guard.ts";
 import { createMeshLogSink } from "./mesh-log.ts";
 import { ensureNativeRuntimeReady } from "./mesh-native.ts";
 import { withTimeout } from "./utils.ts";
@@ -135,7 +136,7 @@ export interface MeshEngine {
    *
    * `verified` is a verdict the caller already paid for — passing it is what
    * keeps a send at one engine round. Omitted (or `null`) means the check runs
-   * here, so a caller that never checked cannot enqueue blind.
+   * here, so a caller that never checked still cannot enqueue blind.
    */
   queueSend(target: string, message: MeshHandoffMessage, verified?: MeshPreflight | null): Promise<void>;
   /** Pre-send check: rejects with {@link MeshPreflightError} when the target cannot receive. */
@@ -216,7 +217,7 @@ export function createRivetEngine(
       await regAny.startAndWait();
       registry = regAny;
       const { createClient } = await (deps.importClient ?? (() => import("rivetkit/client")))();
-      client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
+      client = createClient(guardMeshConfig({ endpoint: config.endpoint, namespace: config.namespace, token: config.token }));
       // Pin only OUR actor's creation to our pool. `get`/list stay un-pooled so
       // queueSend and describe still address actors living in other pools.
       selfHandle = config.pool
@@ -296,7 +297,7 @@ export async function sendMeshHandoff(
   quietMeshRuntime();
   const preflight = options.preflight === false ? null : await preflightMeshSend(config, target);
   const { createClient } = await import("rivetkit/client");
-  const client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
+  const client = createClient(guardMeshConfig({ endpoint: config.endpoint, namespace: config.namespace, token: config.token }));
   const handle = client.get(XFER_INSTANCE_ACTOR, [target]);
   try {
     await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(timeoutMs) });
@@ -312,6 +313,7 @@ export async function sendMeshHandoff(
 
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
 async function engineApi<T>(config: MeshConfig, method: string, path: string, body?: unknown): Promise<T> {
+  assertEndpointReachable(config.endpoint);
   const url = new URL(path, config.endpoint);
   if (config.namespace) url.searchParams.set("namespace", config.namespace);
   const headers: Record<string, string> = {};
@@ -529,6 +531,7 @@ export async function preflightMeshSend(
   try {
     listing = await withTimeout(listMeshState(config), timeoutMs);
   } catch (err) {
+    if (err instanceof MeshRemoteBlockedError) throw err;
     throw new MeshPreflightError(
       target,
       "(unknown)",

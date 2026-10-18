@@ -22,6 +22,7 @@ import {
   normalizeNodeDescription,
   preflightMeshSend,
   readDescriptionAction,
+  sendMeshHandoff,
   type MeshEngine,
   type MeshHandoffMessage,
   type MeshNodeInfo,
@@ -30,6 +31,7 @@ import {
   type RivetEngineDeps,
   type XferInstanceState,
 } from "./mesh-engine.js";
+import { MeshRemoteBlockedError } from "./mesh-guard.js";
 import type { MeshLogSink } from "./mesh-log.js";
 import type { XferNotifyMessage } from "./types.js";
 
@@ -1035,5 +1037,48 @@ describe("mesh pre-send check", () => {
     assert.equal(mismatch.blocked, null);
     assert.match(mismatch.warning ?? "", /pool "host-b" does hold a live runner/);
     assert.deepEqual(meshPreflightVerdict("Running", { name: "phone", pool: "host-b" }), { blocked: null, warning: null });
+  });
+});
+
+describe("mesh guard: the real transport paths refuse to leave the machine in a test run", () => {
+  const REMOTE = { endpoint: "https://engine.example.com" };
+  const save = { context: process.env.NODE_TEST_CONTEXT, allow: process.env.XFER_ALLOW_REMOTE };
+
+  const arm = () => { process.env.NODE_TEST_CONTEXT = "child-v8"; delete process.env.XFER_ALLOW_REMOTE; };
+  const disarm = () => {
+    if (save.context === undefined) delete process.env.NODE_TEST_CONTEXT; else process.env.NODE_TEST_CONTEXT = save.context;
+    if (save.allow === undefined) delete process.env.XFER_ALLOW_REMOTE; else process.env.XFER_ALLOW_REMOTE = save.allow;
+  };
+
+  it("blocks the REST listing before any fetch happens", async () => {
+    arm();
+    let fetched = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => { fetched += 1; return new Response("{}"); }) as typeof fetch;
+    try {
+      await assert.rejects(() => listMeshNodes(REMOTE), MeshRemoteBlockedError);
+      await assert.rejects(() => listMeshState(REMOTE), MeshRemoteBlockedError);
+      assert.equal(fetched, 0, "the guard runs before the network, not after");
+    } finally { globalThis.fetch = original; disarm(); }
+  });
+
+  it("blocks the pre-send check and the one-shot send, so a test cannot enqueue to a deployment", async () => {
+    arm();
+    try {
+      await assert.rejects(() => preflightMeshSend(REMOTE, "phone"), MeshRemoteBlockedError);
+      await assert.rejects(
+        () => sendMeshHandoff(REMOTE, "phone", { id: "1", from: "web", to: "phone", summary: "s", document: "d" }),
+        MeshRemoteBlockedError,
+      );
+    } finally { disarm(); }
+  });
+
+  it("still lets a loopback fixture through, so hermetic tests keep working", async () => {
+    arm();
+    const stub = stubEngineRest([{ actor_id: "a1", key: serializeMeshKey(["phone"]), sleep_ts: 5 }], []);
+    try {
+      assert.deepEqual((await listMeshNodes({ endpoint: "http://127.0.0.1:6420" })).map((n) => n.name), ["phone"]);
+      assert.deepEqual(stub.calls.sort(), ["/actors"]);
+    } finally { stub.restore(); disarm(); }
   });
 });

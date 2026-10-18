@@ -1,11 +1,12 @@
 import * as os from "node:os";
 import * as path from "node:path";
+import { resolveMeshConfigPath } from "./mesh-guard.ts";
 
 /** Root directory for xfer peer sockets + peer metadata. */
 export const XFER_DIR = path.join(os.homedir(), ".pi", "xfer");
 
 /** Mesh engine config (endpoint/namespace/token) for the opt-in mesh transport. */
-export const MESH_CONFIG_PATH = path.join(XFER_DIR, "mesh.config.json");
+export const MESH_CONFIG_PATH = resolveMeshConfigPath(path.join(XFER_DIR, "mesh.config.json"));
 
 /** Download cache for the mesh native runtime binary (never in git). */
 export const MESH_CACHE_DIR = path.join(XFER_DIR, "cache");
