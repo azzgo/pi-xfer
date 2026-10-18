@@ -288,6 +288,51 @@ describe("mesh config: values that are not literals (pi models.json semantics)",
     );
   });
 
+  it("runs a !command in the caller's cwd, and says so in the error when that breaks it", async () => {
+    // The bug this pins: one config, two repositories, two answers — a relative
+    // path inside the command resolves against wherever pi happens to be running.
+    // That stays the semantics (it is the shell's), but it must never be silent.
+    const withScript = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-cwd-"));
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-cwd-other-"));
+    try {
+      fs.writeFileSync(path.join(withScript, "get-token.sh"), "printf relative-token\n", { mode: 0o755 });
+      const config = parseMeshConfig({ ...base, token: "!./get-token.sh" });
+
+      const fromHere = await resolveMeshConfig(config, { cwd: withScript });
+      assert.equal(fromHere.token, "relative-token", "the command runs in the cwd it was given");
+
+      await assert.rejects(
+        () => resolveMeshConfig(config, { cwd: elsewhere }),
+        (err: any) =>
+          /mesh config "token"/.test(err.message) &&
+          /!\.\/get-token\.sh/.test(err.message) &&
+          err.message.includes(elsewhere) &&
+          /absolute path or \$HOME/.test(err.message),
+        "a cwd-dependent failure must name the command, the cwd, and the remedy",
+      );
+    } finally {
+      fs.rmSync(withScript, { recursive: true, force: true });
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it("reports the cwd even when the command fails for a reason unrelated to paths", async () => {
+    await assert.rejects(
+      () => runTokenCommand("exit 7", 5_000, process.env as Record<string, string | undefined>, "/tmp"),
+      (err: any) => /exit code 7/.test(err.message) && /cwd "\/tmp"/.test(err.message),
+    );
+  });
+
+  it("names the cwd and the stderr when a command exits 0 with no stdout", async () => {
+    await assert.rejects(
+      () => runTokenCommand("echo 'wrong vault' >&2; true", 5_000, process.env as Record<string, string | undefined>, "/tmp"),
+      (err: any) =>
+        /produced an empty token/.test(err.message) &&
+        /wrong vault/.test(err.message) &&
+        /cwd "\/tmp"/.test(err.message),
+    );
+  });
+
   it("kills a command that overruns its budget", async () => {
     // The timeout is injected: waiting out the real 10 s would make this a stall.
     await assert.rejects(

@@ -48,7 +48,13 @@ async function connect(configPath: string): Promise<MeshClient | null> {
     const specifier = ["rivetkit", "client"].join("/");
     const { createClient } = (await import(specifier)) as { createClient(config: unknown): MeshClient["client"] };
     return { client: createClient(guardMeshConfig({ endpoint: config.endpoint, namespace: config.namespace, token: config.token })) };
-  } catch {
+  } catch (err) {
+    // Degrading is right — an unreachable actor must not fail `targets.list` — but
+    // degrading *silently* hid a broken `!command` token behind "no descriptions".
+    // Say which config and why, once per connection attempt, and still return null.
+    console.error(
+      `[describer] mesh descriptions unavailable (${configPath}): ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
 }

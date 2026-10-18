@@ -205,8 +205,29 @@ is *not* such a moment: parsing only records which form was written, so a
 display-only surface such as `/xfer mesh status` never spawns anything.
 
 A command that fails, exits non-zero, or prints nothing is reported by name
-(`mesh token command "!…" …`), never silently turned into an empty token. The
-whole command has 10 seconds before it is killed.
+(`mesh config "token": mesh token command "!…" …`), never silently turned into an empty token — including
+when the only thing it wrote went to stderr. The whole command has 10 seconds before it is killed.
+
+**Where it runs: in the cwd of whoever asked.** A `!command` inherits the
+working directory of the pi session, daemon or CLI that triggered it — the same
+as a line you typed into that shell. So a **relative path inside it is not
+stable**: `"!./get-token.sh"` resolves against whichever repository you happen to
+have open, which is usually *not* the directory holding `mesh.config.json`. The
+same config then works from one project and fails from another, and (before this
+was reported by name) the failure surfaced as "token invalid" rather than as
+"that file is not here".
+
+**Use an absolute path, `$HOME`, or a command on `PATH`** — `"!$HOME/bin/mesh-token"`
+or `"!pass show mesh-token"`. Relative paths are not made to work: there is no
+directory this could safely resolve against (the config file is data, not code,
+and pi runs `models.json` commands from the process's cwd too). Every failure
+names the cwd and the shell it used, so the reason is visible in the error:
+
+```
+mesh config "token": mesh token command "!./get-token.sh" produced no token
+(exit code 127; cwd "/home/me/other-project", shell /bin/zsh) — no such file or directory
+— a relative path inside the command resolves against the cwd above; use an absolute path or $HOME
+```
 
 > **Security boundary.** A `!command` runs with your own permissions, so **write
 > permission on `mesh.config.json` is equivalent to permission to execute code as
@@ -409,6 +430,7 @@ Run `/xfer doctor` first — its **Mesh** line distinguishes config problems fro
 |---|---|---|
 | Doctor: `not configured (opt-in) — create ~/.pi/xfer/mesh.config.json` | No config file yet | Create it (step 2). This is a normal state — the mesh is opt-in. |
 | Doctor: `config unusable` | Invalid JSON, or missing/empty `endpoint` | Fix the file; the error message names the field. |
+| Doctor: `config unusable: mesh config "token": mesh token command "!…" produced no token` | The `!command` failed — non-zero exit, or nothing on stdout. The message carries the cwd and shell it ran in; if it mentions a file not being found, the command used a **relative** path | Use an absolute path or `$HOME` ([values that are not literals](#values-that-are-not-literals)), then run the command by hand in that same cwd to see what it prints |
 | Doctor: `engine unreachable at <endpoint>` | Engine down, wrong URL, or firewall | `curl <endpoint>/ui` from the same machine; check the engine container and any reverse proxy (it must tolerate long-lived WebSockets). |
 | `mesh up` fails with an auth error | Wrong or missing `token`/`namespace` | Re-copy the values — on Route A the dashboard's single string has to be split into `endpoint`, `namespace` and `token`, since credentials in the URL are refused. If `token` is a `$VAR`, check it is exported in the environment that starts pi. |
 | `mesh up`: node name already exists on the engine | A node with this xfer name was joined before (possibly from another machine) | `/xfer name <other>` and retry, or destroy the stale actor from the engine dashboard (`<endpoint>/ui`). |
