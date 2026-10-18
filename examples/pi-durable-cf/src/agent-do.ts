@@ -64,12 +64,21 @@ export interface Env {
    * out-of-band runner-config must be registered under the same name.
    */
   POOL_NAME?: string;
-  /** Mesh engine endpoint — where the reply is enqueued. */
+  /** Mesh engine endpoint — where the reply is enqueued, and the `endpoint` the registry needs. */
   MESH_ENDPOINT?: string;
   MESH_NAMESPACE?: string;
   MESH_TOKEN?: string;
+  /**
+   * RivetKit's own env-var fallback (`getRivetEndpoint` / `getRivetNamespace`),
+   * read from the process environment. Set both in `wrangler.toml` `[vars]` so
+   * every code path that bypasses the config object agrees with the secrets.
+   */
+  RIVET_ENDPOINT?: string;
+  RIVET_NAMESPACE?: string;
   /** The Worker's own public URL, which the engine calls back into. */
   WORKER_PUBLIC_URL: string;
+  /** Lifespan the serverless pool is configured with, in ms. Defaults to 30000. */
+  SERVERLESS_REQUEST_LIFESPAN_MS?: number;
   /** Absent: the agent echoes. Present: the same round trip goes through DeepSeek. */
   DEEPSEEK_API_KEY?: string;
   DEEPSEEK_MODEL?: string;
