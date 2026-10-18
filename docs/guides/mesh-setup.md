@@ -51,7 +51,10 @@ If `mesh up` connects and then the node fails to start, this is the usual suspec
 
 ## Transport security is your responsibility
 
-**pi-xfer does not encrypt anything, and Rivet does not encrypt anything for it.** Handoff documents
+**pi-xfer does not encrypt anything, and Rivet does not encrypt anything for it.** This is a settled
+decision, not an unfinished one — application-layer encryption was considered and declined because a
+protocol-level tunnel protects strictly more for strictly less work ([ADR 0019](../adr/0019-mesh-transport-security.md)).
+Handoff documents
 travel as plaintext, the engine admin token travels as a plain `Authorization: Bearer …` header (and
 as a WebSocket subprotocol), and the durability you get for offline nodes is plaintext sitting in the
 engine's database. TLS is decided purely by your `endpoint` scheme: `https://` gives you `wss://`,
@@ -80,6 +83,13 @@ Whichever you pick, **this is your responsibility, not pi-xfer's** — the exten
 missing TLS layer and will happily run over plain HTTP. If you are the only operator you can decide
 the risk is acceptable on a trusted network; anyone else reading this should assume it is not.
 
+Ordered by what they actually protect, a **protocol-level tunnel (Tailscale / EasyTier / WireGuard)
+beats a TLS-terminating edge**: the edge sits inside your trust model and reads everything it
+forwards, whereas a peer-to-peer tunnel protects the payload, the admin token and the control plane
+end to end. Also worth knowing: a same-named `xfer-instance` actor cannot be distinguished from a real
+node, and that stays true on any of these shapes — it is an accepted limit, not a config problem.
+Full reasoning and the accepted risks: [ADR 0019](../adr/0019-mesh-transport-security.md).
+
 ### If you terminate TLS at an edge (Cloudflare Tunnel and friends)
 
 A tunnel hides the engine port and supplies HTTPS, but the edge is now part of your threat model:
@@ -92,8 +102,10 @@ Two operational caveats worth knowing before you commit to a tunnel:
 
 - **Long-lived WebSockets get cut.** Cloudflare documents an idle timeout on proxied WebSockets that
   non-Enterprise plans cannot raise (widely observed at ~100 s of silence), and it restarts edge
-  servers on deploys, dropping connections. The mesh's runner and gateway sockets are idle most of
-  the time, so expect reconnects and plan a heartbeat or a tolerance for churn.
+  servers on deploys, dropping connections. **You do not need to add a heartbeat on the pi-xfer
+  side**: the native runner pings the engine continuously on its own (`last_ping_ts` stays 1–3 s
+  fresh), so an edge idle timeout does not reach the runner registration. A cut gateway socket simply
+  reconnects; what you will notice is latency, not a missing heartbeat.
 - **The dashboard comes along.** The engine serves its admin UI at `<endpoint>/ui`. A public tunnel
   to the engine exposes that too; gate the hostname behind the provider's access control or do not
   publish it publicly at all.
@@ -204,6 +216,6 @@ Run `/xfer doctor` first — its **Mesh** line distinguishes config problems fro
 | Send to an offline node errors after ~30 s | Target never came online | Durable queue buffering starts only once the target actor has been created (i.e. it joined at least once). Bring the target online first. |
 | `mesh up` downloads files on first run | Expected | The native runtime is fetched from npm on first `mesh up` and cached locally (see ADR 0013). Needs network access. |
 | Want to see what the mesh did after the fact | The mesh runs quiet, so the pi screen shows nothing — but nothing is dropped either | Read `<xfer-dir>/mesh.log` (`tail -n 50 ~/.pi/xfer/mesh.log`): every `mesh up/down/send`, refusal, failure, inbound handoff and rivetkit JS log line, append-only. [docs/dev/mesh-log.md](../dev/mesh-log.md) explains what it holds and what it cannot. |
-| Connections drop every ~100 s (or on Cloudflare deploys) through a tunnel/edge proxy | The edge cuts idle WebSockets — the runner and gateway sockets are silent most of the time | Expect reconnects; keep the tunnel only if churn is tolerable, or use a private network / your own TLS proxy — [Transport security](#transport-security-is-your-responsibility) |
+| Connections drop every ~100 s (or on Cloudflare deploys) through a tunnel/edge proxy | The edge cuts idle gateway WebSockets. The runner registration is unaffected — it pings continuously. | Expect reconnects and higher latency; nothing to configure on the pi-xfer side. If churn is disruptive, use a private network / your own TLS proxy — [Transport security](#transport-security-is-your-responsibility) |
 | `mesh up` works but every handoff is readable by something on the path | You are on `http://`, or a TLS-terminating edge is in the path | Terminate TLS yourself or use a private network; pi-xfer has no payload encryption — [Transport security](#transport-security-is-your-responsibility) |
 | Want the RivetKit runtime's **native** logs (the Rust side, e.g. SQLite warnings) | Those never reach JS — they are written straight to the process's stdout, so they cannot be filed in `mesh.log` | Launch pi with `RIVET_LOG_LEVEL=warn` (or `debug`): a level you set yourself is respected, the welcome banner stays off. Expect the lines to smear the pi screen — that noise is why the default is `silent`. |
