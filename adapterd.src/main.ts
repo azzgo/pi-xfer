@@ -75,7 +75,7 @@ const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
   xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
   xfer-adapterd send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D]
-  xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P]
+  xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P] [--no-preflight]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 
@@ -266,14 +266,15 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   const stamp = senderStamp(from, dir);
   const document = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   try {
-    await sendMeshHandoff(config, target, {
-      id,
-      from,
-      to: target,
-      summary,
-      document,
-    });
+    const preflight = await sendMeshHandoff(
+      config,
+      target,
+      { id, from, to: target, summary, document },
+      undefined,
+      { preflight: !flags["no-preflight"] },
+    );
     log(id);
+    if (preflight?.warning) fail(`⚠️ ${preflight.warning}`);
   } catch (err) {
     fail(`❌ mesh send to "${target}" failed: ${errorText(err)}`);
   }

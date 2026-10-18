@@ -180,16 +180,17 @@ export default function (pi: ExtensionAPI) {
       }
       try {
         const document = stampHandoffKind(stampDocument(handoff_document, thisCwdStamp()), kind);
-        const { id } = await mesh.send(target, { summary, document });
+        const { id, warning } = await mesh.send(target, { summary, document });
         return {
           content: [{
             type: "text",
             text: `✅ Sent to mesh node "${target}" (handoff_id: ${id})\n\n` +
+                  (warning ? `⚠️ ${warning}\n\n` : "") +
                   (kind === "task"
                     ? `Task handoff — the target returns a conclusion once it has one.`
                     : `Notification handoff — no reply expected unless the target is missing information.`),
           }],
-          details: { target, handoff_id: id, status: "sent" },
+          details: { target, handoff_id: id, status: "sent", ...(warning ? { warning } : {}) },
           structuredContent: { handoff_id: id, target, status: "sent" },
         };
       } catch (err: any) {

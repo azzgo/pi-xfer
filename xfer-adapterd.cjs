@@ -49810,7 +49810,7 @@ var USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
   xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
   xfer-adapterd send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D]
-  xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P]
+  xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P] [--no-preflight]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 async function main(argv = process.argv.slice(2)) {
@@ -49977,14 +49977,15 @@ async function runMeshSend(argv, flags) {
   const stamp = senderStamp(from, dir);
   const document2 = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   try {
-    await sendMeshHandoff2(config3, target2, {
-      id,
-      from,
-      to: target2,
-      summary,
-      document: document2
-    });
+    const preflight = await sendMeshHandoff2(
+      config3,
+      target2,
+      { id, from, to: target2, summary, document: document2 },
+      void 0,
+      { preflight: !flags["no-preflight"] }
+    );
     log(id);
+    if (preflight?.warning) fail(`⚠️ ${preflight.warning}`);
   } catch (err) {
     fail(`❌ mesh send to "${target2}" failed: ${errorText2(err)}`);
   }
