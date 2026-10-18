@@ -31,9 +31,15 @@ The engine being public is the deployment-shape change ADR 0013's serverless exc
 `ensureRunnerPool()` hardcodes `{ normal: {} }`, so it **cannot** create a serverless pool — and no
 command in this repository may be pointed at one. Register it with the engine's own API, once:
 
+The example joins the pool `cloudflare` by default — that value lives in `wrangler.toml` as
+`POOL_NAME`, and the Worker reads it from there (`poolName` in `src/worker.ts`). To use a different
+name, change it in `wrangler.toml` **and** below: this runner-config name is the one string that has
+to match on both sides.
+
 ```bash
-# Replace with your engine endpoint and token.
-curl -sS -X PUT "https://<engine-host>/runner-configs/<pool>?namespace=<ns>" \
+# Replace the engine host/token, and <pool> only if you renamed POOL_NAME.
+# POOL_NAME defaults to: cloudflare
+curl -sS -X PUT "https://<engine-host>/runner-configs/cloudflare?namespace=<ns>" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"datacenters":{"default":{"serverless":{"url":"https://<worker>.workers.dev/api/rivet","headers":{}}}}}'
@@ -45,8 +51,9 @@ Then confirm the engine holds it (a read against the deployment — also 🔴):
 curl -sS "https://<engine-host>/runner-configs?namespace=<ns>" -H "Authorization: Bearer <token>" | jq .
 ```
 
-`<pool>` is the name the actor was placed in; the example's actor is created in that pool by the
-engine when the Worker's registry starts. Nothing in `pi-xfer` needs to learn the name.
+The name must equal `POOL_NAME` in `wrangler.toml` (default `cloudflare`). The Worker's registry
+declares it via `configurePool`, so the actor is placed in that pool when the registry starts;
+`pi-xfer` itself never needs to learn the name.
 
 ## 2. Deploy the Worker 🔴
 

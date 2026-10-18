@@ -46,10 +46,24 @@ export interface AgentReply {
   document: string;
 }
 
+/**
+ * The serverless pool this node joins. `cloudflare` by default; the engine-side
+ * runner-config must carry the same name, which is why the write-up names it in
+ * exactly one place (wrangler.toml) and everywhere else refers to it.
+ */
+export function poolName(env: Pick<Env, "POOL_NAME">): string {
+  return env.POOL_NAME ?? "cloudflare";
+}
+
 export interface Env {
   AGENT: DurableObjectNamespace;
   /** This node's mesh name (the actor key). Defaults to "cf-node". */
   NODE_NAME?: string;
+  /**
+   * The serverless pool this node joins. Defaults to "cloudflare"; the
+   * out-of-band runner-config must be registered under the same name.
+   */
+  POOL_NAME?: string;
   /** Mesh engine endpoint — where the reply is enqueued. */
   MESH_ENDPOINT?: string;
   MESH_NAMESPACE?: string;

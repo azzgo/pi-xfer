@@ -109,9 +109,10 @@ npx esbuild src/worker.ts --bundle --format=esm --platform=neutral --target=es20
 1. Read `VERIFICATION.md` and decide whether to run it — it reaches a real deployment, which is a
    human decision every time.
 2. `npm install && npx wrangler deploy`
-3. Set the secrets it lists, then register the serverless pool out of band. **No pi-xfer command may
-   be pointed at that pool**: `ensureRunnerPool()` hardcodes `{ normal: {} }` and cannot create a
-   serverless one.
+3. Set the secrets it lists, then register the serverless pool out of band. The pool is named
+   `cloudflare` by default (`POOL_NAME` in `wrangler.toml`, read through `poolName()`); rename it in
+   that one place and the register command must carry the same name. **No pi-xfer command may be
+   pointed at it**: `ensureRunnerPool()` hardcodes `{ normal: {} }` and cannot create a serverless one.
 4. Follow `VERIFICATION.md` from step 3.
 
 With no `DEEPSEEK_API_KEY` the node echoes. That is not a stub — it is how the mesh path gets proven
