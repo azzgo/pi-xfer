@@ -26,6 +26,10 @@ migrations:
 # reaches the node, not the other way round, and the control plane is plain HTTP.
 [vars]
 NODE_NAME = "cf-node"
+# The serverless pool this node's actor is placed in. Rename it freely, but the
+# out-of-band runner-config in VERIFICATION.md step 1 must use the same name —
+# it is the one string that has to match on both sides.
+POOL_NAME = "cloudflare"
 # WORKER_PUBLIC_URL must equal the deployed URL below; set it per environment.
 WORKER_PUBLIC_URL = "https://pi-xfer-cf-actor.<your-subdomain>.workers.dev"
 # MESH_ENDPOINT, MESH_NAMESPACE and MESH_TOKEN are secrets, not vars:

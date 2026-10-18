@@ -25,7 +25,7 @@ import { createClient } from "rivetkit/client";
 import { setup } from "rivetkit";
 import * as wasmBindings from "@rivetkit/rivetkit-wasm";
 import wasmModule from "@rivetkit/rivetkit-wasm/rivetkit_wasm_bg.wasm";
-import { AgentDurableObject, type AgentReply, type AgentStorage, type Env } from "./agent-do.ts";
+import { AgentDurableObject, poolName, type AgentReply, type AgentStorage, type Env } from "./agent-do.ts";
 import { createXferInstance, type MeshHandoffMessage } from "./mesh-actor.ts";
 
 /** Actor type and queue the extension uses; keep these in lockstep with mesh-config.ts. */
@@ -97,6 +97,13 @@ export function createRegistry(env: Env) {
       publicEndpoint: env.WORKER_PUBLIC_URL,
       basePath: "/api/rivet",
     },
+    // Join this named serverless pool rather than the engine default, so the
+    // node is addressable as a pool of its own. The engine-side runner-config
+    // for that name is registered out of band (VERIFICATION.md step 1) —
+    // nothing here creates it, and no pi-xfer command may point at it.
+    ...(env.MESH_ENDPOINT
+      ? { configurePool: { name: poolName(env), url: env.MESH_ENDPOINT } }
+      : {}),
     // wasm forces the engine-side SQLite; a local one does not exist here.
     sqlite: { backend: "remote" },
     noWelcome: true,
