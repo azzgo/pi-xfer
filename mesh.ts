@@ -85,9 +85,9 @@ export class MeshNode {
 
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
-   * not currently Running (Sleeping / Crashed / Pending). Adoption re-resolves
-   * the existing actor in this process so the run loop belongs here and durable
-   * actor state (the node description) is preserved; it never destroys.
+   * not currently Running (Sleeping / Idle / Crashed / Pending). Adoption
+   * re-resolves the existing actor in this process so the run loop belongs here
+   * and durable actor state (the node description) is preserved; it never destroys.
    *
    * A Running actor means another host owns the name right now — refusing is the
    * only safe answer, because the same key would silently route this process's

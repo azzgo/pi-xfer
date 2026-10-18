@@ -48619,6 +48619,7 @@ var init_mod3 = __esm({
 var mesh_engine_exports = {};
 __export(mesh_engine_exports, {
   MAX_NODE_DESCRIPTION: () => MAX_NODE_DESCRIPTION,
+  NO_ENVOYS_ERROR: () => NO_ENVOYS_ERROR,
   applyDescriptionAction: () => applyDescriptionAction,
   createRivetEngine: () => createRivetEngine,
   deriveActorStatus: () => deriveActorStatus,
@@ -48649,8 +48650,13 @@ async function applyDescriptionAction(state, value) {
 async function readDescriptionAction(state) {
   return state.description ?? "";
 }
+function isNoEnvoys(error62) {
+  if (typeof error62 === "string") return error62 === NO_ENVOYS_ERROR;
+  return Boolean(error62) && typeof error62 === "object" && error62.message === NO_ENVOYS_ERROR;
+}
 function deriveActorStatus(actor2) {
   if (actor2.destroy_ts !== void 0 && actor2.destroy_ts !== null) return "Destroyed";
+  if (isNoEnvoys(actor2.error)) return "Idle";
   if (actor2.error !== void 0 && actor2.error !== null) return "Crashed";
   if (actor2.sleep_ts !== void 0 && actor2.sleep_ts !== null) return "Sleeping";
   if (actor2.connectable_ts !== void 0 && actor2.connectable_ts !== null) return "Running";
@@ -48711,13 +48717,7 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
       }
     },
     async listNodes() {
-      const actors = await engineApi(config3, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
-      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({
-        name: deserializeKeyString(a.key),
-        actorId: a.actor_id,
-        status: deriveActorStatus(a),
-        ...a.runner_name_selector ? { pool: a.runner_name_selector } : {}
-      }));
+      return fetchMeshNodes(config3);
     },
     async destroyNode(actorId) {
       await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
@@ -48790,21 +48790,39 @@ async function ensureRunnerPool(config3) {
   return { pool, existed: false };
 }
 function listMeshNodes(config3) {
-  return engineApi(config3, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)).then(
-    (actors) => actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }))
+  return fetchMeshNodes(config3);
+}
+async function fetchMeshNodes(config3) {
+  const actors = await engineApi(
+    config3,
+    "GET",
+    "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)
   );
+  return actors.actors.filter(isLiveActor).map(toMeshNodeInfo);
+}
+function isLiveActor(actor2) {
+  return actor2.destroy_ts === void 0 || actor2.destroy_ts === null;
+}
+function toMeshNodeInfo(actor2) {
+  return {
+    name: deserializeKeyString(actor2.key),
+    actorId: actor2.actor_id,
+    status: deriveActorStatus(actor2),
+    ...actor2.runner_name_selector ? { pool: actor2.runner_name_selector } : {}
+  };
 }
 function deserializeKeyString(serialized) {
   const parts = deserializeMeshKey(typeof serialized === "string" ? serialized : void 0);
   return parts[0] ?? "";
 }
-var MAX_NODE_DESCRIPTION, QUEUE_SEND_TIMEOUT_MS;
+var MAX_NODE_DESCRIPTION, NO_ENVOYS_ERROR, QUEUE_SEND_TIMEOUT_MS;
 var init_mesh_engine = __esm({
   "mesh-engine.ts"() {
     init_mesh_config();
     init_mesh_log();
     init_mesh_native();
     MAX_NODE_DESCRIPTION = 500;
+    NO_ENVOYS_ERROR = "no_envoys";
     QUEUE_SEND_TIMEOUT_MS = 3e4;
   }
 });
@@ -49096,9 +49114,9 @@ var MeshNode = class {
   }
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
-   * not currently Running (Sleeping / Crashed / Pending). Adoption re-resolves
-   * the existing actor in this process so the run loop belongs here and durable
-   * actor state (the node description) is preserved; it never destroys.
+   * not currently Running (Sleeping / Idle / Crashed / Pending). Adoption
+   * re-resolves the existing actor in this process so the run loop belongs here
+   * and durable actor state (the node description) is preserved; it never destroys.
    *
    * A Running actor means another host owns the name right now — refusing is the
    * only safe answer, because the same key would silently route this process's

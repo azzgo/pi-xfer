@@ -70,10 +70,22 @@ export async function readDescriptionAction(state: XferInstanceState): Promise<s
 
 /**
  * Engine-visible lifecycle of one actor, derived from its timestamps.
- * `Destroyed` actors are filtered out of listings, so callers see the four
- * adoptable-or-busy states: Running / Sleeping / Crashed / Pending.
+ * `Destroyed` actors are filtered out of listings, so callers see the
+ * adoptable-or-busy states: Running / Sleeping / Idle / Crashed / Pending.
+ *
+ * `Idle` is an actor that is alive on the engine but has no runner (envoy) in
+ * its pool, which the engine reports as `error: "no_envoys"`. It is online but
+ * cannot receive a handoff, which is emphatically not a crash.
  */
-export type MeshActorStatus = "Running" | "Sleeping" | "Crashed" | "Pending" | "Destroyed";
+export type MeshActorStatus = "Running" | "Sleeping" | "Idle" | "Crashed" | "Pending" | "Destroyed";
+
+/** Engine error text for "the actor is alive, but nothing in its pool can run it". */
+export const NO_ENVOYS_ERROR = "no_envoys";
+
+function isNoEnvoys(error: unknown): boolean {
+  if (typeof error === "string") return error === NO_ENVOYS_ERROR;
+  return Boolean(error) && typeof error === "object" && (error as { message?: unknown }).message === NO_ENVOYS_ERROR;
+}
 
 /** Derive an actor's lifecycle status from the engine's raw timestamp fields. */
 export function deriveActorStatus(actor: {
@@ -84,6 +96,7 @@ export function deriveActorStatus(actor: {
   connectable_ts?: number | null;
 }): MeshActorStatus {
   if (actor.destroy_ts !== undefined && actor.destroy_ts !== null) return "Destroyed";
+  if (isNoEnvoys(actor.error)) return "Idle";
   if (actor.error !== undefined && actor.error !== null) return "Crashed";
   if (actor.sleep_ts !== undefined && actor.sleep_ts !== null) return "Sleeping";
   if (actor.connectable_ts !== undefined && actor.connectable_ts !== null) return "Running";
@@ -211,15 +224,7 @@ export function createRivetEngine(
     },
 
     async listNodes() {
-      const actors = await engineApi<{ actors: any[] }>(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
-      return actors.actors
-        .filter((a) => a.destroy_ts === undefined || a.destroy_ts === null)
-        .map((a) => ({
-          name: deserializeKeyString(a.key),
-          actorId: a.actor_id,
-          status: deriveActorStatus(a),
-          ...(a.runner_name_selector ? { pool: a.runner_name_selector } : {}),
-        }));
+      return fetchMeshNodes(config);
     },
 
     async destroyNode(actorId: string) {
@@ -326,12 +331,30 @@ export async function ensureRunnerPool(config: MeshConfig): Promise<{ pool: stri
 }
 
 export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
-  return engineApi<{ actors: any[] }>(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)).then(
-    (actors) =>
-      actors.actors
-        .filter((a) => a.destroy_ts === undefined || a.destroy_ts === null)
-        .map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) })),
+  return fetchMeshNodes(config);
+}
+
+/** One `GET /actors` listing mapped to nodes — the single mapping both listing paths share. */
+async function fetchMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
+  const actors = await engineApi<{ actors: any[] }>(
+    config,
+    "GET",
+    "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR),
   );
+  return actors.actors.filter(isLiveActor).map(toMeshNodeInfo);
+}
+
+function isLiveActor(actor: any): boolean {
+  return actor.destroy_ts === undefined || actor.destroy_ts === null;
+}
+
+function toMeshNodeInfo(actor: any): MeshNodeInfo {
+  return {
+    name: deserializeKeyString(actor.key),
+    actorId: actor.actor_id,
+    status: deriveActorStatus(actor),
+    ...(actor.runner_name_selector ? { pool: actor.runner_name_selector } : {}),
+  };
 }
 
 function deserializeKeyString(serialized: unknown): string {

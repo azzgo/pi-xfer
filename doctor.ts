@@ -184,7 +184,16 @@ async function meshCheck(deps: DoctorDeps): Promise<DoctorCheck> {
   const list = deps.listMeshNodes ?? listMeshNodes;
   try {
     const nodes = await withTimeout(list(config), deps.meshTimeoutMs ?? MESH_PROBE_TIMEOUT_MS);
-    return { name: "Mesh", status: "pass", detail: `engine reachable — ${nodes.length} node(s) on ${config.endpoint}` };
+    const idle = nodes.filter((node) => node.status === "Idle");
+    const detail = `engine reachable — ${nodes.length} node(s) on ${config.endpoint}`;
+    if (!idle.length) return { name: "Mesh", status: "pass", detail };
+    const pools = [...new Set(idle.map((node) => node.pool ?? "(default)"))].join(", ");
+    return {
+      name: "Mesh",
+      status: "warn",
+      detail: `${detail}; ${idle.length} with no runner in pool ${pools}: ${idle.map((node) => node.name).join(", ")}`,
+      fix: `/xfer mesh setup (start a runner for pool ${pools})`,
+    };
   } catch (err) {
     return fail("Mesh", `engine unreachable at ${config.endpoint}: ${message(err)}`, "/xfer mesh list");
   }

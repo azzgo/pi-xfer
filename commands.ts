@@ -381,7 +381,11 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           try {
             const nodes = await mesh.list();
             const status = mesh.status();
-            const lines = nodes.map((n) => `  ${n.name}${status.online && status.name === n.name ? " (this node)" : ""}`);
+            const lines = nodes.map(
+              (n) =>
+                `  ${n.name}${status.online && status.name === n.name ? " (this node)" : ""}` +
+                `${n.status === "Idle" ? ` — idle: no runner in pool "${n.pool ?? "(default)"}"` : ""}`,
+            );
             ctx.ui.notify(nodes.length ? `🌐 Mesh nodes:\n${lines.join("\n")}` : "🌐 No mesh nodes online", "info");
           } catch (err) {
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
