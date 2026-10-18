@@ -48722,9 +48722,9 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
     async preflight(target2) {
       return preflightMeshSend(config3, target2);
     },
-    async queueSend(target2, message) {
+    async queueSend(target2, message, verified) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
-      await preflightMeshSend(config3, target2);
+      if (!verified) await preflightMeshSend(config3, target2);
       const handle = client.get(XFER_INSTANCE_ACTOR, [target2]);
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });

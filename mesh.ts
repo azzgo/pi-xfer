@@ -223,8 +223,9 @@ export class MeshNode {
     const message: MeshHandoffMessage = { id, from, to: target, summary: params.summary, document: params.document };
     let warning: string | null = null;
     try {
-      warning = (await this.engine.preflight(target)).warning;
-      await this.engine.queueSend(target, message);
+      const verified = await this.engine.preflight(target);
+      warning = verified.warning;
+      await this.engine.queueSend(target, message, verified);
     } catch (err) {
       logMeshEvent(this.logPath, "error", "mesh send failed", {
         from,

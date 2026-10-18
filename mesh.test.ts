@@ -25,6 +25,7 @@ import {
   type MeshEngine,
   type MeshHandoffMessage,
   type MeshNodeInfo,
+  type MeshPreflight,
   type MeshRunnerInfo,
   type RivetEngineDeps,
   type XferInstanceState,
@@ -57,10 +58,12 @@ interface FakeEngineState {
   envoys?: MeshRunnerInfo[] | null;
   preflighted: string[];
   preflightBlocked: string[];
+  /** Targets that reached the enqueue, in order — one entry per send attempt. */
+  queued: string[];
 }
 
 function fakeState(): FakeEngineState {
-  return { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [], preflighted: [], preflightBlocked: [] };
+  return { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [], preflighted: [], preflightBlocked: [], queued: [] };
 }
 
 function fakeEngine(state: FakeEngineState): MeshEngine {
@@ -98,7 +101,11 @@ function fakeEngine(state: FakeEngineState): MeshEngine {
       state.destroyed.push(actorId);
       state.nodes = state.nodes.filter((n) => n.actorId !== actorId);
     },
-    async queueSend(target, message) { state.sent.push({ target, message }); },
+    queueSend: (async (target: string, message: MeshHandoffMessage, verified?: MeshPreflight | null) => {
+      state.queued.push(target);
+      if (!verified) await fakeEngine(state).preflight(target);
+      state.sent.push({ target, message });
+    }) as MeshEngine["queueSend"],
     async setDescription(value) {
       const name = state.nodes.find((n) => n.actorId === `actor-${state.ensured.at(-1)}`);
       const key = name?.name ?? state.ensured.at(-1) ?? "";
@@ -674,6 +681,25 @@ describe("mesh messaging", () => {
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await node.up("web");
     assert.equal((await node.send("phone", { summary: "s", document: "d" })).warning, null);
+  });
+
+  it("runs exactly one pre-send check per send, not one per layer", async () => {
+    const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" }], envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    await node.send("phone", { summary: "s", document: "d" });
+    assert.deepEqual(state.preflighted, ["phone"], "one engine round, however many layers ask");
+    assert.deepEqual(state.queued, ["phone"]);
+    assert.equal(state.sent.length, 1);
+  });
+
+  it("still checks exactly once on the warning path", async () => {
+    const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Idle", pool: "host-b" }], envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    const { warning } = await node.send("phone", { summary: "s", document: "d" });
+    assert.match(warning ?? "", /does hold a live runner/);
+    assert.deepEqual(state.preflighted, ["phone"], "the warning comes from that same round");
   });
 
   it("list queries the engine live and requires being online", async () => {
