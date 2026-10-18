@@ -3,7 +3,7 @@
 # Experimental — see README.md. This `package.json` (and `node_modules/`) belongs
 # to the example, not to the pi-xfer extension: the extension itself ships no
 # runtime dependencies, and nothing here sets a precedent for adding one.
-name: "pi-xfer-cf-actor"
+name: "pi-xfer-pi-durable-cf"
 main: "src/worker.ts"
 compatibility_date: "2025-10-01"
 # nodejs_compat is required: rivetkit's logger (pino) reaches for Node builtins
@@ -31,7 +31,7 @@ NODE_NAME = "cf-node"
 # it is the one string that has to match on both sides.
 POOL_NAME = "cloudflare"
 # WORKER_PUBLIC_URL must equal the deployed URL below; set it per environment.
-WORKER_PUBLIC_URL = "https://pi-xfer-cf-actor.<your-subdomain>.workers.dev"
+WORKER_PUBLIC_URL = "https://pi-xfer-pi-durable-cf.<your-subdomain>.workers.dev"
 # MESH_ENDPOINT, MESH_NAMESPACE and MESH_TOKEN are secrets, not vars:
 #   npx wrangler secret put MESH_ENDPOINT
 #   npx wrangler secret put MESH_NAMESPACE     # optional

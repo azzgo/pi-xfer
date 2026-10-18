@@ -19,7 +19,7 @@
  * queue with a rivetkit client. Nothing in that chain waits for a model before
  * the queue message is acked.
  *
- * Experimental: see `examples/cf-actor/README.md`.
+ * Experimental: see `examples/pi-durable-cf/README.md`.
  */
 import { createClient } from "rivetkit/client";
 import { setup } from "rivetkit";

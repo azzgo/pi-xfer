@@ -1,4 +1,4 @@
-# A Cloudflare Worker as one mesh node
+# A Pi Durable agent on Cloudflare, joined to the mesh
 
 > **Experimental, not a supported feature.** No SLA, no network test in CI, no promise across
 > rivetkit majors. This `package.json` and its `node_modules/` belong to the example — the
@@ -6,8 +6,9 @@
 > adding one. If the example breaks on a future rivetkit, the extension is unaffected.
 
 The mesh has always been a set of machines that stay on. This example adds the first kind that does
-not: a Worker hosting one `xfer-instance` actor, bridged to a Durable Object that runs the agent. It
-wakes when there is work, answers, and otherwise costs nothing.
+not: a **Pi Durable agent** running on Cloudflare, reachable as an ordinary mesh node. It wakes when
+there is work, answers, and otherwise costs nothing. The Cloudflare Worker and its `xfer-instance`
+actor are how that agent joins the mesh — the transport, not the point.
 
 Two things are worth saying plainly about what that buys and what it costs:
 

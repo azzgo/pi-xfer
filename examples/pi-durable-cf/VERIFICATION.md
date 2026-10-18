@@ -58,7 +58,7 @@ declares it via `configurePool`, so the actor is placed in that pool when the re
 ## 2. Deploy the Worker 🔴
 
 ```bash
-cd examples/cf-actor
+cd examples/pi-durable-cf
 npm install
 npx wrangler secret put MESH_ENDPOINT     # https://<engine-host>
 npx wrangler secret put MESH_NAMESPACE    # if your engine uses one

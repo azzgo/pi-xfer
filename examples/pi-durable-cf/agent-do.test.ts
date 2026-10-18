@@ -37,7 +37,7 @@ const handoff: MeshHandoffMessage = {
   document: "# hello from the other side",
 };
 
-describe("cf-actor example: the Durable Object's answer", () => {
+describe("pi-durable-cf example: the Durable Object's answer", () => {
   it("echoes without any credential, pairing the answer to the original id", async () => {
     const { agent: doAgent, sent } = makeAgent([]);
     const reply = await doAgent.receive(handoff);
