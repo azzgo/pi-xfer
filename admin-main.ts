@@ -29,7 +29,8 @@ import { Board } from "./board.ts";
 import { BrokerManager } from "./broker-manager.ts";
 import { MESH_PROBE_TIMEOUT_MS, XFER_DIR } from "./constants.ts";
 import { collectGarbage } from "./gc.ts";
-import { listMeshNodes } from "./mesh-engine.ts";
+import { deriveMeshNodeState, listMeshNodes, listMeshState, meshPoolName, type MeshActorStatus, type MeshNodeState, type MeshRunnerInfo } from "./mesh-engine.ts";
+import { MESH_STATE_MARKS, MESH_STATE_ORDER, poolLabel } from "./mesh-status.ts";
 import { loadMeshConfig } from "./mesh-config.ts";
 import { MeshNode } from "./mesh.ts";
 import { isEntryPoint, listPeers, withTimeout } from "./utils.ts";
@@ -134,27 +135,40 @@ interface MeshView {
   configured: boolean;
   error: string | null;
   nodes: MeshNodeRow[];
+  /** `null` = the engine did not answer `/envoys`; every row then reads "unknown". */
+  envoys: MeshRunnerInfo[] | null;
   config: MeshConfig | null;
   self: { name: string; pool: string } | null;
   notice: { tone: "ok" | "warn"; text: string } | null;
 }
 
+const emptyMeshView = (overrides: Partial<MeshView> = {}): MeshView => ({
+  configured: true,
+  error: null,
+  nodes: [],
+  envoys: null,
+  config: null,
+  self: null,
+  notice: null,
+  ...overrides,
+});
+
 async function meshView(xferDir: string, meshNode: MeshNode | null, notice: MeshView["notice"] = null): Promise<MeshView> {
   const configPath = path.join(xferDir, "mesh.config.json");
-  if (!fs.existsSync(configPath)) return { configured: false, error: null, nodes: [], config: null, self: null, notice };
+  if (!fs.existsSync(configPath)) return emptyMeshView({ configured: false, notice });
   let config: MeshConfig;
   try {
     config = loadMeshConfig(configPath);
   } catch (err) {
-    return { configured: true, error: err instanceof Error ? err.message : String(err), nodes: [], config: null, self: null, notice };
+    return emptyMeshView({ error: err instanceof Error ? err.message : String(err), notice });
   }
   const status = meshNode?.status();
   const self = status?.online ? { name: status.name, pool: config.pool ?? "(default)" } : null;
   try {
-    const nodes = await listMeshNodes(config);
-    return { configured: true, error: null, nodes, config, self, notice };
+    const listing = await listMeshState(config);
+    return { configured: true, error: null, nodes: listing.nodes, envoys: listing.envoys, config, self, notice };
   } catch (err) {
-    return { configured: true, error: err instanceof Error ? err.message : String(err), nodes: [], config, self, notice };
+    return emptyMeshView({ error: err instanceof Error ? err.message : String(err), config, self, notice });
   }
 }
 
@@ -162,16 +176,10 @@ async function loadMeshedView(xferDir: string, meshNode: MeshNode | null, notice
   try {
     return await withTimeout(meshView(xferDir, meshNode, notice), MESH_PROBE_TIMEOUT_MS);
   } catch {
-    return {
-      configured: true,
-      error: `engine did not answer within ${MESH_PROBE_TIMEOUT_MS} ms`,
-      nodes: [],
-      config: null,
-      self: null,
-      notice,
-    };
+    return emptyMeshView({ error: `engine did not answer within ${MESH_PROBE_TIMEOUT_MS} ms`, notice });
   }
 }
+
 
 function meshNoticeParam(tone: "ok" | "warn", text: string): string {
   return `notice=${encodeURIComponent(`${tone}|${text}`)}`;
@@ -393,23 +401,35 @@ interface RenderContext {
   brokerProbe: () => Promise<{ port: number } | null>;
 }
 
-const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
-  Running: { dot: "#1a7f37", text: "running" },
-  Sleeping: { dot: "#9a6700", text: "sleeping" },
-  Idle: { dot: "#8250df", text: "idle · no runner" },
-  Crashed: { dot: "#cf222e", text: "crashed" },
-  Pending: { dot: "#0969da", text: "pending" },
-  Unknown: { dot: "#8a8174", text: "unknown" },
+const STATE_COLORS: Record<MeshNodeState, { dot: string; glyph: string }> = {
+  Running: { dot: "#1a7f37", glyph: "●" },
+  Sleeping: { dot: "#9a6700", glyph: "◐" },
+  NoRunner: { dot: "#8250df", glyph: "○" },
+  Mismatch: { dot: "#bc4c00", glyph: "⚠" },
+  Pending: { dot: "#0969da", glyph: "·" },
+  Crashed: { dot: "#cf222e", glyph: "✗" },
+  Unknown: { dot: "#8a8174", glyph: "?" },
 };
 
-const STATUS_LEGEND = `<div class="rules">${[["#1a7f37", "running"], ["#9a6700", "sleeping"], ["#8250df", "idle · no runner"], ["#cf222e", "crashed"], ["#0969da", "pending"]]
-  .map(([dot, label]) => `<span><span class="dot" style="background:${dot}"></span>${label}</span>`).join("")}</div>`;
+const STATUS_LEGEND = `<div class="rules">${MESH_STATE_ORDER
+  .map((state) => `<span><span class="dot" style="background:${STATE_COLORS[state].dot}"></span>${MESH_STATE_MARKS[state].label}</span>`)
+  .join("")}</div>`;
 
 const meshPoolCount = (nodes: MeshNodeRow[]): number =>
-  new Set(nodes.map((node) => node.pool ?? "(default)")).size;
+  new Set(nodes.map((node) => meshPoolName(node.pool))).size;
 
-const meshStatusColor = (status: string | undefined): { dot: string; text: string } =>
-  STATUS_COLORS[status ?? "Unknown"] ?? STATUS_COLORS.Unknown!;
+const meshRowState = (node: MeshNodeRow, mesh: MeshView): MeshNodeState =>
+  deriveMeshNodeState({ status: (node.status ?? "Unknown") as MeshActorStatus, pool: node.pool }, mesh.envoys);
+
+const rowReason = (node: MeshNodeRow, mesh: MeshView): string => {
+  if (mesh.envoys === null) return "engine did not answer /envoys — its pool's runners are unknown";
+  const pool = poolLabel(node.pool);
+  const state = meshRowState(node, mesh);
+  if (state === "NoRunner") return `no runner in pool "${pool}"`;
+  if (state === "Mismatch") return `pool "${pool}" has a runner, but the actor record still reads idle`;
+  if (state === "Sleeping") return `asleep in pool "${pool}" — wakes on delivery`;
+  return "";
+};
 
 const meshDownForm = (node: MeshNodeRow, confirmMessage: string | null): string =>
   `<form method="post" action="/control/mesh/down">` +
@@ -417,18 +437,21 @@ const meshDownForm = (node: MeshNodeRow, confirmMessage: string | null): string 
   `<input type="hidden" name="actor" value="${escAttribute(node.actorId)}">` +
   `<button class="btn sm danger"${confirmMessage ? ` data-confirm="${esc(confirmMessage)}"` : ""}>down</button></form>`;
 
-const meshNodeRow = (node: MeshNodeRow, self: MeshView["self"]): string => {
-  const color = meshStatusColor(node.status);
-  const isSelf = self?.name === node.name;
-  const pool = node.pool ?? "(default)";
+const meshNodeRow = (node: MeshNodeRow, mesh: MeshView): string => {
+  const state = meshRowState(node, mesh);
+  const color = STATE_COLORS[state];
+  const isSelf = mesh.self?.name === node.name;
+  const pool = poolLabel(node.pool);
   const runningElsewhere = node.status === "Running" && !isSelf;
   const confirmMessage = runningElsewhere
     ? `"${node.name}" is Running on another host right now. Destroying its actor cuts that host off mid-session. Destroy it anyway?`
     : null;
+  const reason = rowReason(node, mesh);
   return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">
-    <span class="dot" style="background:${color.dot}"></span><b class="mono">${esc(node.name)}</b>
-    <span class="muted">${color.text}</span>
+    <span class="mono" style="color:${color.dot};width:1em;text-align:center">${color.glyph}</span><b class="mono">${esc(node.name)}</b>
+    <span class="muted">${MESH_STATE_MARKS[state].label}</span>
     <span class="dim mono">pool ${esc(pool)}</span>
+    ${reason ? `<span class="dim">— ${esc(reason)}</span>` : ""}
     ${isSelf ? `<span class="pill" style="color:#8250df;background:#fbefff">this node</span>` : ""}
     <span style="flex:1"></span>${meshDownForm(node, confirmMessage)}</div>`;
 };
@@ -436,8 +459,9 @@ const meshNodeRow = (node: MeshNodeRow, self: MeshView["self"]): string => {
 const meshViewBody = (mesh: MeshView): string => {
   if (!mesh.configured) return `<div class="empty">not configured — no mesh.config.json in the xfer dir</div>`;
   if (mesh.error !== null) return `<div class="notice warn mono">engine error — ${esc(mesh.error)}</div>`;
-  const rows = mesh.nodes.map((node) => meshNodeRow(node, mesh.self)).join("");
-  return `${STATUS_LEGEND}${rows || `<div class="empty">no mesh nodes</div>`}`;
+  const rows = mesh.nodes.map((node) => meshNodeRow(node, mesh)).join("");
+  const unknown = mesh.envoys === null ? `<div class="notice warn mono">the engine did not answer /envoys — every row reads "?"</div>` : "";
+  return `${unknown}${STATUS_LEGEND}${rows || `<div class="empty">no mesh nodes on the engine</div>`}`;
 };
 
 const presenceRows = (peers: PeerRow[]): string =>

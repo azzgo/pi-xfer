@@ -2031,6 +2031,35 @@ async function engineApi(config, method, path10, body) {
 function listMeshNodes(config) {
   return fetchMeshNodes(config);
 }
+function meshPoolName(pool) {
+  return pool || "default";
+}
+function deriveMeshNodeState(node, envoys) {
+  if (envoys === null) return "Unknown";
+  if (node.status === "Destroyed") return "Unknown";
+  const live = envoys.some((envoy) => envoy.pool === meshPoolName(node.pool));
+  if (node.status === "Idle") return live ? "Mismatch" : "NoRunner";
+  if (node.status === "Running" || node.status === "Sleeping" || node.status === "Pending") return live ? node.status : "NoRunner";
+  return node.status;
+}
+function meshListing(nodes, envoys) {
+  return { nodes, envoys: envoys === null ? null : [...envoys] };
+}
+async function listMeshState(config) {
+  const [nodes, envoys] = await Promise.allSettled([fetchMeshNodes(config), fetchMeshEnvoys(config)]);
+  if (nodes.status === "rejected") throw nodes.reason;
+  return meshListing(nodes.value, envoys.status === "fulfilled" ? envoys.value : null);
+}
+async function fetchMeshEnvoys(config) {
+  const response = await engineApi(config, "GET", "/envoys");
+  return (response.envoys ?? []).filter(isLiveRunner).map(toMeshRunnerInfo);
+}
+function isLiveRunner(envoy) {
+  return envoy.stop_ts === void 0 || envoy.stop_ts === null;
+}
+function toMeshRunnerInfo(envoy) {
+  return { pool: envoy.pool_name ?? "default", envoyKey: envoy.envoy_key ?? "", lastPingTs: envoy.last_ping_ts ?? 0 };
+}
 async function fetchMeshNodes(config) {
   const actors = await engineApi(
     config,
@@ -2050,6 +2079,22 @@ function toMeshNodeInfo(actor) {
     status: deriveActorStatus(actor),
     ...actor.runner_name_selector ? { pool: actor.runner_name_selector } : {}
   };
+}
+
+// mesh-status.ts
+var MESH_STATE_ORDER = ["Running", "Sleeping", "NoRunner", "Mismatch", "Pending", "Crashed", "Unknown"];
+var MESH_STATE_MARKS = {
+  Running: { glyph: "●", label: "running" },
+  Sleeping: { glyph: "◐", label: "sleeping" },
+  NoRunner: { glyph: "○", label: "no runner" },
+  Mismatch: { glyph: "⚠", label: "mismatch" },
+  Pending: { glyph: "·", label: "pending" },
+  Crashed: { glyph: "✗", label: "crashed" },
+  Unknown: { glyph: "?", label: "unknown" }
+};
+function poolLabel(pool) {
+  const name = meshPoolName(pool);
+  return name === "default" ? "(default)" : name;
 }
 
 // admin-main.ts
@@ -2096,36 +2141,39 @@ function processAlive2(pid) {
     return err.code === "EPERM";
   }
 }
+var emptyMeshView = (overrides = {}) => ({
+  configured: true,
+  error: null,
+  nodes: [],
+  envoys: null,
+  config: null,
+  self: null,
+  notice: null,
+  ...overrides
+});
 async function meshView(xferDir, meshNode, notice = null) {
   const configPath = path9.join(xferDir, "mesh.config.json");
-  if (!fs8.existsSync(configPath)) return { configured: false, error: null, nodes: [], config: null, self: null, notice };
+  if (!fs8.existsSync(configPath)) return emptyMeshView({ configured: false, notice });
   let config;
   try {
     config = loadMeshConfig(configPath);
   } catch (err) {
-    return { configured: true, error: err instanceof Error ? err.message : String(err), nodes: [], config: null, self: null, notice };
+    return emptyMeshView({ error: err instanceof Error ? err.message : String(err), notice });
   }
   const status = meshNode?.status();
   const self = status?.online ? { name: status.name, pool: config.pool ?? "(default)" } : null;
   try {
-    const nodes = await listMeshNodes(config);
-    return { configured: true, error: null, nodes, config, self, notice };
+    const listing = await listMeshState(config);
+    return { configured: true, error: null, nodes: listing.nodes, envoys: listing.envoys, config, self, notice };
   } catch (err) {
-    return { configured: true, error: err instanceof Error ? err.message : String(err), nodes: [], config, self, notice };
+    return emptyMeshView({ error: err instanceof Error ? err.message : String(err), config, self, notice });
   }
 }
 async function loadMeshedView(xferDir, meshNode, notice = null) {
   try {
     return await withTimeout(meshView(xferDir, meshNode, notice), MESH_PROBE_TIMEOUT_MS);
   } catch {
-    return {
-      configured: true,
-      error: `engine did not answer within ${MESH_PROBE_TIMEOUT_MS} ms`,
-      nodes: [],
-      config: null,
-      self: null,
-      notice
-    };
+    return emptyMeshView({ error: `engine did not answer within ${MESH_PROBE_TIMEOUT_MS} ms`, notice });
   }
 }
 function meshNoticeParam(tone, text) {
@@ -2310,36 +2358,50 @@ var CLIENT_SCRIPT = `<script>
   };
 })();
 </script>`;
-var STATUS_COLORS = {
-  Running: { dot: "#1a7f37", text: "running" },
-  Sleeping: { dot: "#9a6700", text: "sleeping" },
-  Idle: { dot: "#8250df", text: "idle · no runner" },
-  Crashed: { dot: "#cf222e", text: "crashed" },
-  Pending: { dot: "#0969da", text: "pending" },
-  Unknown: { dot: "#8a8174", text: "unknown" }
+var STATE_COLORS = {
+  Running: { dot: "#1a7f37", glyph: "●" },
+  Sleeping: { dot: "#9a6700", glyph: "◐" },
+  NoRunner: { dot: "#8250df", glyph: "○" },
+  Mismatch: { dot: "#bc4c00", glyph: "⚠" },
+  Pending: { dot: "#0969da", glyph: "·" },
+  Crashed: { dot: "#cf222e", glyph: "✗" },
+  Unknown: { dot: "#8a8174", glyph: "?" }
 };
-var STATUS_LEGEND = `<div class="rules">${[["#1a7f37", "running"], ["#9a6700", "sleeping"], ["#8250df", "idle · no runner"], ["#cf222e", "crashed"], ["#0969da", "pending"]].map(([dot, label]) => `<span><span class="dot" style="background:${dot}"></span>${label}</span>`).join("")}</div>`;
-var meshPoolCount = (nodes) => new Set(nodes.map((node) => node.pool ?? "(default)")).size;
-var meshStatusColor = (status) => STATUS_COLORS[status ?? "Unknown"] ?? STATUS_COLORS.Unknown;
+var STATUS_LEGEND = `<div class="rules">${MESH_STATE_ORDER.map((state) => `<span><span class="dot" style="background:${STATE_COLORS[state].dot}"></span>${MESH_STATE_MARKS[state].label}</span>`).join("")}</div>`;
+var meshPoolCount = (nodes) => new Set(nodes.map((node) => meshPoolName(node.pool))).size;
+var meshRowState = (node, mesh) => deriveMeshNodeState({ status: node.status ?? "Unknown", pool: node.pool }, mesh.envoys);
+var rowReason = (node, mesh) => {
+  if (mesh.envoys === null) return "engine did not answer /envoys — its pool's runners are unknown";
+  const pool = poolLabel(node.pool);
+  const state = meshRowState(node, mesh);
+  if (state === "NoRunner") return `no runner in pool "${pool}"`;
+  if (state === "Mismatch") return `pool "${pool}" has a runner, but the actor record still reads idle`;
+  if (state === "Sleeping") return `asleep in pool "${pool}" — wakes on delivery`;
+  return "";
+};
 var meshDownForm = (node, confirmMessage) => `<form method="post" action="/control/mesh/down"><input type="hidden" name="name" value="${escAttribute(node.name)}"><input type="hidden" name="actor" value="${escAttribute(node.actorId)}"><button class="btn sm danger"${confirmMessage ? ` data-confirm="${esc(confirmMessage)}"` : ""}>down</button></form>`;
-var meshNodeRow = (node, self) => {
-  const color = meshStatusColor(node.status);
-  const isSelf = self?.name === node.name;
-  const pool = node.pool ?? "(default)";
+var meshNodeRow = (node, mesh) => {
+  const state = meshRowState(node, mesh);
+  const color = STATE_COLORS[state];
+  const isSelf = mesh.self?.name === node.name;
+  const pool = poolLabel(node.pool);
   const runningElsewhere = node.status === "Running" && !isSelf;
   const confirmMessage = runningElsewhere ? `"${node.name}" is Running on another host right now. Destroying its actor cuts that host off mid-session. Destroy it anyway?` : null;
+  const reason = rowReason(node, mesh);
   return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">
-    <span class="dot" style="background:${color.dot}"></span><b class="mono">${esc(node.name)}</b>
-    <span class="muted">${color.text}</span>
+    <span class="mono" style="color:${color.dot};width:1em;text-align:center">${color.glyph}</span><b class="mono">${esc(node.name)}</b>
+    <span class="muted">${MESH_STATE_MARKS[state].label}</span>
     <span class="dim mono">pool ${esc(pool)}</span>
+    ${reason ? `<span class="dim">— ${esc(reason)}</span>` : ""}
     ${isSelf ? `<span class="pill" style="color:#8250df;background:#fbefff">this node</span>` : ""}
     <span style="flex:1"></span>${meshDownForm(node, confirmMessage)}</div>`;
 };
 var meshViewBody = (mesh) => {
   if (!mesh.configured) return `<div class="empty">not configured — no mesh.config.json in the xfer dir</div>`;
   if (mesh.error !== null) return `<div class="notice warn mono">engine error — ${esc(mesh.error)}</div>`;
-  const rows = mesh.nodes.map((node) => meshNodeRow(node, mesh.self)).join("");
-  return `${STATUS_LEGEND}${rows || `<div class="empty">no mesh nodes</div>`}`;
+  const rows = mesh.nodes.map((node) => meshNodeRow(node, mesh)).join("");
+  const unknown = mesh.envoys === null ? `<div class="notice warn mono">the engine did not answer /envoys — every row reads "?"</div>` : "";
+  return `${unknown}${STATUS_LEGEND}${rows || `<div class="empty">no mesh nodes on the engine</div>`}`;
 };
 var presenceRows = (peers) => peers.length === 0 ? `<div class="empty">no local peers</div>` : peers.map((p) => {
   const col = p.online ? "#1a7f37" : "#cf222e";

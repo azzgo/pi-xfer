@@ -189,8 +189,21 @@ Sanity-check the file at any time with `/xfer doctor` — the **Mesh** line read
 On each machine, in a pi session:
 
 1. `/xfer mesh up` — joins this instance as a Node, using its xfer name. If the name is already taken on the engine, the join is refused (pick another via `/xfer name`).
-2. `/xfer mesh list` — live engine query; you should see both machines' nodes.
-3. Send a cross-machine handoff: `/xfer mesh <other-node-name> <request>`. The document travels inline through the engine's durable queue. If the target node is online it arrives immediately; if it went offline **after having been online**, it is buffered and delivered when it rejoins. A target that has *never* been online is not buffered — the send errors after ~30 s.
+2. `/xfer mesh status` — this host's own answer to "can anything reach me?": online or not, the pool it belongs to, whether that pool holds a live runner, and whether the engine answers. Works with or without `up`.
+3. `/xfer mesh list` — live engine query, one row per node with its delivery verdict. The glyphs are the whole point:
+
+   | | meaning |
+   |---|---|
+   | `●` running | the actor is connectable in its pool |
+   | `◐` sleeping | the actor is asleep in a pool that has a runner — it wakes on delivery |
+   | `○` no runner | **the pool has no runner, so this node cannot receive anything**. The row names the pool, not the node: any actor placed there is equally stranded |
+   | `⚠` mismatch | the actor record still reads idle while its pool does hold a runner — the engine places it on the next send |
+   | `·` pending / `✗` crashed | waiting for an allocation / a real engine error |
+   | `?` unknown | the engine did not answer `/envoys`, so the runner side is unknown. Never rendered as "offline" and never as "no nodes" |
+
+4. Send a cross-machine handoff: `/xfer mesh <other-node-name> <request>`. The document travels inline through the engine's durable queue. If the target node is online it arrives immediately; if it went offline **after having been online**, it is buffered and delivered when it rejoins. A target that has *never* been online is not buffered — the send errors after ~30 s.
+
+   Every send first runs a **pre-send check** (one engine round: `/actors` + `/envoys`, 6 s): a target whose pool has no runner is refused in about a second, naming the pool, instead of costing a 30 s timeout. The check is **fail-closed** — if the engine cannot answer within 6 s, nothing is sent, because an unverified send may hand you the worst outcome (a reported failure about a message that still arrives). A `⚠` mismatch is a warning, not a refusal, and the send proceeds. `xfer-adapterd mesh send --no-preflight` skips the check for hosts that need to send through an unreachable control plane.
 
 Local-side steps (`mesh.config.json` parsing, `mesh up` refusal on name conflict, doctor's Mesh line) are verified against the code in this repo; the full two-machine delivery loop was not re-run while writing this guide and depends on your control plane deployment.
 
@@ -217,5 +230,7 @@ Run `/xfer doctor` first — its **Mesh** line distinguishes config problems fro
 | `mesh up` downloads files on first run | Expected | The native runtime is fetched from npm on first `mesh up` and cached locally (see ADR 0013). Needs network access. |
 | Want to see what the mesh did after the fact | The mesh runs quiet, so the pi screen shows nothing — but nothing is dropped either | Read `<xfer-dir>/mesh.log` (`tail -n 50 ~/.pi/xfer/mesh.log`): every `mesh up/down/send`, refusal, failure, inbound handoff and rivetkit JS log line, append-only. [docs/dev/mesh-log.md](../dev/mesh-log.md) explains what it holds and what it cannot. |
 | Connections drop every ~100 s (or on Cloudflare deploys) through a tunnel/edge proxy | The edge cuts idle gateway WebSockets. The runner registration is unaffected — it pings continuously. | Expect reconnects and higher latency; nothing to configure on the pi-xfer side. If churn is disruptive, use a private network / your own TLS proxy — [Transport security](#transport-security-is-your-responsibility) |
+| `mesh list` shows `○ no runner` for a node, and sends to it are refused at once | The engine has no live runner in that node's pool, so nothing there can pick the actor up | Start a runner for that pool on that machine — open a pi session there (its runtime joins the pool named in its `mesh.config.json`) — then retry. `/xfer mesh status` answers the same question for this host |
+| Every row reads `?` | The engine answered `/actors` but not `/envoys` | Check `/xfer mesh setup`; the runner side of the engine is unreachable even though the actor listing is not. Sends are refused while this lasts (fail-closed) |
 | `mesh up` works but every handoff is readable by something on the path | You are on `http://`, or a TLS-terminating edge is in the path | Terminate TLS yourself or use a private network; pi-xfer has no payload encryption — [Transport security](#transport-security-is-your-responsibility) |
 | Want the RivetKit runtime's **native** logs (the Rust side, e.g. SQLite warnings) | Those never reach JS — they are written straight to the process's stdout, so they cannot be filed in `mesh.log` | Launch pi with `RIVET_LOG_LEVEL=warn` (or `debug`): a level you set yourself is respected, the welcome banner stays off. Expect the lines to smear the pi screen — that noise is why the default is `silent`. |
