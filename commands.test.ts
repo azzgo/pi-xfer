@@ -436,12 +436,23 @@ describe("xfer command: board subcommand", () => {
 });
 
 /** MeshNode stub recording lifecycle calls; configurable status/list results. */
-function stubMesh(overrides: Partial<{ status: () => any; list: () => Promise<any[]>; up: () => Promise<void>; down: () => Promise<void>; setDescription: (text: string) => Promise<string>; describe: (target: string) => Promise<{ name: string; description: string }> }> = {}) {
+function stubMesh(overrides: Partial<{
+  status: () => any;
+  list: () => Promise<any[]>;
+  state: () => Promise<{ nodes: any[]; envoys: any[] | null }>;
+  up: () => Promise<void>;
+  down: () => Promise<void>;
+  setDescription: (text: string) => Promise<string>;
+  describe: (target: string) => Promise<{ name: string; description: string }>;
+}> = {}) {
   const calls: string[] = [];
   return {
     calls,
     status: overrides.status ?? (() => ({ online: false })),
+    config: () => ({ endpoint: "http://localhost:6420", pool: "host-a" }),
     list: overrides.list ?? (async () => { calls.push("list"); return [{ name: "phone", actorId: "a1" }]; }),
+    state: overrides.state ?? (async () => { calls.push("state"); return { nodes: [{ name: "phone", actorId: "a1", status: "Sleeping" }], envoys: [] }; }),
+    preflight: async (target: string) => { calls.push(`preflight ${target}`); return { target, state: "Sleeping", pool: "host-a", warning: null }; },
     up: overrides.up ?? (async () => { calls.push("up"); }),
     down: overrides.down ?? (async () => { calls.push("down"); }),
     send: async (target: string, params: { summary: string; document: string }) => {
@@ -481,13 +492,94 @@ describe("xfer command: mesh subcommand", () => {
   it("list queries the engine live and marks this node", async () => {
     const mesh = stubMesh({
       status: () => ({ online: true, name: "test-agent" }),
-      list: async () => { mesh.calls.push("list"); return [{ name: "phone", actorId: "a1" }, { name: "test-agent", actorId: "a2" }]; },
+      state: async () => {
+        mesh.calls.push("state");
+        return {
+          nodes: [
+            { name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" },
+            { name: "test-agent", actorId: "a2", status: "Running", pool: "host-a" },
+          ],
+          envoys: [
+            { pool: "host-a", envoyKey: "e1", lastPingTs: 1 },
+            { pool: "host-b", envoyKey: "e2", lastPingTs: 1 },
+          ],
+        };
+      },
     });
     const h = harness({ mesh });
     await h.handler("mesh list");
-    assert.deepEqual(mesh.calls, ["list"]);
+    assert.deepEqual(mesh.calls, ["state"]);
     assert.match(h.notifications[0].message, /phone/);
     assert.match(h.notifications[0].message, /test-agent \(this node\)/);
+    assert.match(h.notifications[0].message, /● running/);
+    assert.match(h.notifications[0].message, /◐ sleeping/);
+  });
+
+  it("list names the pool, not the node, when the pool has no runner", async () => {
+    const mesh = stubMesh({
+      state: async () => ({
+        nodes: [{ name: "phone", actorId: "a1", status: "Idle", pool: "host-b" }],
+        envoys: [{ pool: "host-a", envoyKey: "e1", lastPingTs: 1 }],
+      }),
+    });
+    const h = harness({ mesh });
+    await h.handler("mesh list");
+    assert.match(h.notifications[0].message, /○ no runner/);
+    assert.match(h.notifications[0].message, /no runner in pool "host-b"/);
+  });
+
+  it("list renders every row unknown rather than offline when /envoys did not answer", async () => {
+    const mesh = stubMesh({
+      state: async () => ({ nodes: [{ name: "phone", actorId: "a1", status: "Running", pool: "host-b" }], envoys: null }),
+    });
+    const h = harness({ mesh });
+    await h.handler("mesh list");
+    assert.match(h.notifications[0].message, /\? unknown/);
+    assert.doesNotMatch(h.notifications[0].message, /offline/i);
+    assert.doesNotMatch(h.notifications[0].message, /No mesh nodes/);
+  });
+
+  it("status summarises this node: online, pool, runner, node count", async () => {
+    const mesh = stubMesh({
+      status: () => ({ online: true, name: "test-agent" }),
+      state: async () => ({
+        nodes: [
+          { name: "test-agent", actorId: "a1", status: "Running", pool: "host-a" },
+          { name: "phone", actorId: "a2", status: "Sleeping", pool: "host-b" },
+        ],
+        envoys: [{ pool: "host-a", envoyKey: "e1", lastPingTs: 1 }],
+      }),
+    });
+    const h = harness({ mesh });
+    await h.handler("mesh status");
+    const message = h.notifications[0].message;
+    assert.match(message, /online as "test-agent"/);
+    assert.match(message, /1 live runner\(s\) in pool "host-a"/);
+    assert.match(message, /2 node\(s\) on the engine/);
+    assert.match(message, /http:\/\/localhost:6420/);
+  });
+
+  it("status says plainly that a runner-less pool cannot receive, and how to fix it", async () => {
+    const mesh = stubMesh({
+      status: () => ({ online: false }),
+      state: async () => ({ nodes: [], envoys: [] }),
+    });
+    const h = harness({ mesh });
+    await h.handler("mesh status");
+    const message = h.notifications[0].message;
+    assert.match(message, /offline in this session/);
+    assert.match(message, /no runner in pool "host-a" — this machine cannot receive a handoff/);
+    assert.match(message, /→ fix\s+run a runner in pool "host-a"/);
+  });
+
+  it("status points at /xfer mesh setup when the engine is unreachable", async () => {
+    const mesh = stubMesh({ state: async () => { throw new Error("connect ECONNREFUSED"); } });
+    const h = harness({ mesh });
+    await h.handler("mesh status");
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /engine\s+unreachable/);
+    assert.match(h.notifications[0].message, /connect ECONNREFUSED/);
+    assert.match(h.notifications[0].message, /\/xfer mesh setup/);
   });
 
   it("mesh <name> <request> prompts the agent to use xfer_mesh_to", async () => {
@@ -513,7 +605,7 @@ describe("xfer command: mesh subcommand", () => {
     const mesh = stubMesh();
     const h = harness({ mesh });
     assert.deepEqual((h.completions("mesh") ?? []).map((i) => i.value), ["mesh"]);
-    assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "setup", "up"]);
+    assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "setup", "status", "up"]);
   });
 });
 
