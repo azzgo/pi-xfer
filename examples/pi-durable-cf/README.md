@@ -43,11 +43,11 @@ laptop (pi, mesh up)          Cloudflare
 | File | Role |
 |---|---|
 | `src/mesh-actor.ts` | the `xfer-instance` actor — the same state, queue and actions the extension runs |
-| `src/agent-do.ts` | the Durable Object: the agent's memory, the echo, the DeepSeek seam |
-| `src/worker.ts` | the Worker: registry in wasm, the actor, the DO, the reply path |
+| `src/agent-do.ts` | the Durable Object (the agent's memory, the echo, the DeepSeek seam) and the `Env` |
+| `src/worker.ts` | the Worker: registry in wasm, the actor, the DO, the reply path, pool registration |
 | `agent-do.test.ts` | the only part under `npm test` — echo, redelivery, model fallback |
 | `VERIFICATION.md` | the manual closed-loop procedure (the one live-deployment exception) |
-| `wrangler.toml` | DO binding, migration, the vars and secrets |
+| `wrangler.toml` | DO binding, migration, `routes`, the vars and secrets |
 
 ## Two persistence layers, never blurred
 
@@ -105,16 +105,60 @@ npx esbuild src/worker.ts --bundle --format=esm --platform=neutral --target=es20
   --external:async_hooks --external:module --external:'*.wasm' --outfile=dist/worker.js
 ```
 
+And what the *config* needs, which the bundle will not tell you — the first four are what a live run
+taught, and each one fails as something else:
+
+- **`endpoint`** (plus `namespace`/`token`) on the registry config. `configurePool` cannot register
+  without it, and `parseConfig` rejects the whole config on the first request — a Zod error at the
+  edge, not at deploy time.
+- **`configurePool.url` is the Worker's own URL** — `<WORKER_PUBLIC_URL>/api/rivet`, the address the
+  engine POSTs `/start` to. Pointing it at the engine makes the engine call itself and fail as an
+  empty `serverless start payload`.
+- **`serverless.basePath` and that URL path are one string** (`SERVERLESS_BASE_PATH` in
+  `src/worker.ts`): the Worker only routes what starts with it, and the engine only treats
+  `<basePath>/start` as a start.
+- **Everything time-sensitive goes under `ctx.waitUntil`.** `registerSelf` and the in-Worker pool PUT
+  are background IO; without it the isolate cancels them the moment the response returns.
+- `RIVET_ENDPOINT`/`RIVET_NAMESPACE` exist because parts of the wasm runtime read the engine through
+  RivetKit's env-var fallback (`getRivetEndpoint`) rather than the config object. They must agree
+  with the secrets; drift shows up as an actor the registry cannot see.
+
 ## Run it
 
-1. Read `VERIFICATION.md` and decide whether to run it — it reaches a real deployment, which is a
-   human decision every time.
-2. `npm install && npx wrangler deploy`
-3. Set the secrets it lists, then register the serverless pool out of band. The pool is named
-   `cloudflare` by default (`POOL_NAME` in `wrangler.toml`, read through `poolName()`); rename it in
-   that one place and the register command must carry the same name. **No pi-xfer command may be
-   pointed at it**: `ensureRunnerPool()` hardcodes `{ normal: {} }` and cannot create a serverless one.
-4. Follow `VERIFICATION.md` from step 3.
+Proven once on a real deployment — see `VERIFICATION.md` for the recorded result and the nine
+corrections that came out of it. The order below is the order that works; every step marked 🔴
+reaches a real deployment, which is a human decision each time.
+
+1. **Pin the engine.** `rivetdev/engine:2.3.26`, matching this example's rivetkit. `:latest` and
+   `2.3.26` disagreed on the serverless start payload (empty body, `payload too short`). Mount
+   `/etc/rivet/config.json` with `topology.datacenters[].public_url` set to your engine's public
+   hostname, or the engine answers `endpoint_mismatch` when it starts a runner.
+2. 🔴 **Register the pool out of band, before the first deploy.** The pool is named `cloudflare` by
+   default (`POOL_NAME` in `wrangler.toml`, read through `poolName()`); rename it in that one place
+   and the register command must carry the same name. The body points at the **Worker**, never the
+   engine, and carries the lifespan:
+   `{"datacenters":{"default":{"serverless":{"url":"https://<worker-domain>/api/rivet","headers":{},"request_lifespan":30000}}}}`.
+   **No pi-xfer command may be pointed at a serverless pool**: `ensureRunnerPool()` hardcodes
+   `{ normal: {} }` and cannot create one.
+3. **Give the Worker a domain the engine can reach.** `*.workers.dev` is unreachable from an engine
+   on a mainland-China network, and it is the engine that calls the Worker. Set `routes` (a
+   top-level TOML key, **above** `[vars]`), `WORKER_PUBLIC_URL`, and the runner-config `url` to the
+   same host. `npm run check` prints the resolved vars — read them; a `routes` block placed after
+   `[vars]` silently becomes a variable and the domain never exists.
+4. **Configure and deploy.** `MESH_ENDPOINT` (secret) is the engine; `RIVET_ENDPOINT` and
+   `RIVET_NAMESPACE` in `[vars]` are the same engine on RivetKit's own env-var fallback channel, so
+   they must agree. Then `npm install && npm run check && npx wrangler deploy`, and
+   `curl https://<worker-domain>/health` → `{"ok":true,"node":"cf-node","engine":true}`.
+5. 🔴 **First send from a bare rivetkit client.** The engine starts a serverless runner only when
+   there is something to deliver, so on a cold pool the target always reads `○ no runner` — and
+   `xfer-adapterd mesh send`'s pre-check refuses exactly that, by design. `VERIFICATION.md` step 4
+   has the `node -e` script (create-or-get, then enqueue). `mesh send` is the path for a warm pool.
+
+The Worker also registers its own pool (`configurePool`, and an explicit PUT on its first call) so
+the record cannot drift from the out-of-band one — but that only runs once a runner exists, which is
+why step 2 comes first. Its `registerSelf` (`getOrCreate` under `ctx.waitUntil`) is **unproven**: in
+the recorded run the actor was created out of band, so a node in a listing does not yet prove the
+Worker self-registered.
 
 With no `DEEPSEEK_API_KEY` the node echoes. That is not a stub — it is how the mesh path gets proven
 before any credential exists.
