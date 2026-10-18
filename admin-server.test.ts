@@ -367,6 +367,8 @@ describe("admin mesh control — presence grouping", () => {
       assert.match(res.body, /idle · no runner/);
       assert.match(res.body, /pool host-b/);
       assert.match(res.body, /pool \(default\)/);
+      assert.match(res.body, /<b class="mono">mesh<\/b><span class="muted">3 node\(s\) · 3 pool\(s\)<\/span>/, "SERVICES counts nodes and distinct pools");
+      assert.equal((res.body.match(/<form method="post" action="\/control\/mesh\/up"/g) ?? []).length, 1, "the only up action lives in MESH CONTROL");
       assert.match(res.body, /<form method="post" action="\/control\/mesh\/up"/, "the up action carries a name field");
       assert.match(res.body, /class="btn sm primary">up</);
     } finally { stub.restore(); }
@@ -423,7 +425,10 @@ describe("admin mesh control — up / down actions", () => {
       assert.match(h.published.find((e) => e.kind === "mesh")!.text, /mesh node went up — laptop/);
       const page = await get(port, res.location ?? "/control");
       assert.match(page.body, /<div class="notice ok">[^<]*laptop[^<]*is online<\/div>/, "the notice lands on the page it redirects to");
-      assert.match(page.body, /<span class="pill" style="color:#8250df;background:#fbefff">laptop<\/span>/, "the services row names the daemon's own node");
+      assert.deepEqual(mesh.ups, ["laptop"], "the daemon went online under the submitted name");
+      assert.match(page.body, /<b class="mono">mesh<\/b><span class="muted">0 node\(s\) · 0 pool\(s\)<\/span>/, "SERVICES counts the engine listing, not the local node");
+      assert.doesNotMatch(page.body, /<span class="dim">not online<\/span>/, "SERVICES no longer carries the self slot");
+      assert.doesNotMatch(page.body, /<b class="mono">mesh<\/b>[\s\S]{0,200}?(not online|this node)/, "SERVICES stays a statistic, not an action slot");
     } finally { stub.restore(); }
   });
 
