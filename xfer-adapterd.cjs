@@ -74,6 +74,43 @@ var init_constants = __esm({
   }
 });
 
+// utils.ts
+function msgId() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+function encodeAgentName(name) {
+  return encodeURIComponent(name);
+}
+function endpointForName(name, xferDir = XFER_DIR) {
+  return path2.join(xferDir, `${encodeAgentName(name)}.sock`);
+}
+function metadataForName(name, xferDir = XFER_DIR) {
+  return path2.join(xferDir, `${encodeAgentName(name)}.json`);
+}
+function isEntryPoint(names) {
+  const invoked = process.argv[1];
+  if (!invoked) return false;
+  return names.includes(path2.basename(invoked));
+}
+async function withTimeout(promise2, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise2, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+var path2;
+var init_utils = __esm({
+  "utils.ts"() {
+    path2 = __toESM(require("node:path"), 1);
+    init_constants();
+  }
+});
+
 // mesh-config.ts
 function parseMeshConfig(raw) {
   if (typeof raw !== "object" || raw === null) {
@@ -276,7 +313,7 @@ function isMusl() {
 }
 function nativeBindingPath(version2 = RIVETKIT_VERSION, triple = platformTriple(), cacheDir = MESH_CACHE_DIR) {
   if (!triple) throw new Error(`mesh: no rivetkit native binary exists for ${process.platform}-${process.arch}`);
-  return path6.join(cacheDir, "napi", version2, `${triple}.node`);
+  return path5.join(cacheDir, "napi", version2, `${triple}.node`);
 }
 function napiPackageName(triple) {
   return `${NAPI_SCOPE}/${NAPI_BASE}-${triple}`;
@@ -304,8 +341,8 @@ async function downloadNativeBinding(opts) {
   }
   const tgz = Buffer.from(await response.arrayBuffer());
   const addon = extractNodeFromTgz(tgz);
-  fs6.mkdirSync(path6.dirname(dest), { recursive: true, mode: 448 });
-  fs6.writeFileSync(dest, addon, { mode: 384 });
+  fs5.mkdirSync(path5.dirname(dest), { recursive: true, mode: 448 });
+  fs5.writeFileSync(dest, addon, { mode: 384 });
   return dest;
 }
 function extractNodeFromTgz(tgz) {
@@ -372,13 +409,13 @@ function extractTgzToDir(tgz, destDir) {
     offset += padded;
     const rel = name.replace(/^package\/?/, "");
     if (!rel || rel.startsWith("/") || rel.includes("..")) continue;
-    const dest = path6.join(destDir, rel);
+    const dest = path5.join(destDir, rel);
     const mode = Number.parseInt(header.subarray(100, 108).toString("utf8").replace(/[\0 ]*$/g, "").trim(), 8) & 511;
     if (type === "5") {
-      fs6.mkdirSync(dest, { recursive: true });
+      fs5.mkdirSync(dest, { recursive: true });
     } else if (type === "0" || type === "\0") {
-      fs6.mkdirSync(path6.dirname(dest), { recursive: true });
-      fs6.writeFileSync(dest, Buffer.from(body), { mode: mode || 420 });
+      fs5.mkdirSync(path5.dirname(dest), { recursive: true });
+      fs5.writeFileSync(dest, Buffer.from(body), { mode: mode || 420 });
     }
   }
 }
@@ -397,16 +434,16 @@ function engineCliTriple(platform = process.platform, arch = process.arch) {
 async function ensureEngineCliReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
   const triple = engineCliTriple();
   if (!triple) throw new Error("mesh: no engine-cli package exists for this platform");
-  const root = path6.join(cacheDir, "napi", RIVETKIT_VERSION, "engine-cli");
-  const entry = path6.join(root, "node_modules", "@rivetkit", "engine-cli", "index.js");
-  if (fs6.existsSync(entry)) return entry;
+  const root = path5.join(cacheDir, "napi", RIVETKIT_VERSION, "engine-cli");
+  const entry = path5.join(root, "node_modules", "@rivetkit", "engine-cli", "index.js");
+  if (fs5.existsSync(entry)) return entry;
   const registry2 = "https://registry.npmjs.org";
   const fetchImpl0 = fetchImpl ?? fetch;
   const wrapper = await downloadTarball("@rivetkit/engine-cli", RIVETKIT_VERSION, registry2, fetchImpl0);
-  extractTgzToDir(wrapper, path6.join(root, "node_modules", "@rivetkit", "engine-cli"));
+  extractTgzToDir(wrapper, path5.join(root, "node_modules", "@rivetkit", "engine-cli"));
   const platformPkg = `@rivetkit/engine-cli-${triple}`;
   const platform = await downloadTarball(platformPkg, RIVETKIT_VERSION, registry2, fetchImpl0);
-  extractTgzToDir(platform, path6.join(root, "node_modules", "@rivetkit", `engine-cli-${triple}`));
+  extractTgzToDir(platform, path5.join(root, "node_modules", "@rivetkit", `engine-cli-${triple}`));
   return entry;
 }
 function installNapiRequireShim(bindingsPath) {
@@ -420,18 +457,18 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
     );
   }
   const dest = nativeBindingPath(RIVETKIT_VERSION, triple, cacheDir);
-  if (!fs6.existsSync(dest)) {
+  if (!fs5.existsSync(dest)) {
     await downloadNativeBinding({ triple, cacheDir, fetchImpl });
   }
   installNapiRequireShim(dest);
   const engineCliEntry = await ensureEngineCliReady(cacheDir, fetchImpl);
   globalThis.__meshEngineCliEntry = engineCliEntry;
 }
-var fs6, path6, zlib, RIVETKIT_VERSION, NAPI_SCOPE, NAPI_BASE;
+var fs5, path5, zlib, RIVETKIT_VERSION, NAPI_SCOPE, NAPI_BASE;
 var init_mesh_native = __esm({
   "mesh-native.ts"() {
-    fs6 = __toESM(require("node:fs"), 1);
-    path6 = __toESM(require("node:path"), 1);
+    fs5 = __toESM(require("node:fs"), 1);
+    path5 = __toESM(require("node:path"), 1);
     zlib = __toESM(require("node:zlib"), 1);
     init_constants();
     RIVETKIT_VERSION = "2.3.26";
@@ -22508,7 +22545,7 @@ __export(schemas_exports2, {
   undefined: () => _undefined3,
   union: () => union,
   unknown: () => unknown,
-  url: () => url2,
+  url: () => url,
   uuid: () => uuid2,
   uuidv4: () => uuidv4,
   uuidv6: () => uuidv6,
@@ -22546,7 +22583,7 @@ function uuidv6(params) {
 function uuidv7(params) {
   return _uuidv7(ZodUUID, params);
 }
-function url2(params) {
+function url(params) {
   return _url(ZodURL, params);
 }
 function httpUrl(params) {
@@ -25297,7 +25334,7 @@ __export(external_exports, {
   union: () => union,
   unknown: () => unknown,
   uppercase: () => _uppercase,
-  url: () => url2,
+  url: () => url,
   util: () => util_exports,
   uuid: () => uuid2,
   uuidv4: () => uuidv4,
@@ -31760,7 +31797,7 @@ function createBaggage(entries = {}) {
   return new BaggageImpl(new Map(Object.entries(entries)));
 }
 var diag;
-var init_utils = __esm({
+var init_utils2 = __esm({
   "node_modules/@opentelemetry/api/build/esm/baggage/utils.js"() {
     init_diag();
     init_baggage_impl();
@@ -32394,7 +32431,7 @@ var init_tracestate_impl = __esm({
 function createTraceState(rawTraceState) {
   return new TraceStateImpl(rawTraceState);
 }
-var init_utils2 = __esm({
+var init_utils3 = __esm({
   "node_modules/@opentelemetry/api/build/esm/trace/internal/utils.js"() {
     init_tracestate_impl();
   }
@@ -32458,7 +32495,7 @@ var init_propagation = __esm({
     init_NoopTextMapPropagator();
     init_TextMapPropagator();
     init_context_helpers();
-    init_utils();
+    init_utils2();
     init_diag();
     API_NAME3 = "propagation";
     NOOP_TEXT_MAP_PROPAGATOR = new NoopTextMapPropagator();
@@ -32607,7 +32644,7 @@ var init_trace_api = __esm({
 // node_modules/@opentelemetry/api/build/esm/index.js
 var init_esm = __esm({
   "node_modules/@opentelemetry/api/build/esm/index.js"() {
-    init_utils2();
+    init_utils3();
     init_spancontext_utils();
     init_context_api();
     init_propagation_api();
@@ -39382,12 +39419,12 @@ var init_is_symbol = __esm({
 });
 
 // node_modules/@rivetkit/on-change/source/path.js
-var path7, path_default;
+var path6, path_default;
 var init_path = __esm({
   "node_modules/@rivetkit/on-change/source/path.js"() {
     init_constants3();
     init_is_symbol();
-    path7 = {
+    path6 = {
       after(path12, subPath) {
         if (Array.isArray(path12)) {
           return path12.slice(subPath.length);
@@ -39500,7 +39537,7 @@ var init_path = __esm({
         return path12 === "";
       }
     };
-    path_default = path7;
+    path_default = path6;
   }
 });
 
@@ -48619,13 +48656,24 @@ var init_mod3 = __esm({
 var mesh_engine_exports = {};
 __export(mesh_engine_exports, {
   MAX_NODE_DESCRIPTION: () => MAX_NODE_DESCRIPTION,
+  MeshPreflightError: () => MeshPreflightError,
   NO_ENVOYS_ERROR: () => NO_ENVOYS_ERROR,
+  PREFLIGHT_TIMEOUT_MS: () => PREFLIGHT_TIMEOUT_MS,
   applyDescriptionAction: () => applyDescriptionAction,
   createRivetEngine: () => createRivetEngine,
   deriveActorStatus: () => deriveActorStatus,
+  deriveMeshNodeState: () => deriveMeshNodeState,
   ensureRunnerPool: () => ensureRunnerPool,
+  findMeshNode: () => findMeshNode,
   listMeshNodes: () => listMeshNodes,
+  listMeshRunners: () => listMeshRunners,
+  listMeshState: () => listMeshState,
+  meshListing: () => meshListing,
+  meshPoolName: () => meshPoolName,
+  meshPreflightVerdict: () => meshPreflightVerdict,
   normalizeNodeDescription: () => normalizeNodeDescription,
+  preflightMeshSend: () => preflightMeshSend,
+  preflightRemedy: () => preflightRemedy,
   quietMeshRuntime: () => quietMeshRuntime,
   readDescriptionAction: () => readDescriptionAction,
   sendMeshHandoff: () => sendMeshHandoff
@@ -48719,11 +48767,18 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
     async listNodes() {
       return fetchMeshNodes(config3);
     },
+    async state() {
+      return listMeshState(config3);
+    },
     async destroyNode(actorId) {
       await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
     },
+    async preflight(target2) {
+      return preflightMeshSend(config3, target2);
+    },
     async queueSend(target2, message) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
+      await preflightMeshSend(config3, target2);
       const handle = client.get(XFER_INSTANCE_ACTOR, [target2]);
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
@@ -48747,8 +48802,9 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
   };
   return engine;
 }
-async function sendMeshHandoff(config3, target2, message, timeoutMs = QUEUE_SEND_TIMEOUT_MS) {
+async function sendMeshHandoff(config3, target2, message, timeoutMs = QUEUE_SEND_TIMEOUT_MS, options = {}) {
   quietMeshRuntime();
+  const preflight = options.preflight === false ? null : await preflightMeshSend(config3, target2);
   const { createClient: createClient2 } = await Promise.resolve().then(() => (init_mod3(), mod_exports2));
   const client = createClient2({ endpoint: config3.endpoint, namespace: config3.namespace, token: config3.token });
   const handle = client.get(XFER_INSTANCE_ACTOR, [target2]);
@@ -48760,6 +48816,7 @@ async function sendMeshHandoff(config3, target2, message, timeoutMs = QUEUE_SEND
       { cause: err instanceof Error ? err : void 0 }
     );
   }
+  return preflight;
 }
 async function engineApi(config3, method2, path12, body) {
   const url3 = new URL(path12, config3.endpoint);
@@ -48792,6 +48849,38 @@ async function ensureRunnerPool(config3) {
 function listMeshNodes(config3) {
   return fetchMeshNodes(config3);
 }
+function meshPoolName(pool) {
+  return pool || "default";
+}
+function deriveMeshNodeState(node2, envoys) {
+  if (envoys === null) return "Unknown";
+  if (node2.status === "Destroyed") return "Unknown";
+  const live = envoys.some((envoy) => envoy.pool === meshPoolName(node2.pool));
+  if (node2.status === "Idle") return live ? "Mismatch" : "NoRunner";
+  if (node2.status === "Running" || node2.status === "Sleeping" || node2.status === "Pending") return live ? node2.status : "NoRunner";
+  return node2.status;
+}
+function meshListing(nodes, envoys) {
+  return { nodes, envoys: envoys === null ? null : [...envoys] };
+}
+async function listMeshState(config3) {
+  const [nodes, envoys] = await Promise.allSettled([fetchMeshNodes(config3), fetchMeshEnvoys(config3)]);
+  if (nodes.status === "rejected") throw nodes.reason;
+  return meshListing(nodes.value, envoys.status === "fulfilled" ? envoys.value : null);
+}
+async function listMeshRunners(config3) {
+  return fetchMeshEnvoys(config3);
+}
+async function fetchMeshEnvoys(config3) {
+  const response = await engineApi(config3, "GET", "/envoys");
+  return (response.envoys ?? []).filter(isLiveRunner).map(toMeshRunnerInfo);
+}
+function isLiveRunner(envoy) {
+  return envoy.stop_ts === void 0 || envoy.stop_ts === null;
+}
+function toMeshRunnerInfo(envoy) {
+  return { pool: envoy.pool_name ?? "default", envoyKey: envoy.envoy_key ?? "", lastPingTs: envoy.last_ping_ts ?? 0 };
+}
 async function fetchMeshNodes(config3) {
   const actors = await engineApi(
     config3,
@@ -48804,26 +48893,89 @@ function isLiveActor(actor2) {
   return actor2.destroy_ts === void 0 || actor2.destroy_ts === null;
 }
 function toMeshNodeInfo(actor2) {
+  const deserialized = deserializeMeshKey(typeof actor2.key === "string" ? actor2.key : void 0);
   return {
-    name: deserializeKeyString(actor2.key),
+    name: deserialized[0] ?? "",
     actorId: actor2.actor_id,
     status: deriveActorStatus(actor2),
     ...actor2.runner_name_selector ? { pool: actor2.runner_name_selector } : {}
   };
 }
-function deserializeKeyString(serialized) {
-  const parts = deserializeMeshKey(typeof serialized === "string" ? serialized : void 0);
-  return parts[0] ?? "";
+function findMeshNode(nodes, target2) {
+  return nodes.find((node2) => node2.name === target2) ?? null;
 }
-var MAX_NODE_DESCRIPTION, NO_ENVOYS_ERROR, QUEUE_SEND_TIMEOUT_MS;
+function meshPreflightVerdict(state, node2) {
+  const pool = meshPoolName(node2.pool);
+  if (state === "NoRunner") {
+    return {
+      blocked: `"${node2.name}" is online but cannot receive: no runner in pool "${pool}"`,
+      warning: null
+    };
+  }
+  if (state === "Mismatch") {
+    return {
+      blocked: null,
+      warning: `"${node2.name}" reads idle (no runner) in its actor record while pool "${pool}" does hold a live runner — the engine places it on the next send`
+    };
+  }
+  return { blocked: null, warning: null };
+}
+async function preflightMeshSend(config3, target2, timeoutMs = PREFLIGHT_TIMEOUT_MS) {
+  let listing;
+  try {
+    listing = await withTimeout(listMeshState(config3), timeoutMs);
+  } catch (err) {
+    throw new MeshPreflightError(
+      target2,
+      "(unknown)",
+      `mesh: could not check "${target2}" before sending — engine did not answer /actors + /envoys within ${timeoutMs} ms (${err instanceof Error ? err.message : String(err)}). Nothing was sent; the check is deliberately fail-closed so a runner-less pool cannot turn into a 30 s "maybe delivered" timeout. Retry when the engine is reachable, or send without the check via the adapter CLI's --no-preflight`
+    );
+  }
+  if (listing.envoys === null) {
+    throw new MeshPreflightError(
+      target2,
+      "(unknown)",
+      `mesh: could not check "${target2}" before sending — the engine did not answer /envoys, so whether its pool has a runner is unknown. Nothing was sent; verify with /xfer mesh list, or send without the check via the adapter CLI's --no-preflight`
+    );
+  }
+  const node2 = findMeshNode(listing.nodes, target2);
+  if (!node2) {
+    throw new MeshPreflightError(
+      target2,
+      "(none)",
+      `mesh: no mesh node named "${target2}" on the engine — it was never brought up there (/xfer mesh up on that machine) or its actor was destroyed. Nothing was sent`
+    );
+  }
+  const state = deriveMeshNodeState(node2, listing.envoys);
+  const pool = meshPoolName(node2.pool);
+  const verdict = meshPreflightVerdict(state, node2);
+  if (verdict.blocked) throw new MeshPreflightError(target2, pool, `${verdict.blocked}. Nothing was sent — ${preflightRemedy(pool)}`);
+  return { target: target2, state, pool, warning: verdict.warning };
+}
+function preflightRemedy(pool) {
+  return `start a runner for pool "${pool}" on that machine (open pi there) and retry`;
+}
+var MAX_NODE_DESCRIPTION, NO_ENVOYS_ERROR, QUEUE_SEND_TIMEOUT_MS, PREFLIGHT_TIMEOUT_MS, MeshPreflightError;
 var init_mesh_engine = __esm({
   "mesh-engine.ts"() {
     init_mesh_config();
     init_mesh_log();
     init_mesh_native();
+    init_utils();
     MAX_NODE_DESCRIPTION = 500;
     NO_ENVOYS_ERROR = "no_envoys";
     QUEUE_SEND_TIMEOUT_MS = 3e4;
+    PREFLIGHT_TIMEOUT_MS = 6e3;
+    MeshPreflightError = class extends Error {
+      target;
+      pool;
+      constructor(target2, pool, message) {
+        super(message);
+        this.name = "MeshPreflightError";
+        this.target = target2;
+        this.pool = pool;
+      }
+    };
   }
 });
 
@@ -48902,29 +49054,7 @@ var path11 = __toESM(require("node:path"), 1);
 var fs = __toESM(require("node:fs"), 1);
 var net = __toESM(require("node:net"), 1);
 init_constants();
-
-// utils.ts
-var path2 = __toESM(require("node:path"), 1);
-init_constants();
-function msgId() {
-  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
-}
-function encodeAgentName(name) {
-  return encodeURIComponent(name);
-}
-function endpointForName(name, xferDir = XFER_DIR) {
-  return path2.join(xferDir, `${encodeAgentName(name)}.sock`);
-}
-function metadataForName(name, xferDir = XFER_DIR) {
-  return path2.join(xferDir, `${encodeAgentName(name)}.json`);
-}
-function isEntryPoint(names) {
-  const invoked = process.argv[1];
-  if (!invoked) return false;
-  return names.includes(path2.basename(invoked));
-}
-
-// client.ts
+init_utils();
 function sendNotify(target2, msg, xferDir) {
   return new Promise((resolve2, reject) => {
     const endpoint = endpointForName(target2, xferDir);
@@ -49061,6 +49191,9 @@ function senderCwdStampFor(cwd, machine) {
   };
 }
 
+// adapterd.src/main.ts
+init_utils();
+
 // adapterd.src/daemon.ts
 var fs8 = __toESM(require("node:fs"), 1);
 var path9 = __toESM(require("node:path"), 1);
@@ -49068,15 +49201,17 @@ var import_node_child_process = require("node:child_process");
 init_constants();
 
 // mesh.ts
-var fs5 = __toESM(require("node:fs"), 1);
+var fs6 = __toESM(require("node:fs"), 1);
 var os2 = __toESM(require("node:os"), 1);
-var path5 = __toESM(require("node:path"), 1);
-var url = __toESM(require("node:url"), 1);
+var path7 = __toESM(require("node:path"), 1);
+var url2 = __toESM(require("node:url"), 1);
 init_mesh_config();
+init_mesh_engine();
 init_mesh_log();
+init_utils();
 var MESH_RUNTIME_BUNDLE = "mesh-runtime.cjs";
 async function loadMeshRuntimeBundle(dir = __dirname) {
-  const bundleUrl = url.pathToFileURL(path5.join(dir, MESH_RUNTIME_BUNDLE)).href;
+  const bundleUrl = url2.pathToFileURL(path7.join(dir, MESH_RUNTIME_BUNDLE)).href;
   try {
     const mod = await import(bundleUrl);
     if (typeof mod?.createRivetEngine !== "function") throw new Error("bundle does not export createRivetEngine");
@@ -49108,9 +49243,32 @@ var MeshNode = class {
   status() {
     return this.engine && this.nodeName ? { online: true, name: this.nodeName } : { online: false };
   }
+  /** The pool this host's runner joins, and the engine it points at. */
+  config() {
+    return this.configOverride ?? loadMeshConfig(this.configPath);
+  }
   /** Live engine listing of all mesh nodes (no cache). */
   async list() {
     return this.requireEngine().listNodes();
+  }
+  /**
+   * Live listing plus the runner side of the same engine round, for surfaces
+   * that must say whether a node can actually receive (`/xfer mesh list`).
+   * Works without an engine of our own: listing is an observer operation, so it
+   * answers with or without `up`.
+   */
+  async state() {
+    return this.engine ? this.engine.state() : listMeshState(this.configOverride ?? loadMeshConfig(this.configPath));
+  }
+  /** One node's verdict, joined against its pool's live runners. */
+  async nodeState(target2) {
+    const listing = await this.state();
+    const node2 = findMeshNode(listing.nodes, target2);
+    return { node: node2, state: node2 ? deriveMeshNodeState(node2, listing.envoys) : "Unknown", listing };
+  }
+  /** Pre-send check for a target; rejects with MeshPreflightError when it cannot receive. */
+  async preflight(target2) {
+    return this.engine ? this.engine.preflight(target2) : preflightMeshSend(this.configOverride ?? loadMeshConfig(this.configPath), target2);
   }
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
@@ -49211,7 +49369,9 @@ var MeshNode = class {
     const from = this.nodeName;
     if (!this.engine || !from) throw new Error("mesh is not online — run /xfer mesh up first");
     const message = { id, from, to: target2, summary: params.summary, document: params.document };
+    let warning = null;
     try {
+      warning = (await this.engine.preflight(target2)).warning;
       await this.engine.queueSend(target2, message);
     } catch (err) {
       logMeshEvent(this.logPath, "error", "mesh send failed", {
@@ -49224,7 +49384,7 @@ var MeshNode = class {
       throw err;
     }
     logMeshEvent(this.logPath, "info", "mesh send", { from, to: target2, id, bytes: params.document.length });
-    return { id };
+    return { id, warning };
   }
   async shutdown() {
     if (!this.engine) return;
@@ -49265,8 +49425,8 @@ var MeshNode = class {
       this.onMisroute(message, selfKey);
       return;
     }
-    const docPath = path5.join(os2.tmpdir(), `pi-xfer-${message.id}.md`);
-    fs5.writeFileSync(docPath, message.document, { encoding: "utf-8", mode: 384 });
+    const docPath = path7.join(os2.tmpdir(), `pi-xfer-${message.id}.md`);
+    fs6.writeFileSync(docPath, message.document, { encoding: "utf-8", mode: 384 });
     logMeshEvent(this.logPath, "info", "mesh inbound", {
       id: message.id,
       from: message.from,
@@ -49350,10 +49510,14 @@ function createServer2(delivery) {
   });
 }
 
+// adapterd.src/daemon.ts
+init_utils();
+
 // adapterd.src/inbox.ts
 var fs7 = __toESM(require("node:fs"), 1);
 var path8 = __toESM(require("node:path"), 1);
 init_constants();
+init_utils();
 function inboxPathForName(name, dir = XFER_DIR) {
   return path8.join(dir, `${encodeAgentName(name)}.inbox.jsonl`);
 }

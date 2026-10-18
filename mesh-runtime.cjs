@@ -48607,6 +48607,19 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
   globalThis.__meshEngineCliEntry = engineCliEntry;
 }
 
+// utils.ts
+async function withTimeout(promise2, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise2, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // mesh-engine.ts
 var MAX_NODE_DESCRIPTION = 500;
 function quietMeshRuntime() {
@@ -48700,11 +48713,18 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
     async listNodes() {
       return fetchMeshNodes(config3);
     },
+    async state() {
+      return listMeshState(config3);
+    },
     async destroyNode(actorId) {
       await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
     },
+    async preflight(target2) {
+      return preflightMeshSend(config3, target2);
+    },
     async queueSend(target2, message) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
+      await preflightMeshSend(config3, target2);
       const handle = client.get(XFER_INSTANCE_ACTOR, [target2]);
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
@@ -48740,6 +48760,35 @@ async function engineApi(config3, method2, path5, body) {
   }
   return await response.json();
 }
+function meshPoolName(pool) {
+  return pool || "default";
+}
+function deriveMeshNodeState(node2, envoys) {
+  if (envoys === null) return "Unknown";
+  if (node2.status === "Destroyed") return "Unknown";
+  const live = envoys.some((envoy) => envoy.pool === meshPoolName(node2.pool));
+  if (node2.status === "Idle") return live ? "Mismatch" : "NoRunner";
+  if (node2.status === "Running" || node2.status === "Sleeping" || node2.status === "Pending") return live ? node2.status : "NoRunner";
+  return node2.status;
+}
+function meshListing(nodes, envoys) {
+  return { nodes, envoys: envoys === null ? null : [...envoys] };
+}
+async function listMeshState(config3) {
+  const [nodes, envoys] = await Promise.allSettled([fetchMeshNodes(config3), fetchMeshEnvoys(config3)]);
+  if (nodes.status === "rejected") throw nodes.reason;
+  return meshListing(nodes.value, envoys.status === "fulfilled" ? envoys.value : null);
+}
+async function fetchMeshEnvoys(config3) {
+  const response = await engineApi(config3, "GET", "/envoys");
+  return (response.envoys ?? []).filter(isLiveRunner).map(toMeshRunnerInfo);
+}
+function isLiveRunner(envoy) {
+  return envoy.stop_ts === void 0 || envoy.stop_ts === null;
+}
+function toMeshRunnerInfo(envoy) {
+  return { pool: envoy.pool_name ?? "default", envoyKey: envoy.envoy_key ?? "", lastPingTs: envoy.last_ping_ts ?? 0 };
+}
 async function fetchMeshNodes(config3) {
   const actors = await engineApi(
     config3,
@@ -48752,16 +48801,78 @@ function isLiveActor(actor2) {
   return actor2.destroy_ts === void 0 || actor2.destroy_ts === null;
 }
 function toMeshNodeInfo(actor2) {
+  const deserialized = deserializeMeshKey(typeof actor2.key === "string" ? actor2.key : void 0);
   return {
-    name: deserializeKeyString(actor2.key),
+    name: deserialized[0] ?? "",
     actorId: actor2.actor_id,
     status: deriveActorStatus(actor2),
     ...actor2.runner_name_selector ? { pool: actor2.runner_name_selector } : {}
   };
 }
-function deserializeKeyString(serialized) {
-  const parts = deserializeMeshKey(typeof serialized === "string" ? serialized : void 0);
-  return parts[0] ?? "";
+function findMeshNode(nodes, target2) {
+  return nodes.find((node2) => node2.name === target2) ?? null;
+}
+var PREFLIGHT_TIMEOUT_MS = 6e3;
+function meshPreflightVerdict(state, node2) {
+  const pool = meshPoolName(node2.pool);
+  if (state === "NoRunner") {
+    return {
+      blocked: `"${node2.name}" is online but cannot receive: no runner in pool "${pool}"`,
+      warning: null
+    };
+  }
+  if (state === "Mismatch") {
+    return {
+      blocked: null,
+      warning: `"${node2.name}" reads idle (no runner) in its actor record while pool "${pool}" does hold a live runner — the engine places it on the next send`
+    };
+  }
+  return { blocked: null, warning: null };
+}
+var MeshPreflightError = class extends Error {
+  target;
+  pool;
+  constructor(target2, pool, message) {
+    super(message);
+    this.name = "MeshPreflightError";
+    this.target = target2;
+    this.pool = pool;
+  }
+};
+async function preflightMeshSend(config3, target2, timeoutMs = PREFLIGHT_TIMEOUT_MS) {
+  let listing;
+  try {
+    listing = await withTimeout(listMeshState(config3), timeoutMs);
+  } catch (err) {
+    throw new MeshPreflightError(
+      target2,
+      "(unknown)",
+      `mesh: could not check "${target2}" before sending — engine did not answer /actors + /envoys within ${timeoutMs} ms (${err instanceof Error ? err.message : String(err)}). Nothing was sent; the check is deliberately fail-closed so a runner-less pool cannot turn into a 30 s "maybe delivered" timeout. Retry when the engine is reachable, or send without the check via the adapter CLI's --no-preflight`
+    );
+  }
+  if (listing.envoys === null) {
+    throw new MeshPreflightError(
+      target2,
+      "(unknown)",
+      `mesh: could not check "${target2}" before sending — the engine did not answer /envoys, so whether its pool has a runner is unknown. Nothing was sent; verify with /xfer mesh list, or send without the check via the adapter CLI's --no-preflight`
+    );
+  }
+  const node2 = findMeshNode(listing.nodes, target2);
+  if (!node2) {
+    throw new MeshPreflightError(
+      target2,
+      "(none)",
+      `mesh: no mesh node named "${target2}" on the engine — it was never brought up there (/xfer mesh up on that machine) or its actor was destroyed. Nothing was sent`
+    );
+  }
+  const state = deriveMeshNodeState(node2, listing.envoys);
+  const pool = meshPoolName(node2.pool);
+  const verdict = meshPreflightVerdict(state, node2);
+  if (verdict.blocked) throw new MeshPreflightError(target2, pool, `${verdict.blocked}. Nothing was sent — ${preflightRemedy(pool)}`);
+  return { target: target2, state, pool, warning: verdict.warning };
+}
+function preflightRemedy(pool) {
+  return `start a runner for pool "${pool}" on that machine (open pi there) and retry`;
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

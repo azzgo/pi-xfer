@@ -1,6 +1,7 @@
 import { HANDOFF_QUEUE, XFER_INSTANCE_ACTOR, deserializeMeshKey, type MeshConfig } from "./mesh-config.ts";
 import { createMeshLogSink } from "./mesh-log.ts";
 import { ensureNativeRuntimeReady } from "./mesh-native.ts";
+import { withTimeout } from "./utils.ts";
 
 /** Inline handoff payload carried by the mesh handoff queue. */
 export interface MeshHandoffMessage {
@@ -125,10 +126,14 @@ export interface MeshEngine {
   stop(): Promise<void>;
   /** Live engine query: all nodes for the xfer-instance actor type. */
   listNodes(): Promise<MeshNodeInfo[]>;
+  /** Same listing with the runner side (`/envoys`), for delivery-verdict surfaces. */
+  state(): Promise<MeshListing>;
   /** Permanently destroy one actor. */
   destroyNode(actorId: string): Promise<void>;
   /** Fire-and-forget enqueue of an inline handoff to the target node. */
   queueSend(target: string, message: MeshHandoffMessage): Promise<void>;
+  /** Pre-send check: rejects with {@link MeshPreflightError} when the target cannot receive. */
+  preflight(target: string): Promise<MeshPreflight>;
   /** Set this node's own description; resolves with the stored (normalized) value. */
   setDescription(value: string): Promise<string>;
   /** Read one node's description by name; rejects when the node is unreachable. */
@@ -227,12 +232,21 @@ export function createRivetEngine(
       return fetchMeshNodes(config);
     },
 
+    async state() {
+      return listMeshState(config);
+    },
+
     async destroyNode(actorId: string) {
       await engineApi(config, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
     },
 
+    async preflight(target: string): Promise<MeshPreflight> {
+      return preflightMeshSend(config, target);
+    },
+
     async queueSend(target: string, message: MeshHandoffMessage) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
+      await preflightMeshSend(config, target);
       const handle = client.get(XFER_INSTANCE_ACTOR, [target]);
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
@@ -271,8 +285,10 @@ export async function sendMeshHandoff(
   target: string,
   message: MeshHandoffMessage,
   timeoutMs: number = QUEUE_SEND_TIMEOUT_MS,
-): Promise<void> {
+  options: { preflight?: boolean } = {},
+): Promise<MeshPreflight | null> {
   quietMeshRuntime();
+  const preflight = options.preflight === false ? null : await preflightMeshSend(config, target);
   const { createClient } = await import("rivetkit/client");
   const client = createClient({ endpoint: config.endpoint, namespace: config.namespace, token: config.token });
   const handle = client.get(XFER_INSTANCE_ACTOR, [target]);
@@ -285,9 +301,9 @@ export async function sendMeshHandoff(
       { cause: err instanceof Error ? err : undefined },
     );
   }
+  return preflight;
 }
 
-/** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
 async function engineApi<T>(config: MeshConfig, method: string, path: string, body?: unknown): Promise<T> {
   const url = new URL(path, config.endpoint);
@@ -334,6 +350,81 @@ export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
   return fetchMeshNodes(config);
 }
 
+/**
+ * One node's verdict, from two engine facts rather than one: what the actor
+ * record says about the actor, and whether its pool holds a live runner. The
+ * record alone cannot be trusted for "can this node receive a handoff" — a
+ * runner-less actor keeps reading `no_envoys` after its pool gained a runner,
+ * and a `no_envoys` actor may yet be placed. No engine runner data (`envoys` is
+ * null) yields `Unknown`; it is never rendered as "offline" or "no nodes".
+ */
+export type MeshNodeState = "Running" | "Sleeping" | "NoRunner" | "Mismatch" | "Crashed" | "Pending" | "Unknown";
+
+/** One live runner in an engine pool (`GET /envoys`). */
+export interface MeshRunnerInfo {
+  pool: string;
+  envoyKey: string;
+  /** Engine clock timestamp — not comparable with a local `Date.now()` delta. */
+  lastPingTs: number;
+}
+
+export interface MeshListing {
+  nodes: MeshNodeInfo[];
+  /** Live runners by pool name; `null` = the engine did not answer `/envoys`. */
+  envoys: MeshRunnerInfo[] | null;
+}
+
+/** Engine pool of an actor/node: an absent selector means the engine's default pool. */
+export function meshPoolName(pool: string | undefined): string {
+  return pool || "default";
+}
+
+/** Join one actor with the runners its pool holds. */
+export function deriveMeshNodeState(
+  node: Pick<MeshNodeInfo, "status" | "pool">,
+  envoys: readonly MeshRunnerInfo[] | null,
+): MeshNodeState {
+  if (envoys === null) return "Unknown";
+  if (node.status === "Destroyed") return "Unknown";
+  const live = envoys.some((envoy) => envoy.pool === meshPoolName(node.pool));
+  if (node.status === "Idle") return live ? "Mismatch" : "NoRunner";
+  if (node.status === "Running" || node.status === "Sleeping" || node.status === "Pending") return live ? node.status : "NoRunner";
+  return node.status;
+}
+
+/** Engine verdict for a whole listing: one engine round, both facts. */
+export function meshListing(
+  nodes: MeshNodeInfo[],
+  envoys: readonly MeshRunnerInfo[] | null,
+): MeshListing {
+  return { nodes, envoys: envoys === null ? null : [...envoys] };
+}
+
+/** Read both engine facts at once: actor records plus live runners. Either may fail independently. */
+export async function listMeshState(config: MeshConfig): Promise<MeshListing> {
+  const [nodes, envoys] = await Promise.allSettled([fetchMeshNodes(config), fetchMeshEnvoys(config)]);
+  if (nodes.status === "rejected") throw nodes.reason;
+  return meshListing(nodes.value, envoys.status === "fulfilled" ? envoys.value : null);
+}
+
+/** Live runners on the engine, filtered to those a pool can actually run work on. */
+export async function listMeshRunners(config: MeshConfig): Promise<MeshRunnerInfo[]> {
+  return fetchMeshEnvoys(config);
+}
+
+async function fetchMeshEnvoys(config: MeshConfig): Promise<MeshRunnerInfo[]> {
+  const response = await engineApi<{ envoys: any[] }>(config, "GET", "/envoys");
+  return (response.envoys ?? []).filter(isLiveRunner).map(toMeshRunnerInfo);
+}
+
+function isLiveRunner(envoy: any): boolean {
+  return envoy.stop_ts === undefined || envoy.stop_ts === null;
+}
+
+function toMeshRunnerInfo(envoy: any): MeshRunnerInfo {
+  return { pool: envoy.pool_name ?? "default", envoyKey: envoy.envoy_key ?? "", lastPingTs: envoy.last_ping_ts ?? 0 };
+}
+
 /** One `GET /actors` listing mapped to nodes — the single mapping both listing paths share. */
 async function fetchMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
   const actors = await engineApi<{ actors: any[] }>(
@@ -349,15 +440,123 @@ function isLiveActor(actor: any): boolean {
 }
 
 function toMeshNodeInfo(actor: any): MeshNodeInfo {
+  const deserialized = deserializeMeshKey(typeof actor.key === "string" ? actor.key : undefined);
   return {
-    name: deserializeKeyString(actor.key),
+    name: deserialized[0] ?? "",
     actorId: actor.actor_id,
     status: deriveActorStatus(actor),
     ...(actor.runner_name_selector ? { pool: actor.runner_name_selector } : {}),
   };
 }
 
-function deserializeKeyString(serialized: unknown): string {
-  const parts = deserializeMeshKey(typeof serialized === "string" ? serialized : undefined);
-  return parts[0] ?? "";
+/** The node one send targets, or `null` when the engine lists no such node. */
+export function findMeshNode(nodes: readonly MeshNodeInfo[], target: string): MeshNodeInfo | null {
+  return nodes.find((node) => node.name === target) ?? null;
+}
+
+/**
+ * Timeout policy for the pre-send check: a timeout is **a failed precheck**, not
+ * a silent pass. A send into a pool with no runner costs 30 s and reads as
+ * "failed" about a message that may still arrive (P0-B's ambiguity); refusing
+ * for one second of uncertainty is the cheap side of that trade. It never
+ * implies the message was sent, and it says how to skip the check.
+ */
+export const PREFLIGHT_TIMEOUT_MS = 6_000;
+
+/**
+ * Refuse an enqueue whose target cannot receive it. Engine truth beats the
+ * actor record: a pool with no live runner at all blocks, a runner-less actor
+ * whose pool does hold a runner is only a warning.
+ */
+export function meshPreflightVerdict(
+  state: MeshNodeState,
+  node: Pick<MeshNodeInfo, "name" | "pool">,
+): { blocked: string | null; warning: string | null } {
+  const pool = meshPoolName(node.pool);
+  if (state === "NoRunner") {
+    return {
+      blocked: `"${node.name}" is online but cannot receive: no runner in pool "${pool}"`,
+      warning: null,
+    };
+  }
+  if (state === "Mismatch") {
+    return {
+      blocked: null,
+      warning:
+        `"${node.name}" reads idle (no runner) in its actor record while pool "${pool}" does hold a live runner — ` +
+        `the engine places it on the next send`,
+    };
+  }
+  return { blocked: null, warning: null };
+}
+
+/** Raised by the pre-send check so callers can present a refusal apart from a transport failure. */
+export class MeshPreflightError extends Error {
+  readonly target: string;
+  readonly pool: string;
+  constructor(target: string, pool: string, message: string) {
+    super(message);
+    this.name = "MeshPreflightError";
+    this.target = target;
+    this.pool = pool;
+  }
+}
+
+export interface MeshPreflight {
+  target: string;
+  state: MeshNodeState;
+  pool: string;
+  warning: string | null;
+}
+
+/**
+ * Blocking pre-send check: one engine round (actors + envoys, `PREFLIGHT_TIMEOUT_MS`)
+ * before the enqueue. Throws {@link MeshPreflightError} when the target cannot
+ * receive, so the caller reports "not sent" instead of a 30 s enqueue timeout.
+ */
+export async function preflightMeshSend(
+  config: MeshConfig,
+  target: string,
+  timeoutMs: number = PREFLIGHT_TIMEOUT_MS,
+): Promise<MeshPreflight> {
+  let listing: MeshListing;
+  try {
+    listing = await withTimeout(listMeshState(config), timeoutMs);
+  } catch (err) {
+    throw new MeshPreflightError(
+      target,
+      "(unknown)",
+      `mesh: could not check "${target}" before sending — engine did not answer /actors + /envoys within ${timeoutMs} ms ` +
+        `(${err instanceof Error ? err.message : String(err)}). Nothing was sent; the check is deliberately fail-closed so a ` +
+        `runner-less pool cannot turn into a 30 s "maybe delivered" timeout. Retry when the engine is reachable, ` +
+        `or send without the check via the adapter CLI's --no-preflight`,
+    );
+  }
+  if (listing.envoys === null) {
+    throw new MeshPreflightError(
+      target,
+      "(unknown)",
+      `mesh: could not check "${target}" before sending — the engine did not answer /envoys, so whether its pool has a runner ` +
+        `is unknown. Nothing was sent; verify with /xfer mesh list, or send without the check via the adapter CLI's --no-preflight`,
+    );
+  }
+  const node = findMeshNode(listing.nodes, target);
+  if (!node) {
+    throw new MeshPreflightError(
+      target,
+      "(none)",
+      `mesh: no mesh node named "${target}" on the engine — it was never brought up there (/xfer mesh up on that machine) ` +
+        `or its actor was destroyed. Nothing was sent`,
+    );
+  }
+  const state = deriveMeshNodeState(node, listing.envoys);
+  const pool = meshPoolName(node.pool);
+  const verdict = meshPreflightVerdict(state, node);
+  if (verdict.blocked) throw new MeshPreflightError(target, pool, `${verdict.blocked}. Nothing was sent — ${preflightRemedy(pool)}`);
+  return { target, state, pool, warning: verdict.warning };
+}
+
+/** What to do about a refused send, worded for the person holding the other machine. */
+export function preflightRemedy(pool: string): string {
+  return `start a runner for pool "${pool}" on that machine (open pi there) and retry`;
 }

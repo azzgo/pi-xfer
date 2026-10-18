@@ -7,16 +7,25 @@ import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js"
 import { parseMeshConfig, serializeMeshKey, deserializeMeshKey, XFER_INSTANCE_ACTOR } from "./mesh-config.js";
 import {
   NO_ENVOYS_ERROR,
+  PREFLIGHT_TIMEOUT_MS,
+  MeshPreflightError,
   applyDescriptionAction,
   createRivetEngine,
   deriveActorStatus,
+  deriveMeshNodeState,
   ensureRunnerPool,
   listMeshNodes,
+  listMeshState,
+  meshListing,
+  meshPoolName,
+  meshPreflightVerdict,
   normalizeNodeDescription,
+  preflightMeshSend,
   readDescriptionAction,
   type MeshEngine,
   type MeshHandoffMessage,
   type MeshNodeInfo,
+  type MeshRunnerInfo,
   type RivetEngineDeps,
   type XferInstanceState,
 } from "./mesh-engine.js";
@@ -44,6 +53,14 @@ interface FakeEngineState {
   /** Names whose actor is unreachable (describe rejects). */
   unreachable: string[];
   upFail?: boolean;
+  /** Live runners the fake engine reports; `null` = `/envoys` did not answer. */
+  envoys?: MeshRunnerInfo[] | null;
+  preflighted: string[];
+  preflightBlocked: string[];
+}
+
+function fakeState(): FakeEngineState {
+  return { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [], preflighted: [], preflightBlocked: [] };
 }
 
 function fakeEngine(state: FakeEngineState): MeshEngine {
@@ -61,6 +78,22 @@ function fakeEngine(state: FakeEngineState): MeshEngine {
     },
     async stop() { state.stopped += 1; },
     async listNodes() { return [...state.nodes]; },
+    async state() { return meshListing(state.nodes, state.envoys); },
+    async preflight(target) {
+      state.preflighted.push(target);
+      const node = state.nodes.find((candidate) => candidate.name === target);
+      if (!node) {
+        state.preflightBlocked.push(target);
+        throw new MeshPreflightError(target, "(none)", `mesh: no mesh node named "${target}" on the engine. Nothing was sent`);
+      }
+      const view = deriveMeshNodeState(node, state.envoys);
+      const verdict = meshPreflightVerdict(view, node);
+      if (verdict.blocked) {
+        state.preflightBlocked.push(target);
+        throw new MeshPreflightError(target, meshPoolName(node.pool), `${verdict.blocked}. Nothing was sent`);
+      }
+      return { target, state: view, pool: meshPoolName(node.pool), warning: verdict.warning };
+    },
     async destroyNode(actorId) {
       state.destroyed.push(actorId);
       state.nodes = state.nodes.filter((n) => n.actorId !== actorId);
@@ -223,7 +256,10 @@ describe("rivet engine wiring", () => {
     const record = fresh();
     const engine = createRivetEngine({ endpoint: "http://localhost:6420", pool: "host-a" }, () => {}, fakeDeps(record));
     await engine.ensureNode("web");
-    await engine.queueSend("phone", handoff);
+    const stub = stubDelivery("phone", [{ pool_name: "host-b", envoy_key: "e1", last_ping_ts: 9 }]);
+    try {
+      await engine.queueSend("phone", handoff);
+    } finally { stub.restore(); }
     await engine.getDescription("phone");
     assert.deepEqual(record.gets, [
       [XFER_INSTANCE_ACTOR, ["phone"]],
@@ -273,7 +309,7 @@ describe("rivet engine wiring", () => {
 });
 
 describe("mesh node descriptions", () => {
-  const fresh = (): FakeEngineState => ({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] });
+  const fresh = fakeState;
 
   it("set stores the trimmed value on this node and returns it", async () => {
     const state = fresh();
@@ -367,6 +403,53 @@ describe("mesh actor status", () => {
   });
 });
 
+interface EngineActorRow {
+  actor_id: string;
+  key: string;
+  runner_name_selector?: string | null;
+  [field: string]: unknown;
+}
+
+interface EngineEnvoyRow {
+  pool_name: string;
+  envoy_key?: string;
+  last_ping_ts?: number;
+  stop_ts?: number | null;
+}
+
+/** Stub the engine REST surface both the listing and the pre-send check read. */
+function stubEngineRest(
+  actors: EngineActorRow[],
+  envoys: EngineEnvoyRow[] | { fail: string },
+  options: { actorsFail?: string; delayMs?: number } = {},
+) {
+  const calls: string[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: any) => {
+    const url = new URL(String(input));
+    calls.push(url.pathname);
+    if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+    if (url.pathname === "/actors") {
+      if (options.actorsFail) throw new Error(options.actorsFail);
+      return new Response(JSON.stringify({ actors }), { status: 200 });
+    }
+    if (url.pathname === "/envoys") {
+      if ("fail" in envoys) throw new Error(envoys.fail);
+      return new Response(JSON.stringify({ envoys, pagination: {} }), { status: 200 });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  return { calls, restore: () => { globalThis.fetch = original; } };
+}
+
+/** Actors + envoys for one send target: "phone" asleep in pool "host-b". */
+function stubDelivery(target: string, envoys: EngineEnvoyRow[], pool = "host-b") {
+  return stubEngineRest(
+    [{ actor_id: "a1", key: serializeMeshKey([target]), runner_name_selector: pool, sleep_ts: 5 }],
+    envoys,
+  );
+}
+
 describe("mesh node listing", () => {
   interface ActorRow {
     actor_id: string;
@@ -435,7 +518,7 @@ describe("mesh node listing", () => {
 
 describe("mesh node lifecycle", () => {
   it("up connects under the given name after a conflict check", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const state: FakeEngineState = fakeState();
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await node.up("web");
     assert.deepEqual(state.ensured, ["web"]);
@@ -494,12 +577,12 @@ describe("mesh node lifecycle", () => {
   });
 
   it("up surfaces config errors with the config path", async () => {
-    const node = makeNode(path.join(tmpDir, "does-not-exist.config.json"), fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }));
+    const node = makeNode(path.join(tmpDir, "does-not-exist.config.json"), fakeEngine(fakeState()));
     await assert.rejects(() => node.up("web"), /mesh not configured/);
   });
 
   it("up awaits an async engineFactory (default bundle-loading path)", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const state: FakeEngineState = fakeState();
     const engine = fakeEngine(state);
     const node = new MeshNode({
       configPath: writeConfig({ endpoint: "http://localhost:6420" }),
@@ -516,14 +599,14 @@ describe("mesh node lifecycle", () => {
   });
 
   it("up refuses when already online", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const state: FakeEngineState = fakeState();
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await node.up("web");
     await assert.rejects(() => node.up("web"), /already online/);
   });
 
   it("down destroys this node's actor and stops the engine exactly once", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const state: FakeEngineState = fakeState();
     const engine = fakeEngine(state);
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), engine);
     await node.up("web");
@@ -534,7 +617,7 @@ describe("mesh node lifecycle", () => {
   });
 
   it("down stops the engine even when the destroy query fails", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const state: FakeEngineState = fakeState();
     const engine = fakeEngine(state);
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), engine);
     await node.up("web");
@@ -547,7 +630,7 @@ describe("mesh node lifecycle", () => {
 
 describe("mesh messaging", () => {
   it("send enqueues the full inline payload with id/from/summary/document", async () => {
-    const state: FakeEngineState = { nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] };
+    const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" }], envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }] };
     const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
     await node.up("web");
     const { id } = await node.send("phone", { summary: "fix the thing", document: "# Handoff\n\nbody" });
@@ -561,8 +644,36 @@ describe("mesh messaging", () => {
   });
 
   it("send requires being online", async () => {
-    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }));
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(fakeState()));
     await assert.rejects(() => node.send("phone", { summary: "s", document: "d" }), /not online/);
+  });
+
+  it("refuses a send whose target's pool has no runner, and never enqueues it", async () => {
+    const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Idle", pool: "host-b" }], envoys: [] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    await assert.rejects(
+      () => node.send("phone", { summary: "s", document: "d" }),
+      (err: any) => err instanceof MeshPreflightError && /no runner in pool "host-b"/.test(err.message),
+    );
+    assert.deepEqual(state.sent, [], "a refused send never reaches the queue");
+    assert.deepEqual(state.preflightBlocked, ["phone"]);
+  });
+
+  it("sends with a warning when the actor record and the pool's runners disagree", async () => {
+    const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Idle", pool: "host-b" }], envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    const { warning } = await node.send("phone", { summary: "s", document: "d" });
+    assert.match(warning ?? "", /reads idle \(no runner\) in its actor record while pool "host-b" does hold a live runner/);
+    assert.equal(state.sent.length, 1, "engine truth wins — the send goes through");
+  });
+
+  it("sends without a warning when the target's pool has a live runner", async () => {
+    const state: FakeEngineState = { ...fakeState(), nodes: [{ name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" }], envoys: [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }] };
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state));
+    await node.up("web");
+    assert.equal((await node.send("phone", { summary: "s", document: "d" })).warning, null);
   });
 
   it("list queries the engine live and requires being online", async () => {
@@ -581,7 +692,7 @@ describe("mesh messaging", () => {
 describe("mesh inbound delivery", () => {
   it("writes the doc to /tmp and routes it through the local deliver pipeline", async () => {
     const delivered: XferNotifyMessage[] = [];
-    const engine = fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] });
+    const engine = fakeEngine(fakeState());
     const sink = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), engine, delivered);
     (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
       id: "mid-1",
@@ -605,7 +716,7 @@ describe("mesh inbound delivery", () => {
     const delivered: XferNotifyMessage[] = [];
     const sink = makeNode(
       writeConfig({ endpoint: "http://localhost:6420" }),
-      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }),
+      fakeEngine(fakeState()),
       delivered,
     );
     (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
@@ -626,7 +737,7 @@ describe("mesh inbound delivery", () => {
     const delivered: XferNotifyMessage[] = [];
     const sink = makeNode(
       writeConfig({ endpoint: "http://localhost:6420" }),
-      fakeEngine({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] }),
+      fakeEngine(fakeState()),
       delivered,
     );
     (sink as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void }).onHandoff({
@@ -710,7 +821,7 @@ describe("ensureRunnerPool", () => {
 });
 
 describe("mesh log", () => {
-  const fresh = (): FakeEngineState => ({ nodes: [], ensured: [], stopped: 0, destroyed: [], sent: [], descriptions: {}, unreachable: [] });
+  const fresh = fakeState;
 
   it("up records the session context, the pool, and whether it adopted an actor", async () => {
     const logPath = meshLogPath("up");
@@ -754,7 +865,10 @@ describe("mesh log", () => {
   it("journals send, inbound, and misroute as metadata only — never the handoff body", async () => {
     const logPath = meshLogPath("flow");
     const delivered: XferNotifyMessage[] = [];
-    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(fresh()), delivered, logPath);
+    const state = fresh();
+    state.nodes.push({ name: "phone", actorId: "a1", status: "Sleeping", pool: "host-b" });
+    state.envoys = [{ pool: "host-b", envoyKey: "e1", lastPingTs: 1 }];
+    const node = makeNode(writeConfig({ endpoint: "http://localhost:6420" }), fakeEngine(state), delivered, logPath);
     await node.up("web");
     await node.send("phone", { summary: "s", document: "SECRET-BODY" });
     const inbound = node as unknown as { onHandoff(m: MeshHandoffMessage, selfKey: string): void };
@@ -766,5 +880,134 @@ describe("mesh log", () => {
     assert.match(log, /msg="mesh misroute" id=mid-2 from=grok to=phone reached=web/);
     assert.ok(!log.includes("SECRET-BODY"), "handoff bodies stay out of the log");
     fs.rmSync(path.join(os.tmpdir(), "pi-xfer-mid-1.md"), { force: true });
+  });
+});
+
+describe("mesh pre-send check", () => {
+  const config = { endpoint: "http://localhost:6420" };
+
+  it("reads the two engine facts in one round and joins them per node", async () => {
+    const stub = stubEngineRest(
+      [
+        { actor_id: "a1", key: serializeMeshKey(["running"]), runner_name_selector: "host-a", connectable_ts: 1 },
+        { actor_id: "a2", key: serializeMeshKey(["idle"]), runner_name_selector: "host-b", error: NO_ENVOYS_ERROR, sleep_ts: 5 },
+        { actor_id: "a3", key: serializeMeshKey(["defaulted"]), sleep_ts: 5 },
+      ],
+      [{ pool_name: "host-a", envoy_key: "e1" }, { pool_name: "default", envoy_key: "e2" }],
+    );
+    try {
+      const listing = await listMeshState(config);
+      assert.deepEqual(stub.calls.sort(), ["/actors", "/envoys"]);
+      assert.deepEqual(listing.nodes.map((n) => deriveMeshNodeState(n, listing.envoys)), [
+        "Running",
+        "NoRunner",
+        "Sleeping",
+      ]);
+      assert.deepEqual(listing.envoys?.map((e) => e.pool), ["host-a", "default"]);
+    } finally { stub.restore(); }
+  });
+
+  it("ignores a stopped runner — a stopped envoy is not a live one", async () => {
+    const stub = stubEngineRest(
+      [{ actor_id: "a1", key: serializeMeshKey(["phone"]), runner_name_selector: "host-b", sleep_ts: 5 }],
+      [{ pool_name: "host-b", envoy_key: "gone", stop_ts: 7 }],
+    );
+    try {
+      const listing = await listMeshState(config);
+      assert.deepEqual(listing.envoys, []);
+      assert.equal(deriveMeshNodeState(listing.nodes[0]!, listing.envoys), "NoRunner");
+    } finally { stub.restore(); }
+  });
+
+  it("treats a missing /envoys answer as unknown, not as an absence of nodes", async () => {
+    const stub = stubEngineRest(
+      [{ actor_id: "a1", key: serializeMeshKey(["phone"]), runner_name_selector: "host-b", sleep_ts: 5 }],
+      { fail: "envoys 500" },
+    );
+    try {
+      const listing = await listMeshState(config);
+      assert.equal(listing.envoys, null);
+      assert.equal(listing.nodes.length, 1, "the actor listing still renders");
+      assert.equal(deriveMeshNodeState(listing.nodes[0]!, listing.envoys), "Unknown");
+      await assert.rejects(
+        () => preflightMeshSend(config, "phone"),
+        (err: any) => err instanceof MeshPreflightError && /did not answer \/envoys/.test(err.message),
+      );
+    } finally { stub.restore(); }
+  });
+
+  it("refuses when the target's pool holds no runner, naming the pool", async () => {
+    const stub = stubEngineRest(
+      [
+        { actor_id: "a1", key: serializeMeshKey(["phone"]), runner_name_selector: "host-b", error: NO_ENVOYS_ERROR, sleep_ts: 5 },
+        { actor_id: "a2", key: serializeMeshKey(["laptop"]), runner_name_selector: "host-a", sleep_ts: 5 },
+      ],
+      [{ pool_name: "host-a", envoy_key: "e1" }],
+    );
+    try {
+      await assert.rejects(
+        () => preflightMeshSend(config, "phone"),
+        (err: any) =>
+          err instanceof MeshPreflightError &&
+          err.pool === "host-b" &&
+          /"phone" is online but cannot receive: no runner in pool "host-b"/.test(err.message) &&
+          /start a runner for pool "host-b" on that machine/.test(err.message) &&
+          /Nothing was sent/.test(err.message),
+      );
+      const allowed = await preflightMeshSend(config, "laptop");
+      assert.deepEqual(allowed, { target: "laptop", state: "Sleeping", pool: "host-a", warning: null });
+    } finally { stub.restore(); }
+  });
+
+  it("refuses a target the engine does not list at all", async () => {
+    const stub = stubEngineRest([], []);
+    try {
+      await assert.rejects(
+        () => preflightMeshSend(config, "ghost"),
+        (err: any) => err instanceof MeshPreflightError && /no mesh node named "ghost"/.test(err.message) && /Nothing was sent/.test(err.message),
+      );
+    } finally { stub.restore(); }
+  });
+
+  it("fails closed on a timeout: nothing is sent rather than waiting out the 30 s enqueue", async () => {
+    const stub = stubEngineRest(
+      [{ actor_id: "a1", key: serializeMeshKey(["phone"]), runner_name_selector: "host-b", sleep_ts: 5 }],
+      [],
+      { delayMs: 200 },
+    );
+    try {
+      await assert.rejects(
+        () => preflightMeshSend(config, "phone", 20),
+        (err: any) =>
+          err instanceof MeshPreflightError &&
+          /engine did not answer \/actors \+ \/envoys within 20 ms/.test(err.message) &&
+          /Nothing was sent; the check is deliberately fail-closed/.test(err.message) &&
+          /--no-preflight/.test(err.message),
+      );
+    } finally { stub.restore(); }
+  });
+
+  it("propagates a failed actor listing instead of calling the engine empty", async () => {
+    const stub = stubEngineRest([], [], { actorsFail: "connect ECONNREFUSED" });
+    try {
+      await assert.rejects(() => listMeshState(config), /connect ECONNREFUSED/);
+      await assert.rejects(() => preflightMeshSend(config, "phone"), (err: any) => err instanceof MeshPreflightError);
+    } finally { stub.restore(); }
+  });
+
+  it("defaults to a six-second budget on the delivery hot path", () => {
+    assert.equal(PREFLIGHT_TIMEOUT_MS, 6_000);
+  });
+
+  it("verdicts name the pool for a runner-less node and warn on a record/pool disagreement", () => {
+    assert.match(
+      meshPreflightVerdict("NoRunner", { name: "phone", pool: "host-b" }).blocked ?? "",
+      /no runner in pool "host-b"/,
+    );
+    assert.equal(meshPreflightVerdict("NoRunner", { name: "phone" }).warning, null);
+    const mismatch = meshPreflightVerdict("Mismatch", { name: "phone", pool: "host-b" });
+    assert.equal(mismatch.blocked, null);
+    assert.match(mismatch.warning ?? "", /pool "host-b" does hold a live runner/);
+    assert.deepEqual(meshPreflightVerdict("Running", { name: "phone", pool: "host-b" }), { blocked: null, warning: null });
   });
 });

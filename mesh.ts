@@ -3,7 +3,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
 import { loadMeshConfig, type MeshConfig } from "./mesh-config.ts";
-import type { MeshEngine, MeshHandoffMessage, MeshNodeInfo, RivetEngineOptions } from "./mesh-engine.ts";
+import {
+  deriveMeshNodeState,
+  findMeshNode,
+  listMeshState,
+  preflightMeshSend,
+  type MeshEngine,
+  type MeshHandoffMessage,
+  type MeshListing,
+  type MeshNodeInfo,
+  type MeshNodeState,
+  type MeshPreflight,
+  type RivetEngineOptions,
+} from "./mesh-engine.ts";
 import { MESH_LOG_PATH, logMeshEvent } from "./mesh-log.ts";
 import type { XferNotifyMessage } from "./types.ts";
 import { msgId } from "./utils.ts";
@@ -78,11 +90,37 @@ export class MeshNode {
     return this.engine && this.nodeName ? { online: true, name: this.nodeName } : { online: false };
   }
 
+  /** The pool this host's runner joins, and the engine it points at. */
+  config(): MeshConfig {
+    return this.configOverride ?? loadMeshConfig(this.configPath);
+  }
+
   /** Live engine listing of all mesh nodes (no cache). */
   async list(): Promise<MeshNodeInfo[]> {
     return this.requireEngine().listNodes();
   }
 
+  /**
+   * Live listing plus the runner side of the same engine round, for surfaces
+   * that must say whether a node can actually receive (`/xfer mesh list`).
+   * Works without an engine of our own: listing is an observer operation, so it
+   * answers with or without `up`.
+   */
+  async state(): Promise<MeshListing> {
+    return this.engine ? this.engine.state() : listMeshState(this.configOverride ?? loadMeshConfig(this.configPath));
+  }
+
+  /** One node's verdict, joined against its pool's live runners. */
+  async nodeState(target: string): Promise<{ node: MeshNodeInfo | null; state: MeshNodeState; listing: MeshListing }> {
+    const listing = await this.state();
+    const node = findMeshNode(listing.nodes, target);
+    return { node, state: node ? deriveMeshNodeState(node, listing.envoys) : "Unknown", listing };
+  }
+
+  /** Pre-send check for a target; rejects with MeshPreflightError when it cannot receive. */
+  async preflight(target: string): Promise<MeshPreflight> {
+    return this.engine ? this.engine.preflight(target) : preflightMeshSend(this.configOverride ?? loadMeshConfig(this.configPath), target);
+  }
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
    * not currently Running (Sleeping / Idle / Crashed / Pending). Adoption
@@ -178,12 +216,14 @@ export class MeshNode {
   }
 
   /** Fire-and-forget inline handoff to another mesh node. */
-  async send(target: string, params: { summary: string; document: string }): Promise<{ id: string }> {
+  async send(target: string, params: { summary: string; document: string }): Promise<{ id: string; warning: string | null }> {
     const id = msgId();
     const from = this.nodeName;
     if (!this.engine || !from) throw new Error("mesh is not online — run /xfer mesh up first");
     const message: MeshHandoffMessage = { id, from, to: target, summary: params.summary, document: params.document };
+    let warning: string | null = null;
     try {
+      warning = (await this.engine.preflight(target)).warning;
       await this.engine.queueSend(target, message);
     } catch (err) {
       logMeshEvent(this.logPath, "error", "mesh send failed", {
@@ -196,7 +236,7 @@ export class MeshNode {
       throw err;
     }
     logMeshEvent(this.logPath, "info", "mesh send", { from, to: target, id, bytes: params.document.length });
-    return { id };
+    return { id, warning };
   }
 
   async shutdown(): Promise<void> {

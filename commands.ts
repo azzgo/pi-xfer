@@ -12,6 +12,7 @@ import { collectGarbage } from "./gc.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
 import type { MeshNode } from "./mesh.ts";
 import { ensureRunnerPool, listMeshNodes } from "./mesh-engine.ts";
+import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTableLines } from "./mesh-status.ts";
 import { loadMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
@@ -124,6 +125,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         const subPrefix = prefix.slice("mesh ".length).replace(/^\s+/, "");
         const items: AutocompleteItem[] = [
           { value: "mesh up", label: "up", description: "Bring this instance online as its xfer name (needs mesh.config.json)" },
+          { value: "mesh status", label: "status", description: "This node's mesh state: online, pool, runner in that pool, engine reachability" },
           { value: "mesh down", label: "down", description: "Destroy this node and go offline" },
           { value: "mesh list", label: "list", description: "List mesh nodes (live engine query)" },
           { value: "mesh setup", label: "setup", description: "Verify mesh.config.json works: parse config, ensure the pool's runner-config, query the engine" },
@@ -167,7 +169,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
-          "   /xfer mesh [<up|down|list|name> <request>] — mesh transport\n" +
+          "   /xfer mesh [<status|up|down|list|setup|name> <request>] — mesh transport\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
           "   /xfer doctor             — self-check the install and print fix hints\n" +
 
@@ -341,10 +343,11 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         const sub = parts[1];
         if (!sub || sub === "help") {
           ctx.ui.notify(
-            "🌐 /xfer mesh               — mesh status\n" +
+            "🌐 /xfer mesh               — this help\n" +
+            "   /xfer mesh status       — this node's state: online, pool, runner in that pool, engine reachability\n" +
             "   /xfer mesh up           — bring this instance online (as its xfer name)\n" +
             "   /xfer mesh down         — destroy this node and go offline\n" +
-            "   /xfer mesh list         — list mesh nodes (live engine query)\n" +
+            "   /xfer mesh list         — every mesh node with its delivery verdict (live engine query)\n" +
             "   /xfer mesh setup        — verify mesh.config.json: config parse, pool runner-config, engine reachability\n" +
             "   /xfer mesh <name> <request> — send a one-way handoff via mesh",
             "info",
@@ -379,16 +382,38 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         if (sub === "list") {
           try {
-            const nodes = await mesh.list();
+            const listing = await mesh.state();
             const status = mesh.status();
-            const lines = nodes.map(
-              (n) =>
-                `  ${n.name}${status.online && status.name === n.name ? " (this node)" : ""}` +
-                `${n.status === "Idle" ? ` — idle: no runner in pool "${n.pool ?? "(default)"}"` : ""}`,
+            const selfName = status.online ? status.name : null;
+            const lines = meshTableLines(listing, selfName);
+            const advice = meshSelfAdvice(meshSelfStatus(listing, { online: status.online, name: selfName }, mesh.config().pool));
+            ctx.ui.notify(
+              listing.nodes.length
+                ? `🌐 Mesh nodes (${listing.nodes.length}):\n${lines.join("\n")}\n${meshLegendLine()}` +
+                  (advice ? `\n⚠️ ${advice}` : "")
+                : `🌐 No mesh nodes on the engine (${MESH_CONFIG_PATH}) — bring one up with /xfer mesh up`,
+              "info",
             );
-            ctx.ui.notify(nodes.length ? `🌐 Mesh nodes:\n${lines.join("\n")}` : "🌐 No mesh nodes online", "info");
           } catch (err) {
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        if (sub === "status") {
+          const status = mesh.status();
+          const shown = [status.online ? `online as "${status.name}"` : "offline in this session"];
+          try {
+            const listing = await mesh.state();
+            const config = mesh.config();
+            const selfStatus = meshSelfStatus(listing, { online: status.online, name: status.online ? status.name : null }, config.pool);
+            ctx.ui.notify(`🌐 Mesh status — ${shown.join(", ")}\n${meshStatusLines(selfStatus, config.endpoint).join("\n")}`, "info");
+          } catch (err) {
+            ctx.ui.notify(
+              `🌐 Mesh status — ${shown.join(", ")}\n` +
+                `  ✗ engine      unreachable (${MESH_CONFIG_PATH}): ${err instanceof Error ? err.message : String(err)}\n` +
+                `  → fix         /xfer mesh setup — checks config parsing, the pool's runner-config and engine reachability`,
+              "error",
+            );
           }
           return;
         }

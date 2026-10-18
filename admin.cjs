@@ -2043,16 +2043,13 @@ function isLiveActor(actor) {
   return actor.destroy_ts === void 0 || actor.destroy_ts === null;
 }
 function toMeshNodeInfo(actor) {
+  const deserialized = deserializeMeshKey(typeof actor.key === "string" ? actor.key : void 0);
   return {
-    name: deserializeKeyString(actor.key),
+    name: deserialized[0] ?? "",
     actorId: actor.actor_id,
     status: deriveActorStatus(actor),
     ...actor.runner_name_selector ? { pool: actor.runner_name_selector } : {}
   };
-}
-function deserializeKeyString(serialized) {
-  const parts = deserializeMeshKey(typeof serialized === "string" ? serialized : void 0);
-  return parts[0] ?? "";
 }
 
 // admin-main.ts
