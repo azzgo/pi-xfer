@@ -45,7 +45,9 @@ laptop (pi, mesh up)          Cloudflare
 | `src/mesh-actor.ts` | the `xfer-instance` actor — the same state, queue and actions the extension runs |
 | `src/agent-do.ts` | the Durable Object (the agent's memory, the echo, the DeepSeek seam) and the `Env` |
 | `src/worker.ts` | the Worker: registry in wasm, the actor, the DO, the reply path, pool registration |
-| `agent-do.test.ts` | the only part under `npm test` — echo, redelivery, model fallback |
+| `src/pool-config.ts` | the pool body and timing (seconds) — dependency-free so it is testable |
+| `agent-do.test.ts` | the answer logic: echo, redelivery, model fallback |
+| `pool-registration.test.ts` | the pool body: grace period below lifespan, no re-write when it matches |
 | `VERIFICATION.md` | the manual closed-loop procedure (the one live-deployment exception) |
 | `wrangler.toml` | DO binding, migration, `routes`, the vars and secrets |
 
@@ -118,10 +120,18 @@ taught, and each one fails as something else:
   `src/worker.ts`): the Worker only routes what starts with it, and the engine only treats
   `<basePath>/start` as a start.
 - **Everything time-sensitive goes under `ctx.waitUntil`.** `registerSelf` and the in-Worker pool PUT
-  are background IO; without it the isolate cancels them the moment the response returns.
+  are background IO; without it the isolate cancels them the moment the response returns — and
+  background work must also be **finite**: the registration attempts once per isolate and never
+  retries, because a rejected config is answered with the same 400 forever, and 41 attempts spent
+  the whole subrequest budget on a live run.
 - `RIVET_ENDPOINT`/`RIVET_NAMESPACE` exist because parts of the wasm runtime read the engine through
   RivetKit's env-var fallback (`getRivetEndpoint`) rather than the config object. They must agree
   with the secrets; drift shows up as an actor the registry cannot see.
+- **Pool timing is one constant, in seconds** (`SERVERLESS_POOL_TIMING` in `src/pool-config.ts`),
+  because three writers carry it: `configurePool`, the Worker's own runner-config PUT, and the
+  out-of-band curl. It is not a `wrangler` var for exactly that reason — a unit slip between them is
+  refused as an illegal config (`drain_grace_period must be less than request_lifespan`), not as a
+  mistake. `pool-registration.test.ts` pins the invariant.
 
 ## Run it
 
@@ -136,8 +146,12 @@ reaches a real deployment, which is a human decision each time.
 2. 🔴 **Register the pool out of band, before the first deploy.** The pool is named `cloudflare` by
    default (`POOL_NAME` in `wrangler.toml`, read through `poolName()`); rename it in that one place
    and the register command must carry the same name. The body points at the **Worker**, never the
-   engine, and carries the lifespan:
-   `{"datacenters":{"default":{"serverless":{"url":"https://<worker-domain>/api/rivet","headers":{},"request_lifespan":30000}}}}`.
+   engine, and carries **both** timing fields:
+   `{"datacenters":{"default":{"serverless":{"url":"https://<worker-domain>/api/rivet","headers":{},"request_lifespan":30000,"drain_grace_period":600}}}}`.
+   Both are in **seconds**, and `drain_grace_period` must be present and strictly smaller than
+   `request_lifespan` — omitted, the engine applies its 1800 s default and refuses the pool with
+   `drain_grace_period must be less than request_lifespan`. The numbers live in one place,
+   `SERVERLESS_POOL_TIMING` (`src/pool-config.ts`), which the Worker's own registration uses too.
    **No pi-xfer command may be pointed at a serverless pool**: `ensureRunnerPool()` hardcodes
    `{ normal: {} }` and cannot create one.
 3. **Give the Worker a domain the engine can reach.** `*.workers.dev` is unreachable from an engine

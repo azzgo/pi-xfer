@@ -77,8 +77,6 @@ export interface Env {
   RIVET_NAMESPACE?: string;
   /** The Worker's own public URL, which the engine calls back into. */
   WORKER_PUBLIC_URL: string;
-  /** Lifespan the serverless pool is configured with, in ms. Defaults to 30000. */
-  SERVERLESS_REQUEST_LIFESPAN_MS?: number;
   /** Absent: the agent echoes. Present: the same round trip goes through DeepSeek. */
   DEEPSEEK_API_KEY?: string;
   DEEPSEEK_MODEL?: string;
