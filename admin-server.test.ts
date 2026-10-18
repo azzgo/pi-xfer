@@ -17,6 +17,7 @@ import type { MeshConfig } from "./mesh-config.js";
 import type { MeshNode } from "./mesh.js";
 import { serializeMeshKey } from "./mesh-config.js";
 import type { MeshNodeInfo } from "./mesh-engine.js";
+import { meshRows } from "./mesh-status.js";
 
 const tmpDirs: string[] = [];
 const servers: AdminServer[] = [];
@@ -579,5 +580,83 @@ describe("admin broker + admin control endpoints", () => {
       req.on("error", reject);
       req.end();
     });
+  });
+});
+
+describe("admin mesh rows — same verdict, same words as the CLI", () => {
+  /** Every (glyph, label, pool, reason) triple the admin page renders, in row order. */
+  function adminRows(body: string): Array<{ glyph: string; label: string; pool: string; reason: string | null }> {
+    const section = body.slice(body.indexOf("mesh nodes"));
+    const rows = section.split('<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">').slice(1);
+    return rows.map((row) => ({
+      glyph: (row.match(/<span class="mono" style="color:[^"]*;width:1em;text-align:center">([^<]*)<\/span>/) ?? [])[1] ?? "",
+      label: (row.match(/<span class="muted">([^<]*)<\/span>/) ?? [])[1] ?? "",
+      pool: (row.match(/pool ([^<]*)<\/span>/) ?? [])[1] ?? "",
+      reason: (row.match(/— ([^<]*)<\/span>/) ?? [])[1] ?? null,
+    }));
+  }
+
+  it("renders every state with the glyph and label mesh-status.ts defines", async () => {
+    const h = makeHarness();
+    writeMeshConfig(h.xferDir, { pool: "host-a" });
+    const stub = stubEngine([
+      { name: "live", actorId: "a1", status: "Running", pool: "host-a" },
+      { name: "asleep", actorId: "a2", status: "Sleeping", pool: "host-a" },
+      { name: "stranded", actorId: "a3", status: "Sleeping", pool: "host-b" },
+      { name: "urgent", actorId: "a4", status: "Pending", pool: "host-a" },
+      { name: "broken", actorId: "a5", status: "Crashed", pool: "host-a" },
+    ], { envoys: ["host-a"] });
+    try {
+      const port = await listen(h);
+      const rows = adminRows((await get(port, "/control")).body);
+      assert.equal(rows.length, 5);
+      const listing = {
+        nodes: [
+          { name: "live", actorId: "a1", status: "Running" as const, pool: "host-a" },
+          { name: "asleep", actorId: "a2", status: "Sleeping" as const, pool: "host-a" },
+          { name: "stranded", actorId: "a3", status: "Sleeping" as const, pool: "host-b" },
+          { name: "urgent", actorId: "a4", status: "Pending" as const, pool: "host-a" },
+          { name: "broken", actorId: "a5", status: "Crashed" as const, pool: "host-a" },
+        ],
+        envoys: [{ pool: "host-a", envoyKey: "e1", lastPingTs: 1 }],
+      };
+      const cliRows = meshRows(listing as unknown as Parameters<typeof meshRows>[0], null);
+      assert.deepEqual(rows.map((r) => [r.glyph, r.label]), cliRows.map((r) => [r.glyph, r.label]), "glyph/label come from one source");
+      assert.deepEqual(rows.map((r) => r.pool), cliRows.map((r) => r.pool));
+      assert.deepEqual(
+        rows.map((r) => r.glyph),
+        ["●", "◐", "○", "·", "✗"],
+        "all four deliverable/undeliverable shapes plus the two record-only ones",
+      );
+    } finally { stub.restore(); }
+  });
+
+  it("marks a runner-less and a live node differently, and never says offline", async () => {
+    const h = makeHarness();
+    writeMeshConfig(h.xferDir, { pool: "host-a" });
+    const stub = stubEngine([
+      { name: "live", actorId: "a1", status: "Sleeping", pool: "host-a" },
+      { name: "stranded", actorId: "a2", status: "Sleeping", pool: "host-b" },
+    ], { envoys: ["host-a"] });
+    try {
+      const port = await listen(h);
+      const body = (await get(port, "/control")).body;
+      const rows = adminRows(body);
+      assert.notEqual(rows[0]!.glyph, rows[1]!.glyph, "a live node is never labelled like a runner-less one");
+      assert.match(rows[1]!.reason ?? "", /no runner in pool &quot;host-b&quot;/);
+      assert.doesNotMatch(body.slice(body.indexOf("mesh nodes")), /offline/i);
+    } finally { stub.restore(); }
+  });
+
+  it("shows every row as unknown when /envoys did not answer", async () => {
+    const h = makeHarness();
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([{ name: "live", actorId: "a1", status: "Running", pool: "host-a" }], { envoys: null });
+    try {
+      const port = await listen(h);
+      const rows = adminRows((await get(port, "/control")).body);
+      assert.deepEqual(rows.map((r) => [r.glyph, r.label]), [["?", "unknown"]]);
+      assert.match((await get(port, "/control")).body, /did not answer \/envoys — every row reads "\?"/);
+    } finally { stub.restore(); }
   });
 });

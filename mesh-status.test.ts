@@ -197,3 +197,27 @@ describe("mesh status rendering", () => {
     assert.equal(meshSelfAdvice(healthy), null);
   });
 });
+
+describe("mesh status: one vocabulary for every surface", () => {
+  it("is the only module that spells a verdict glyph", async () => {
+    const fs = await import("node:fs");
+    const root = import.meta.dirname;
+    const surfaces = ["commands.ts", "admin-main.ts"].filter((name) => fs.existsSync(`${root}/${name}`));
+    assert.deepEqual(surfaces.sort(), ["admin-main.ts", "commands.ts"], "sanity: both surfaces exist");
+    for (const name of surfaces) {
+      const source = fs.readFileSync(`${root}/${name}`, "utf-8");
+      const verdictShapes = MESH_STATE_ORDER
+        .map((state) => `${MESH_STATE_MARKS[state].glyph} ${MESH_STATE_MARKS[state].label}`)
+        .filter((shape) => source.includes(shape));
+      assert.deepEqual(verdictShapes, [], `${name} must take verdict glyph/label pairs from mesh-status.ts, not spell them`);
+    }
+  });
+
+  it("keeps the labels the legend and the rows both show", () => {
+    const legend = meshLegendLine();
+    for (const state of MESH_STATE_ORDER) {
+      assert.ok(legend.includes(MESH_STATE_MARKS[state].label), `${state} label missing from the legend`);
+      assert.ok(legend.includes(MESH_STATE_MARKS[state].glyph), `${state} glyph missing from the legend`);
+    }
+  });
+});

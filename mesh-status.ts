@@ -192,3 +192,15 @@ export function meshSelfAdvice(status: MeshSelfStatus): string | null {
   if (!status.online || !status.envoysKnown || status.poolHasRunner) return null;
   return `this node's pool "${status.pool}" has no runner — handoffs sent here queue until one appears`;
 }
+
+/**
+ * `/xfer mesh status` when the engine did not answer at all: the one shape that
+ * has no `MeshListing` behind it, rendered here so neither surface hand-draws
+ * a glyph for it.
+ */
+export function meshUnreachableLines(endpointOrPath: string, reason: string): string[] {
+  return [
+    `  ${MESH_STATE_MARKS.Unknown.glyph} engine  unreachable (${endpointOrPath}): ${reason}`,
+    `  → fix     /xfer mesh setup — checks config parsing, the pool's runner-config and engine reachability`,
+  ];
+}

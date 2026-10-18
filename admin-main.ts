@@ -401,18 +401,19 @@ interface RenderContext {
   brokerProbe: () => Promise<{ port: number } | null>;
 }
 
-const STATE_COLORS: Record<MeshNodeState, { dot: string; glyph: string }> = {
-  Running: { dot: "#1a7f37", glyph: "●" },
-  Sleeping: { dot: "#9a6700", glyph: "◐" },
-  NoRunner: { dot: "#8250df", glyph: "○" },
-  Mismatch: { dot: "#bc4c00", glyph: "⚠" },
-  Pending: { dot: "#0969da", glyph: "·" },
-  Crashed: { dot: "#cf222e", glyph: "✗" },
-  Unknown: { dot: "#8a8174", glyph: "?" },
+/** Presentation only: glyphs and labels come from mesh-status.ts, never from here. */
+const STATE_DOT_COLORS: Record<MeshNodeState, string> = {
+  Running: "#1a7f37",
+  Sleeping: "#9a6700",
+  NoRunner: "#8250df",
+  Mismatch: "#bc4c00",
+  Pending: "#0969da",
+  Crashed: "#cf222e",
+  Unknown: "#8a8174",
 };
 
 const STATUS_LEGEND = `<div class="rules">${MESH_STATE_ORDER
-  .map((state) => `<span><span class="dot" style="background:${STATE_COLORS[state].dot}"></span>${MESH_STATE_MARKS[state].label}</span>`)
+  .map((state) => `<span><span class="dot" style="background:${STATE_DOT_COLORS[state]}"></span>${MESH_STATE_MARKS[state].label}</span>`)
   .join("")}</div>`;
 
 const meshPoolCount = (nodes: MeshNodeRow[]): number =>
@@ -439,7 +440,7 @@ const meshDownForm = (node: MeshNodeRow, confirmMessage: string | null): string 
 
 const meshNodeRow = (node: MeshNodeRow, mesh: MeshView): string => {
   const state = meshRowState(node, mesh);
-  const color = STATE_COLORS[state];
+  const dot = STATE_DOT_COLORS[state];
   const isSelf = mesh.self?.name === node.name;
   const pool = poolLabel(node.pool);
   const runningElsewhere = node.status === "Running" && !isSelf;
@@ -448,7 +449,7 @@ const meshNodeRow = (node: MeshNodeRow, mesh: MeshView): string => {
     : null;
   const reason = rowReason(node, mesh);
   return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">
-    <span class="mono" style="color:${color.dot};width:1em;text-align:center">${color.glyph}</span><b class="mono">${esc(node.name)}</b>
+    <span class="mono" style="color:${dot};width:1em;text-align:center">${MESH_STATE_MARKS[state].glyph}</span><b class="mono">${esc(node.name)}</b>
     <span class="muted">${MESH_STATE_MARKS[state].label}</span>
     <span class="dim mono">pool ${esc(pool)}</span>
     ${reason ? `<span class="dim">— ${esc(reason)}</span>` : ""}
