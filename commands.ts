@@ -12,7 +12,7 @@ import { collectGarbage } from "./gc.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
 import type { MeshNode } from "./mesh.ts";
 import { ensureRunnerPool, listMeshNodes } from "./mesh-engine.ts";
-import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTableLines } from "./mesh-status.ts";
+import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTableLines, meshUnreachableLines } from "./mesh-status.ts";
 import { loadMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
@@ -408,10 +408,9 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             const selfStatus = meshSelfStatus(listing, { online: status.online, name: status.online ? status.name : null }, config.pool);
             ctx.ui.notify(`🌐 Mesh status — ${shown.join(", ")}\n${meshStatusLines(selfStatus, config.endpoint).join("\n")}`, "info");
           } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
             ctx.ui.notify(
-              `🌐 Mesh status — ${shown.join(", ")}\n` +
-                `  ✗ engine      unreachable (${MESH_CONFIG_PATH}): ${err instanceof Error ? err.message : String(err)}\n` +
-                `  → fix         /xfer mesh setup — checks config parsing, the pool's runner-config and engine reachability`,
+              `🌐 Mesh status — ${shown.join(", ")}\n${meshUnreachableLines(MESH_CONFIG_PATH, reason).join("\n")}`,
               "error",
             );
           }

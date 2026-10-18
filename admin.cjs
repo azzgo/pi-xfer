@@ -2423,16 +2423,16 @@ var CLIENT_SCRIPT = `<script>
   };
 })();
 </script>`;
-var STATE_COLORS = {
-  Running: { dot: "#1a7f37", glyph: "●" },
-  Sleeping: { dot: "#9a6700", glyph: "◐" },
-  NoRunner: { dot: "#8250df", glyph: "○" },
-  Mismatch: { dot: "#bc4c00", glyph: "⚠" },
-  Pending: { dot: "#0969da", glyph: "·" },
-  Crashed: { dot: "#cf222e", glyph: "✗" },
-  Unknown: { dot: "#8a8174", glyph: "?" }
+var STATE_DOT_COLORS = {
+  Running: "#1a7f37",
+  Sleeping: "#9a6700",
+  NoRunner: "#8250df",
+  Mismatch: "#bc4c00",
+  Pending: "#0969da",
+  Crashed: "#cf222e",
+  Unknown: "#8a8174"
 };
-var STATUS_LEGEND = `<div class="rules">${MESH_STATE_ORDER.map((state) => `<span><span class="dot" style="background:${STATE_COLORS[state].dot}"></span>${MESH_STATE_MARKS[state].label}</span>`).join("")}</div>`;
+var STATUS_LEGEND = `<div class="rules">${MESH_STATE_ORDER.map((state) => `<span><span class="dot" style="background:${STATE_DOT_COLORS[state]}"></span>${MESH_STATE_MARKS[state].label}</span>`).join("")}</div>`;
 var meshPoolCount = (nodes) => new Set(nodes.map((node) => meshPoolName(node.pool))).size;
 var meshRowState = (node, mesh) => deriveMeshNodeState({ status: node.status ?? "Unknown", pool: node.pool }, mesh.envoys);
 var rowReason = (node, mesh) => {
@@ -2447,14 +2447,14 @@ var rowReason = (node, mesh) => {
 var meshDownForm = (node, confirmMessage) => `<form method="post" action="/control/mesh/down"><input type="hidden" name="name" value="${escAttribute(node.name)}"><input type="hidden" name="actor" value="${escAttribute(node.actorId)}"><button class="btn sm danger"${confirmMessage ? ` data-confirm="${esc(confirmMessage)}"` : ""}>down</button></form>`;
 var meshNodeRow = (node, mesh) => {
   const state = meshRowState(node, mesh);
-  const color = STATE_COLORS[state];
+  const dot = STATE_DOT_COLORS[state];
   const isSelf = mesh.self?.name === node.name;
   const pool = poolLabel(node.pool);
   const runningElsewhere = node.status === "Running" && !isSelf;
   const confirmMessage = runningElsewhere ? `"${node.name}" is Running on another host right now. Destroying its actor cuts that host off mid-session. Destroy it anyway?` : null;
   const reason = rowReason(node, mesh);
   return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">
-    <span class="mono" style="color:${color.dot};width:1em;text-align:center">${color.glyph}</span><b class="mono">${esc(node.name)}</b>
+    <span class="mono" style="color:${dot};width:1em;text-align:center">${MESH_STATE_MARKS[state].glyph}</span><b class="mono">${esc(node.name)}</b>
     <span class="muted">${MESH_STATE_MARKS[state].label}</span>
     <span class="dim mono">pool ${esc(pool)}</span>
     ${reason ? `<span class="dim">— ${esc(reason)}</span>` : ""}
