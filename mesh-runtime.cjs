@@ -48629,8 +48629,14 @@ async function applyDescriptionAction(state, value) {
 async function readDescriptionAction(state) {
   return state.description ?? "";
 }
+var NO_ENVOYS_ERROR = "no_envoys";
+function isNoEnvoys(error62) {
+  if (typeof error62 === "string") return error62 === NO_ENVOYS_ERROR;
+  return Boolean(error62) && typeof error62 === "object" && error62.message === NO_ENVOYS_ERROR;
+}
 function deriveActorStatus(actor2) {
   if (actor2.destroy_ts !== void 0 && actor2.destroy_ts !== null) return "Destroyed";
+  if (isNoEnvoys(actor2.error)) return "Idle";
   if (actor2.error !== void 0 && actor2.error !== null) return "Crashed";
   if (actor2.sleep_ts !== void 0 && actor2.sleep_ts !== null) return "Sleeping";
   if (actor2.connectable_ts !== void 0 && actor2.connectable_ts !== null) return "Running";
@@ -48692,13 +48698,7 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
       }
     },
     async listNodes() {
-      const actors = await engineApi(config3, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR));
-      return actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({
-        name: deserializeKeyString(a.key),
-        actorId: a.actor_id,
-        status: deriveActorStatus(a),
-        ...a.runner_name_selector ? { pool: a.runner_name_selector } : {}
-      }));
+      return fetchMeshNodes(config3);
     },
     async destroyNode(actorId) {
       await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
@@ -48739,6 +48739,25 @@ async function engineApi(config3, method2, path5, body) {
     throw new Error(`mesh engine ${method2} ${url2.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
   }
   return await response.json();
+}
+async function fetchMeshNodes(config3) {
+  const actors = await engineApi(
+    config3,
+    "GET",
+    "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)
+  );
+  return actors.actors.filter(isLiveActor).map(toMeshNodeInfo);
+}
+function isLiveActor(actor2) {
+  return actor2.destroy_ts === void 0 || actor2.destroy_ts === null;
+}
+function toMeshNodeInfo(actor2) {
+  return {
+    name: deserializeKeyString(actor2.key),
+    actorId: actor2.actor_id,
+    status: deriveActorStatus(actor2),
+    ...actor2.runner_name_selector ? { pool: actor2.runner_name_selector } : {}
+  };
 }
 function deserializeKeyString(serialized) {
   const parts = deserializeMeshKey(typeof serialized === "string" ? serialized : void 0);

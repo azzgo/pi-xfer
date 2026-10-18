@@ -116,7 +116,7 @@ function processAlive(pid: number): boolean {
 interface MeshView {
   configured: boolean;
   error: string | null;
-  nodes: { name: string; actorId: string }[];
+  nodes: { name: string; actorId: string; status?: string; pool?: string }[];
 }
 
 async function meshView(xferDir: string): Promise<MeshView> {
@@ -148,6 +148,13 @@ const KIND_COLORS: Record<AdminEvent["kind"], [string, string]> = {
 const TONES: Record<string, string> = { peers: "#1a7f37", mesh: "#8250df", board: "#0969da", broker: "#9a6700" };
 
 const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+const meshNodeLabel = (node: { name: string; status?: string; pool?: string }): string => {
+  const label = esc(node.name);
+  if (node.status !== "Idle") return label;
+  return `${label} (idle: no runner in pool "${esc(node.pool ?? "(default)")}")`;
+};
+
 const md = (src: string): string => esc(src)
   .replace(/^### (.*)$/gm, "<h3>$1</h3>")
   .replace(/^## (.*)$/gm, "<h3>$1</h3>")
@@ -378,7 +385,7 @@ const controlPage = (ctx: RenderContext, peers: PeerRow[], mesh: MeshView, broke
     ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8a8174"></span><b class="mono">mesh</b><span class="muted">not configured (mesh.config.json)</span></div>`
     : mesh.error !== null
       ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span><b class="mono">mesh</b><span class="muted">${esc(mesh.error)}</span></div>`
-      : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8250df"></span><b class="mono">mesh</b><span class="muted">${mesh.nodes.length} node(s): ${mesh.nodes.map((n) => esc(n.name)).join(", ") || "—"}</span></div>`;
+      : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8250df"></span><b class="mono">mesh</b><span class="muted">${mesh.nodes.length} node(s): ${mesh.nodes.map(meshNodeLabel).join(", ") || "—"}</span></div>`;
   return shell("control", "Control",
     "Presence and the few actions this console is allowed to take.", `
     <div class="grid" style="grid-template-columns:1fr 1fr">

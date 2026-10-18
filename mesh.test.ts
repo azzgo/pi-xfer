@@ -6,10 +6,12 @@ import { after, before, describe, it } from "node:test";
 import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js";
 import { parseMeshConfig, serializeMeshKey, deserializeMeshKey, XFER_INSTANCE_ACTOR } from "./mesh-config.js";
 import {
+  NO_ENVOYS_ERROR,
   applyDescriptionAction,
   createRivetEngine,
   deriveActorStatus,
   ensureRunnerPool,
+  listMeshNodes,
   normalizeNodeDescription,
   readDescriptionAction,
   type MeshEngine,
@@ -345,6 +347,89 @@ describe("mesh actor status", () => {
     assert.equal(deriveActorStatus({ destroy_ts: 9, error: 1, sleep_ts: 1, connectable_ts: 1 }), "Destroyed");
     assert.equal(deriveActorStatus({ error: 1, sleep_ts: 1, connectable_ts: 1 }), "Crashed");
     assert.equal(deriveActorStatus({ sleep_ts: 1, connectable_ts: 1 }), "Sleeping");
+  });
+
+  it("reads a runner-less actor as Idle, not Crashed", () => {
+    assert.equal(deriveActorStatus({ error: NO_ENVOYS_ERROR, sleep_ts: 5 }), "Idle");
+    assert.equal(deriveActorStatus({ error: { message: NO_ENVOYS_ERROR } }), "Idle");
+    assert.equal(deriveActorStatus({ connectable_ts: 1, error: NO_ENVOYS_ERROR }), "Idle");
+  });
+
+  it("still calls a real engine error a crash", () => {
+    assert.equal(deriveActorStatus({ error: "runner crashed" }), "Crashed");
+    assert.equal(deriveActorStatus({ error: { message: "runner crashed" } }), "Crashed");
+    assert.equal(deriveActorStatus({ error: "no_envoy" }), "Crashed", "no near-miss matches the engine's exact code");
+    assert.equal(deriveActorStatus({ error: { message: `${NO_ENVOYS_ERROR}: pool gone`, code: 500 } }), "Crashed");
+  });
+
+  it("keeps destroy ahead of the runner-less reading", () => {
+    assert.equal(deriveActorStatus({ destroy_ts: 9, error: NO_ENVOYS_ERROR }), "Destroyed");
+  });
+});
+
+describe("mesh node listing", () => {
+  interface ActorRow {
+    actor_id: string;
+    key: string;
+    runner_name_selector?: string | null;
+    [field: string]: unknown;
+  }
+
+  function stubActors(rows: ActorRow[]) {
+    const calls: Array<{ method: string; url: string }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = new URL(String(input));
+      calls.push({ method: init?.method ?? "GET", url: url.pathname + url.search });
+      return new Response(JSON.stringify({ actors: rows }), { status: 200 });
+    }) as typeof fetch;
+    return { calls, restore: () => { globalThis.fetch = original; } };
+  }
+
+  const config = { endpoint: "http://localhost:6420" };
+
+  it("carries each actor's pool through, so the listing can be joined with /envoys", async () => {
+    const stub = stubActors([
+      { actor_id: "a1", key: serializeMeshKey(["laptop"]), runner_name_selector: "host-a" },
+      { actor_id: "a2", key: serializeMeshKey(["phone"]) },
+    ]);
+    try {
+      const nodes = await listMeshNodes(config);
+      assert.deepEqual(nodes, [
+        { name: "laptop", actorId: "a1", status: "Pending", pool: "host-a" },
+        { name: "phone", actorId: "a2", status: "Pending" },
+      ]);
+      assert.equal("pool" in nodes[1]!, false, "an unpooled actor stays field-absent (default pool)");
+    } finally { stub.restore(); }
+  });
+
+  it("maps the live states off the same raw fields, and drops destroyed actors", async () => {
+    const stub = stubActors([
+      { actor_id: "a1", key: serializeMeshKey(["running"]), connectable_ts: 1, start_ts: 1 },
+      { actor_id: "a2", key: serializeMeshKey(["asleep"]), sleep_ts: 5 },
+      { actor_id: "a3", key: serializeMeshKey(["idle"]), error: NO_ENVOYS_ERROR, sleep_ts: 5, runner_name_selector: "host-b" },
+      { actor_id: "a4", key: serializeMeshKey(["broken"]), error: { message: "boom" } },
+      { actor_id: "a5", key: serializeMeshKey(["gone"]), destroy_ts: 9 },
+    ]);
+    try {
+      const nodes = await listMeshNodes(config);
+      assert.deepEqual(nodes.map((n) => [n.name, n.status, n.pool ?? null]), [
+        ["running", "Running", null],
+        ["asleep", "Sleeping", null],
+        ["idle", "Idle", "host-b"],
+        ["broken", "Crashed", null],
+      ]);
+      assert.equal(stub.calls[0]?.url, `/actors?name=${encodeURIComponent(XFER_INSTANCE_ACTOR)}`);
+    } finally { stub.restore(); }
+  });
+
+  it("MeshNode.list() reports the same pool as the observing listing", async () => {
+    const stub = stubActors([{ actor_id: "a1", key: serializeMeshKey(["laptop"]), runner_name_selector: "host-a", sleep_ts: 1 }]);
+    try {
+      const engine = createRivetEngine(config, () => {});
+      assert.deepEqual(await engine.listNodes(), await listMeshNodes(config));
+      assert.deepEqual(await engine.listNodes(), [{ name: "laptop", actorId: "a1", status: "Sleeping", pool: "host-a" }]);
+    } finally { stub.restore(); }
   });
 });
 

@@ -16,6 +16,7 @@ import type { AdminManager } from "./admin-manager.js";
 import type { BrokerManager } from "./broker-manager.js";
 import { doctorSeverity, formatDoctorReport, runDoctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { MeshConfig } from "./mesh-config.js";
+import type { MeshNodeInfo } from "./mesh-engine.js";
 
 const tmpDirs: string[] = [];
 
@@ -59,7 +60,7 @@ interface Overrides {
   meshConfigPath?: string;
   broker?: ReturnType<typeof stubBroker>;
   admin?: ReturnType<typeof stubAdmin>;
-  listMeshNodes?: (config: MeshConfig) => Promise<{ name: string; actorId: string }[]>;
+  listMeshNodes?: (config: MeshConfig) => Promise<MeshNodeInfo[]>;
   meshTimeoutMs?: number;
 }
 
@@ -200,6 +201,21 @@ describe("doctor: mesh", () => {
     assert.equal(mesh.status, "pass");
     assert.match(mesh.detail, /engine reachable — 1 node\(s\)/);
     assert.equal(mesh.fix, undefined);
+  });
+
+  it("warns about nodes with no runner in their pool instead of counting them as healthy", async () => {
+    const configPath = withConfig({ endpoint: "https://rivet.example" });
+    const listMeshNodes = async () => [
+      { name: "laptop", actorId: "a1", status: "Running" as const, pool: "host-a" },
+      { name: "phone", actorId: "a2", status: "Idle" as const, pool: "host-b" },
+      { name: "tablet", actorId: "a3", status: "Idle" as const },
+    ];
+    const report = await runDoctor(deps({ meshConfigPath: configPath, listMeshNodes }));
+    const mesh = checkFor(report, "Mesh");
+    assert.equal(mesh.status, "warn");
+    assert.match(mesh.detail, /engine reachable — 3 node\(s\)/);
+    assert.match(mesh.detail, /2 with no runner in pool host-b, \(default\): phone, tablet/);
+    assert.match(mesh.fix ?? "", /\/xfer mesh setup/);
   });
 
   it("passes when no config exists (opt-in) and points at the mesh setup guide", async () => {

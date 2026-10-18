@@ -2003,8 +2003,14 @@ var path8 = __toESM(require("node:path"), 1);
 var MESH_LOG_PATH = path8.join(XFER_DIR, "mesh.log");
 
 // mesh-engine.ts
+var NO_ENVOYS_ERROR = "no_envoys";
+function isNoEnvoys(error) {
+  if (typeof error === "string") return error === NO_ENVOYS_ERROR;
+  return Boolean(error) && typeof error === "object" && error.message === NO_ENVOYS_ERROR;
+}
 function deriveActorStatus(actor) {
   if (actor.destroy_ts !== void 0 && actor.destroy_ts !== null) return "Destroyed";
+  if (isNoEnvoys(actor.error)) return "Idle";
   if (actor.error !== void 0 && actor.error !== null) return "Crashed";
   if (actor.sleep_ts !== void 0 && actor.sleep_ts !== null) return "Sleeping";
   if (actor.connectable_ts !== void 0 && actor.connectable_ts !== null) return "Running";
@@ -2023,9 +2029,26 @@ async function engineApi(config, method, path10, body) {
   return await response.json();
 }
 function listMeshNodes(config) {
-  return engineApi(config, "GET", "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)).then(
-    (actors) => actors.actors.filter((a) => a.destroy_ts === void 0 || a.destroy_ts === null).map((a) => ({ name: deserializeKeyString(a.key), actorId: a.actor_id, status: deriveActorStatus(a) }))
+  return fetchMeshNodes(config);
+}
+async function fetchMeshNodes(config) {
+  const actors = await engineApi(
+    config,
+    "GET",
+    "/actors?name=" + encodeURIComponent(XFER_INSTANCE_ACTOR)
   );
+  return actors.actors.filter(isLiveActor).map(toMeshNodeInfo);
+}
+function isLiveActor(actor) {
+  return actor.destroy_ts === void 0 || actor.destroy_ts === null;
+}
+function toMeshNodeInfo(actor) {
+  return {
+    name: deserializeKeyString(actor.key),
+    actorId: actor.actor_id,
+    status: deriveActorStatus(actor),
+    ...actor.runner_name_selector ? { pool: actor.runner_name_selector } : {}
+  };
 }
 function deserializeKeyString(serialized) {
   const parts = deserializeMeshKey(typeof serialized === "string" ? serialized : void 0);
@@ -2099,6 +2122,11 @@ var KIND_COLORS = {
 };
 var TONES = { peers: "#1a7f37", mesh: "#8250df", board: "#0969da", broker: "#9a6700" };
 var esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+var meshNodeLabel = (node) => {
+  const label = esc(node.name);
+  if (node.status !== "Idle") return label;
+  return `${label} (idle: no runner in pool "${esc(node.pool ?? "(default)")}")`;
+};
 var md = (src) => esc(src).replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h3>$1</h3>").replace(/^# (.*)$/gm, "<h3>$1</h3>").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>").replace(/^- (.*)$/gm, "<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>").replace(/\n{2,}/g, "<br><br>");
 var css = () => {
   const c = { bg: "#f3efe6", panel: "#fffdf8", line: "#e4dccb", text: "#1c1917", muted: "#6b6256", dim: "#8a8174", hover: "#efe8da", soft: "#e7dfd0", nav: "#fffdf8", navText: "#6b6256", accent: "#1d4ed8" };
@@ -2286,7 +2314,7 @@ var controlPage = (ctx, peers, mesh, broker, selfCheck) => {
         <form method="post" action="/control/broker/stop"><button class="btn sm danger">stop</button></form></div>` : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span>
         <b class="mono">broker</b><span class="muted">stopped</span><span style="flex:1"></span>
         <form method="post" action="/control/broker/start"><button class="btn sm primary">start</button></form></div>`;
-  const meshRow = !mesh.configured ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8a8174"></span><b class="mono">mesh</b><span class="muted">not configured (mesh.config.json)</span></div>` : mesh.error !== null ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span><b class="mono">mesh</b><span class="muted">${esc(mesh.error)}</span></div>` : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8250df"></span><b class="mono">mesh</b><span class="muted">${mesh.nodes.length} node(s): ${mesh.nodes.map((n) => esc(n.name)).join(", ") || "—"}</span></div>`;
+  const meshRow = !mesh.configured ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8a8174"></span><b class="mono">mesh</b><span class="muted">not configured (mesh.config.json)</span></div>` : mesh.error !== null ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span><b class="mono">mesh</b><span class="muted">${esc(mesh.error)}</span></div>` : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8250df"></span><b class="mono">mesh</b><span class="muted">${mesh.nodes.length} node(s): ${mesh.nodes.map(meshNodeLabel).join(", ") || "—"}</span></div>`;
   return shell(
     "control",
     "Control",
