@@ -2324,6 +2324,7 @@ var STATUS_COLORS = {
   Unknown: { dot: "#8a8174", text: "unknown" }
 };
 var STATUS_LEGEND = `<div class="rules">${[["#1a7f37", "running"], ["#9a6700", "sleeping"], ["#8250df", "idle · no runner"], ["#cf222e", "crashed"], ["#0969da", "pending"]].map(([dot, label]) => `<span><span class="dot" style="background:${dot}"></span>${label}</span>`).join("")}</div>`;
+var meshPoolCount = (nodes) => new Set(nodes.map((node) => node.pool ?? "(default)")).size;
 var meshStatusColor = (status) => STATUS_COLORS[status ?? "Unknown"] ?? STATUS_COLORS.Unknown;
 var meshDownForm = (node, confirmMessage) => `<form method="post" action="/control/mesh/down"><input type="hidden" name="name" value="${escAttribute(node.name)}"><input type="hidden" name="actor" value="${escAttribute(node.actorId)}"><button class="btn sm danger"${confirmMessage ? ` data-confirm="${esc(confirmMessage)}"` : ""}>down</button></form>`;
 var meshNodeRow = (node, self) => {
@@ -2388,8 +2389,8 @@ var controlPage = (ctx, peers, mesh, broker, selfCheck) => {
         <form method="post" action="/control/broker/stop"><button class="btn sm danger">stop</button></form></div>` : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span>
         <b class="mono">broker</b><span class="muted">stopped</span><span style="flex:1"></span>
         <form method="post" action="/control/broker/start"><button class="btn sm primary">start</button></form></div>`;
-  const meshSelf = mesh.self ? `<span class="pill" style="color:#8250df;background:#fbefff">${esc(mesh.self.name)}</span>` : `<span class="dim">not online</span>`;
   const meshPoint = mesh.error !== null ? "#cf222e" : mesh.configured ? "#8250df" : "#8a8174";
+  const meshSummary = mesh.configured ? `${mesh.nodes.length} node(s) · ${meshPoolCount(mesh.nodes)} pool(s)` : "not configured";
   const notice = mesh.notice ? `<div class="notice ${mesh.notice.tone}">${esc(mesh.notice.text)}</div>` : "";
   return shell(
     "control",
@@ -2409,8 +2410,7 @@ var controlPage = (ctx, peers, mesh, broker, selfCheck) => {
             <b class="mono">admin</b><span class="muted">:${ctx.port} (this)</span><span style="flex:1"></span>
             <form method="post" action="/control/admin/stop"><button class="btn sm danger">stop</button></form></div>
           <div class="row" style="padding:6px 0"><span class="dot" style="background:${meshPoint}"></span>
-            <b class="mono">mesh</b><span class="muted">${mesh.configured ? `${mesh.nodes.length} node(s)` : "not configured"}</span>
-            <span style="flex:1"></span>${meshSelf}</div>
+            <b class="mono">mesh</b><span class="muted">${meshSummary}</span></div>
         </div>
         <div class="panel" style="margin-bottom:14px"><h2>mesh control</h2>
           ${meshUpForm(mesh, mesh.self?.name ?? "")}
