@@ -14,6 +14,11 @@ The static image above is an export of the full interactive diagram — **[Open 
 
 The mesh needs a **Rivet control plane** (engine) that every machine can reach. pi-xfer does not ship one; you either use Rivet's hosted cloud or run your own. Once you have it, everything is configured with a single file, `~/.pi/xfer/mesh.config.json`.
 
+> **Not every node is a machine that stays on.** A Cloudflare Worker can host a node that exists
+> only while there is work — see [Pi Durable agent](pi-durable-agent.md). It uses the same engine and
+> the same commands, but its pool is registered differently (out of band), so read that page before
+> pointing `mesh setup` at one.
+
 ## Step 1 — Get a control plane
 
 Two routes. Pick one.
@@ -284,6 +289,11 @@ accepts the same value as `--pool` (together with `--engine`). Rationale and the
 RivetKit API evidence: [ADR 0017](../adr/0017-mesh-runner-pools.md).
 
 Sanity-check the file at any time with `/xfer doctor` — the **Mesh** line reads the config and queries the engine.
+
+One pool kind is **not** what this step creates: a **serverless** pool (a Cloudflare Worker, no
+resident runner). `ensureRunnerPool()` writes `{ normal: {} }` and cannot express one, so
+`mesh setup`'s pool step will not create one and no pi-xfer command may be pointed at it — see
+[Pi Durable agent](pi-durable-agent.md) for the out-of-band registration.
 
 ## Step 3 — Verify end to end
 
