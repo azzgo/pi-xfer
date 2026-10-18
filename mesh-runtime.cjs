@@ -24970,11 +24970,8 @@ function checkedRead() {
   try {
     let result = read();
     if (bundledStrings) {
-      if (position >= bundledStrings.postBundlePosition) {
-        let error62 = new Error("Unexpected bundle position");
-        error62.incomplete = true;
-        throw error62;
-      }
+      if (position >= bundledStrings.postBundlePosition)
+        throw new Error("Unexpected bundle position");
       position = bundledStrings.postBundlePosition;
       bundledStrings = null;
     }
@@ -24993,7 +24990,10 @@ function checkedRead() {
     return result;
   } catch (error62) {
     clearSource();
-    if (error62 instanceof RangeError || error62.message.startsWith("Unexpected end of buffer")) {
+    if (nestedDecodeErrors.has(error62)) {
+      if (error62.incomplete)
+        error62.incomplete = false;
+    } else if (error62 instanceof RangeError && position + 8 > srcEnd || error62 && typeof error62.message == "string" && error62.message.startsWith("Unexpected end of buffer")) {
       error62.incomplete = true;
     }
     throw error62;
@@ -25074,12 +25074,12 @@ function read() {
               let i2 = 0;
               if (currentDecoder.keyMap) {
                 while ((key = read()) != STOP_CODE) {
-                  if (i2++ >= maxMapSize) throw new Error(`Property count exceeds ${maxMapSize}`);
+                  if (i2++ >= objectSizeLimit) throw new Error(`Property count exceeds ${objectSizeLimit}`);
                   object2[safeKey2(currentDecoder.decodeKey(key))] = read();
                 }
               } else {
                 while ((key = read()) != STOP_CODE) {
-                  if (i2++ >= maxMapSize) throw new Error(`Property count exceeds ${maxMapSize}`);
+                  if (i2++ >= objectSizeLimit) throw new Error(`Property count exceeds ${objectSizeLimit}`);
                   object2[safeKey2(key)] = read();
                 }
               }
@@ -25124,11 +25124,13 @@ function read() {
     case 1:
       return ~token;
     case 2:
+      if (token > srcEnd - position) throw endOfCBORError();
       return readBin(token);
     case 3:
       if (srcStringEnd >= position) {
         return srcString.slice(position - srcStringStart, (position += token) - srcStringStart);
       }
+      if (token > srcEnd - position) throw endOfCBORError();
       if (srcStringEnd == 0 && srcEnd < 140 && token < 32) {
         let string4 = token < 16 ? shortStringInJS(token) : longStringInJS(token);
         if (string4 != null)
@@ -25136,15 +25138,15 @@ function read() {
       }
       return readFixedString(token);
     case 4:
-      if (token >= maxArraySize) throw new Error(`Array length exceeds ${maxArraySize}`);
+      if (token > maxArraySize) throw new Error(`Array length exceeds ${maxArraySize}`);
       if (token > srcEnd - position) throw endOfCBORError();
       let array2 = new Array(token);
       for (let i = 0; i < token; i++) array2[i] = read();
       return array2;
     case 5:
-      if (token >= maxMapSize) throw new Error(`Map size exceeds ${maxArraySize}`);
-      if (token > (srcEnd - position) / 2) throw endOfCBORError();
       if (currentDecoder.mapsAsObjects) {
+        if (token > objectSizeLimit) throw new Error(`Property count exceeds ${objectSizeLimit}`);
+        if (token > (srcEnd - position) / 2) throw endOfCBORError();
         let object2 = {};
         if (currentDecoder.keyMap) for (let i = 0; i < token; i++) object2[safeKey2(currentDecoder.decodeKey(read()))] = read();
         else for (let i = 0; i < token; i++) object2[safeKey2(read())] = read();
@@ -25154,6 +25156,8 @@ function read() {
           currentDecoder.mapsAsObjects = true;
           restoreMapsAsObject = false;
         }
+        if (token > maxMapSize) throw new Error(`Map size exceeds ${maxMapSize}`);
+        if (token > (srcEnd - position) / 2) throw endOfCBORError();
         let map2 = /* @__PURE__ */ new Map();
         if (currentDecoder.keyMap) for (let i = 0; i < token; i++) map2.set(currentDecoder.decodeKey(read()), read());
         else for (let i = 0; i < token; i++) map2.set(read(), read());
@@ -25655,10 +25659,12 @@ function readJustLength() {
         token = src[position++];
         break;
       case 25:
+        if (position + 2 > srcEnd) throw endOfCBORError();
         token = dataView.getUint16(position);
         position += 2;
         break;
       case 26:
+        if (position + 4 > srcEnd) throw endOfCBORError();
         token = dataView.getUint32(position);
         position += 4;
         break;
@@ -25695,29 +25701,34 @@ function saveState(callback) {
   let savedStructures = currentStructures;
   let savedDecoder = currentDecoder;
   let savedSequentialMode = sequentialMode;
-  let value = callback();
-  srcEnd = savedSrcEnd;
-  position = savedPosition;
-  stringPosition = savedStringPosition;
-  srcStringStart = savedSrcStringStart;
-  srcStringEnd = savedSrcStringEnd;
-  srcString = savedSrcString;
-  strings = savedStrings;
-  referenceMap = savedReferenceMap;
-  bundledStrings = savedBundledStrings;
-  src = savedSrc;
-  sequentialMode = savedSequentialMode;
-  currentStructures = savedStructures;
-  currentDecoder = savedDecoder;
-  dataView = new DataView(src.buffer, src.byteOffset, src.byteLength);
-  return value;
+  let savedRestoreMapsAsObject = restoreMapsAsObject;
+  restoreMapsAsObject = false;
+  try {
+    return callback();
+  } finally {
+    srcEnd = savedSrcEnd;
+    position = savedPosition;
+    stringPosition = savedStringPosition;
+    srcStringStart = savedSrcStringStart;
+    srcStringEnd = savedSrcStringEnd;
+    srcString = savedSrcString;
+    strings = savedStrings;
+    referenceMap = savedReferenceMap;
+    bundledStrings = savedBundledStrings;
+    src = savedSrc;
+    sequentialMode = savedSequentialMode;
+    currentStructures = savedStructures;
+    currentDecoder = savedDecoder;
+    restoreMapsAsObject = savedRestoreMapsAsObject;
+    dataView = new DataView(src.buffer, src.byteOffset, src.byteLength);
+  }
 }
 function clearSource() {
   src = null;
   referenceMap = null;
   currentStructures = null;
 }
-var decoder, src, srcEnd, position, EMPTY_ARRAY, LEGACY_RECORD_INLINE_ID, RECORD_DEFINITIONS_ID, RECORD_INLINE_ID, BUNDLED_STRINGS_ID, PACKED_REFERENCE_TAG_ID, STOP_CODE, maxArraySize, maxMapSize, strings, stringPosition, currentDecoder, currentStructures, srcString, srcStringStart, srcStringEnd, bundledStrings, referenceMap, currentExtensions, currentExtensionRanges, packedValues, dataView, restoreMapsAsObject, defaultOptions, sequentialMode, inlineObjectReadThreshold, Decoder, validName, readFixedString, readString8, readString16, readString32, isNativeAccelerationEnabled, fromCharCode, f32Array, u8Array, keyCache, Tag, recordDefinition, glbl, packedTable, SHARED_DATA_TAG_ID, isLittleEndianMachine, typedArrays, typedArrayTags, mult10, defaultDecoder, decode3, decodeMultiple, FLOAT32_OPTIONS;
+var decoder, src, srcEnd, position, EMPTY_ARRAY, LEGACY_RECORD_INLINE_ID, RECORD_DEFINITIONS_ID, RECORD_INLINE_ID, BUNDLED_STRINGS_ID, PACKED_REFERENCE_TAG_ID, STOP_CODE, maxArraySize, maxMapSize, maxObjectSize, objectSizeLimit, strings, stringPosition, currentDecoder, currentStructures, srcString, srcStringStart, srcStringEnd, bundledStrings, referenceMap, currentExtensions, currentExtensionRanges, packedValues, dataView, restoreMapsAsObject, defaultOptions, sequentialMode, inlineObjectReadThreshold, Decoder, nestedDecodeErrors, validName, readFixedString, readString8, readString16, readString32, isNativeAccelerationEnabled, fromCharCode, f32Array, u8Array, keyCache, Tag, recordDefinition, glbl, packedTable, SHARED_DATA_TAG_ID, isLittleEndianMachine, typedArrays, typedArrayTags, mult10, defaultDecoder, decode3, decodeMultiple, FLOAT32_OPTIONS;
 var init_decode = __esm({
   "node_modules/cbor-x/decode.js"() {
     try {
@@ -25734,6 +25745,8 @@ var init_decode = __esm({
     STOP_CODE = {};
     maxArraySize = 11281e4;
     maxMapSize = 1681e4;
+    maxObjectSize = 1671e4;
+    objectSizeLimit = maxObjectSize;
     strings = EMPTY_ARRAY;
     stringPosition = 0;
     currentDecoder = {};
@@ -25815,7 +25828,13 @@ var init_decode = __esm({
         if (src) {
           return saveState(() => {
             clearSource();
-            return this ? this.decode(source, end) : _Decoder.prototype.decode.call(defaultOptions, source, end);
+            try {
+              return this ? this.decode(source, end) : _Decoder.prototype.decode.call(defaultOptions, source, end);
+            } catch (error62) {
+              if (error62 && typeof error62 == "object")
+                nestedDecodeErrors.add(error62);
+              throw error62;
+            }
           });
         }
         srcEnd = end > -1 ? end : source.length;
@@ -25885,6 +25904,7 @@ var init_decode = __esm({
         }
       }
     };
+    nestedDecodeErrors = /* @__PURE__ */ new WeakSet();
     validName = /^[a-zA-Z_$][a-zA-Z\d_$]*$/;
     readFixedString = readStringJS;
     readString8 = readStringJS;
@@ -25958,18 +25978,12 @@ var init_decode = __esm({
       return (glbl[data[0]] || Error)(data[1], data[2]);
     };
     packedTable = (read7) => {
-      if (src[position++] != 132) {
-        let error62 = new Error("Packed values structure must be followed by a 4 element array");
-        if (src.length < position)
-          error62.incomplete = true;
-        throw error62;
-      }
+      if (!(position < srcEnd)) throw endOfCBORError();
+      if (src[position++] != 132)
+        throw new Error("Packed values structure must be followed by a 4 element array");
       let newPackedValues = read7();
-      if (!newPackedValues || !newPackedValues.length) {
-        let error62 = new Error("Packed values structure must be followed by a 4 element array");
-        error62.incomplete = true;
-        throw error62;
-      }
+      if (!Array.isArray(newPackedValues) || !newPackedValues.length)
+        throw new Error("Packed values structure must be followed by a 4 element array");
       packedValues = packedValues ? newPackedValues.concat(packedValues.slice(newPackedValues.length)) : newPackedValues;
       packedValues.prefixes = read7();
       packedValues.suffixes = read7();
@@ -25986,10 +26000,7 @@ var init_decode = __esm({
       }
       if (typeof data == "number")
         return packedValues[16 + (data >= 0 ? 2 * data : -2 * data - 1)];
-      let error62 = new Error("No support for non-integer packed references yet");
-      if (data === void 0)
-        error62.incomplete = true;
-      throw error62;
+      throw new Error("No support for non-integer packed references yet");
     };
     currentExtensions[28] = (read7) => {
       if (!referenceMap) {
@@ -26027,9 +26038,18 @@ var init_decode = __esm({
     };
     currentExtensions[258] = (array2) => new Set(array2);
     (currentExtensions[259] = (read7) => {
-      if (currentDecoder.mapsAsObjects) {
-        currentDecoder.mapsAsObjects = false;
+      let decoder2 = currentDecoder;
+      if (decoder2.mapsAsObjects) {
+        decoder2.mapsAsObjects = false;
         restoreMapsAsObject = true;
+        try {
+          return read7();
+        } finally {
+          if (restoreMapsAsObject) {
+            decoder2.mapsAsObjects = true;
+            restoreMapsAsObject = false;
+          }
+        }
       }
       return read7();
     }).handlesRead = true;
@@ -26413,7 +26433,7 @@ var init_encode = __esm({
             if (throwOnIterable)
               return;
             encode4(value);
-            if (bundledStrings2) {
+            if (bundledStrings2 && bundledStrings2.position) {
               writeBundles(start, encode4);
             }
             encoder.offset = position2;
