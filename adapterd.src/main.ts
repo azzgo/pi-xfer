@@ -15,7 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { sendNotify } from "../client.ts";
 import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
-import { loadMeshConfig, parseMeshConfig } from "../mesh-config.ts";
+import { loadMeshConfig, parseMeshConfig, resolveMeshConfig } from "../mesh-config.ts";
 import { stampHandoffKind, type HandoffKind } from "../handoff-kind.ts";
 import { senderCwdStampFor, stampDocument, type SenderCwdStamp } from "../sender-cwd-stamp.ts";
 import { endpointForName, isEntryPoint, metadataForName, msgId } from "../utils.ts";
@@ -123,7 +123,7 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
     try {
       const config = engine
         ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) })
-        : loadMeshConfig(configPath);
+        : await resolveMeshConfig(loadMeshConfig(configPath));
       mesh = { configPath, config };
     } catch (err) {
       fail(`❌ --mesh requested but mesh is not configured — ${errorText(err)}`);
@@ -254,7 +254,7 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   try {
     config = engine
       ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) })
-      : loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH);
+      : await resolveMeshConfig(loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH));
   } catch (err) {
     fail(`❌ mesh is not configured — ${errorText(err)}`);
     return;

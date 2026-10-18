@@ -21,8 +21,8 @@ Two routes. Pick one.
 ### Route A: Rivet Cloud (hosted)
 
 1. Create a project at [dashboard.rivet.dev](https://dashboard.rivet.dev).
-2. Open **Connect** and copy the backend endpoint value — it looks like `https://my-namespace:sk_xxxxx@api.rivet.dev` (namespace and secret token embedded in one URL).
-3. That URL is your `endpoint`. You're done — skip to step 2.
+2. Open **Connect** and copy the backend address and credentials. The dashboard hands you one string shaped like `https://my-namespace:sk_xxxxx@api.rivet.dev`; **split it** — pi-xfer no longer accepts credentials inside the endpoint URL.
+3. Put the parts in their own fields: `endpoint` becomes `https://api.rivet.dev`, `namespace` becomes `my-namespace`, and the token becomes `token` (or, better, `"token": "$RIVET_ADMIN_TOKEN"` so it is not in the file at all). See [Values that are not literals](#values-that-are-not-literals).
 
 Reference: [Rivet Cloud docs](https://rivet.dev/docs/deploy/cloud/).
 
@@ -116,20 +116,12 @@ Every machine that joins the mesh writes this file in its own home directory.
 
 | Field | Required | What it is |
 |---|---|---|
-| `endpoint` | yes | Control-plane URL. You may embed namespace and token as URL auth — `https://my-ns:sk_xxx@api.rivet.dev` — and omit the two fields below (pi-xfer parses them out, verified against `parseMeshConfig` in `mesh-config.ts`). |
-| `namespace` | no | The isolated environment your nodes live in. Defaults to `default` engine-side. |
-| `token` | no | Auth token for the engine (`sk_…` from Rivet Cloud; the admin token on self-hosted). Sent as `Authorization: Bearer …`. |
+| `endpoint` | yes | Control-plane URL, always a plain literal. **Credentials in a URL (`https://ns:token@host`) are refused** — see [the migration note](#credentials-in-the-endpoint-url-no-longer-work). |
+| `namespace` | no | The isolated environment your nodes live in. Defaults to `default` engine-side. A literal or `$ENV_VAR`. |
+| `token` | no | Auth token for the engine (`sk_…` from Rivet Cloud; the admin token on self-hosted). Sent as `Authorization: Bearer …`. A literal, `$ENV_VAR`, or `!command` — see [below](#values-that-are-not-literals). |
 | `pool` | no | Envoy/runner pool this host's runners join. Set it to the machine/host name on a mixed fleet so the engine can only schedule this Node's actor onto this machine. Unset = the engine-wide `default` pool, where the engine may place the actor on any host (see [per-host pools](#per-host-runner-pools-mixed-fleets)). |
 
-Minimal example (Route A, URL-auth form — one value copied from the dashboard):
-
-```json
-{
-  "endpoint": "https://my-namespace:sk_xxxxx@api.rivet.dev"
-}
-```
-
-Explicit-field example (typical for Route B):
+Minimal example:
 
 ```json
 {
@@ -138,6 +130,91 @@ Explicit-field example (typical for Route B):
   "token": "your-admin-token"
 }
 ```
+
+### Values that are not literals
+
+`token` (and `namespace`) accept the same three forms as `apiKey` in pi's own
+`models.json` — see [pi's models documentation](https://github.com/earendil-works/pi/blob/main/docs/models.md).
+The semantics are pi's, deliberately: one dialect for every config file you write.
+
+| Written as | Meaning |
+|---|---|
+| `"your-admin-token"` | the literal value |
+| `"$MESH_TOKEN"` / `"${MESH_TOKEN}"` | interpolate an environment variable; literals may surround it (`"sk_${PART_A}${PART_B}"`) |
+| `"!pass show mesh-token"` | run the rest **as a shell command** and use its trimmed stdout |
+
+Two details worth knowing, both inherited from pi:
+
+- `$$` produces a literal `$` and `$!` a literal `!`, so a value may itself start
+  with a dollar sign without being read as a reference.
+- A `$NAME` that is not set is an **error**, not an empty string. A blank token
+  sent to the engine would fail as a confusing 401; naming the variable is the
+  honest answer.
+
+```json
+{
+  "endpoint": "https://engine.example.com",
+  "namespace": "default",
+  "token": "!secret-tool lookup service rivet-engine"
+}
+```
+
+```json
+{
+  "endpoint": "https://engine.example.com",
+  "namespace": "default",
+  "token": "$RIVET_ADMIN_TOKEN"
+}
+```
+
+**When it runs, and what that costs.** A `!command` is evaluated each time the
+mesh actually talks to the engine — on `/xfer mesh up`, and on any send, listing
+or check that needs the credential. Nothing is cached, matching pi ("commands run
+at request time and are not cached"), so a rotated or expiring secret is picked up
+on the next operation instead of being frozen for the session. Reading a config
+is *not* such a moment: parsing only records which form was written, so a
+display-only surface such as `/xfer mesh status` never spawns anything.
+
+A command that fails, exits non-zero, or prints nothing is reported by name
+(`mesh token command "!…" …`), never silently turned into an empty token. The
+whole command has 10 seconds before it is killed.
+
+> **Security boundary.** A `!command` runs with your own permissions, so **write
+> permission on `mesh.config.json` is equivalent to permission to execute code as
+> you.** That is a real change in what this file is: it used to be inert data.
+> Keep it `0600`, keep it out of any repository, and prefer `$ENV_VAR` if you only
+> need to avoid storing the secret on disk.
+
+### Credentials in the endpoint URL no longer work
+
+The old `https://my-namespace:sk_xxx@api.rivet.dev` form is **refused** with a
+migration message: one URL carrying the endpoint, the namespace and the token was
+too easy to get wrong, and now that a token can be a command or an environment
+lookup, embedding it in a URL is a second, weaker spelling of the same thing.
+
+Given:
+
+```json
+{
+  "endpoint": "http://default:sk_xxx@engine.example.com:6420/",
+  "pool": "workstation"
+}
+```
+
+write:
+
+```json
+{
+  "endpoint": "http://engine.example.com:6420/",
+  "namespace": "default",
+  "token": "sk_xxx",
+  "pool": "workstation"
+}
+```
+
+The token can also leave the file entirely — `"token": "$RIVET_ADMIN_TOKEN"` or
+`"token": "!secret-tool lookup service rivet-engine"`. The exact target shape is
+printed in the error, so pasting it from the message is enough.
 
 ### Per-host runner pools (mixed fleets)
 
@@ -283,7 +360,7 @@ Use it with `XFER_MESH_CONFIG=/tmp/mesh.local.json npm test`, or point a
 working-tree session at it (`pi -ne -e ./`) after backing up
 `~/.pi/xfer/mesh.config.json` — and put it back afterwards. Authentication is on
 by default in current engines, so put the admin token you started the container
-with in `token` (or embed it as URL auth, exactly as Route A shows). Either way
+with in `token`. Either way
 nothing you do on loopback can reach anyone else.
 
 If even that is too much for what you are checking, do not run the command:
@@ -299,7 +376,7 @@ Run `/xfer doctor` first — its **Mesh** line distinguishes config problems fro
 | Doctor: `not configured (opt-in) — create ~/.pi/xfer/mesh.config.json` | No config file yet | Create it (step 2). This is a normal state — the mesh is opt-in. |
 | Doctor: `config unusable` | Invalid JSON, or missing/empty `endpoint` | Fix the file; the error message names the field. |
 | Doctor: `engine unreachable at <endpoint>` | Engine down, wrong URL, or firewall | `curl <endpoint>/ui` from the same machine; check the engine container and any reverse proxy (it must tolerate long-lived WebSockets). |
-| `mesh up` fails with an auth error | Wrong or missing `token`/`namespace` | Re-copy the values; on Route A the single URL-auth endpoint value avoids split-field mistakes. |
+| `mesh up` fails with an auth error | Wrong or missing `token`/`namespace` | Re-copy the values — on Route A the dashboard's single string has to be split into `endpoint`, `namespace` and `token`, since credentials in the URL are refused. If `token` is a `$VAR`, check it is exported in the environment that starts pi. |
 | `mesh up`: node name already exists on the engine | A node with this xfer name was joined before (possibly from another machine) | `/xfer name <other>` and retry, or destroy the stale actor from the engine dashboard (`<endpoint>/ui`). |
 | Node is up but the peer doesn't see it in `mesh list` | The two machines point at different engines or namespaces | Compare `endpoint` and `namespace` in both machines' configs — discovery is engine-side, so both must resolve to the same engine + namespace. |
 | A handoff arrives on the wrong machine | Every host shares the `default` pool, so the engine scheduled your Node's actor onto another machine's runner | Give each machine its own `pool` and create that pool's runner-config — [per-host pools](#per-host-runner-pools-mixed-fleets), [ADR 0017](../adr/0017-mesh-runner-pools.md). |

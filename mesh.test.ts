@@ -4,7 +4,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.js";
-import { parseMeshConfig, serializeMeshKey, deserializeMeshKey, XFER_INSTANCE_ACTOR } from "./mesh-config.js";
+import {
+  parseMeshConfig,
+  resolveMeshConfig,
+  runTokenCommand,
+  serializeMeshKey,
+  deserializeMeshKey,
+  XFER_INSTANCE_ACTOR,
+} from "./mesh-config.js";
 import {
   ACTOR_READY_TIMEOUT_CODE,
   NO_ENVOYS_ERROR,
@@ -154,11 +161,18 @@ describe("mesh config", () => {
     assert.deepEqual(config, { endpoint: "http://localhost:6420", namespace: "prod", token: "sk_1" });
   });
 
-  it("extracts namespace/token from URL auth syntax and strips them from the endpoint", () => {
-    const config = parseMeshConfig({ endpoint: "https://myns:sk_abc@mesh.example.com" });
-    assert.equal(config.endpoint, "https://mesh.example.com/");
-    assert.equal(config.namespace, "myns");
-    assert.equal(config.token, "sk_abc");
+  it("refuses URL auth and hands back the migrated shape", () => {
+    // The old form looks valid, so the message has to carry the whole fix.
+    assert.throws(
+      () => parseMeshConfig({ endpoint: "http://default:sk_abc@engine.example.com:6420/", pool: "workstation" }),
+      (err: any) =>
+        /no longer supported/.test(err.message) &&
+        /"endpoint": "http:\/\/192\.168\.101\.230:6420\/"/.test(err.message) &&
+        /"namespace": "default"/.test(err.message) &&
+        /"pool": "workstation"/.test(err.message) &&
+        /\$MESH_TOKEN/.test(err.message) &&
+        /!pass show mesh-token/.test(err.message),
+    );
   });
 
   it("rejects a missing or empty endpoint", () => {
@@ -178,14 +192,10 @@ describe("mesh config", () => {
     assert.throws(() => parseMeshConfig({ endpoint: "http://localhost:6420", pool: 42 }), /"pool" must be a non-empty string/);
   });
 
-  it("rejects credentials set twice (URL userinfo + explicit fields)", () => {
+  it("refuses URL auth even when the explicit fields are also present", () => {
     assert.throws(
       () => parseMeshConfig({ endpoint: "https://ns:token@example.com:6420", namespace: "ns", token: "token" }),
-      /credentials twice/,
-    );
-    assert.throws(
-      () => parseMeshConfig({ endpoint: "https://placeholder:placeholder@example.com:6420", namespace: "ns" }),
-      /credentials twice/,
+      /no longer supported/,
     );
   });
 
@@ -199,6 +209,106 @@ describe("mesh config", () => {
     assert.deepEqual(deserializeMeshKey("web"), ["web"]);
     assert.deepEqual(deserializeMeshKey("/"), []);
     assert.deepEqual(deserializeMeshKey(serializeMeshKey(["a/b", "c\\d"])), ["a/b", "c\\d"]);
+  });
+});
+
+describe("mesh config: values that are not literals (pi models.json semantics)", () => {
+  const base = { endpoint: "http://localhost:6420" };
+  const env = { MESH_TOKEN: "from-env", NS: "prod", PART_A: "ab", PART_B: "cd" } as Record<string, string | undefined>;
+
+  it("leaves a literal token alone and resolves nothing", async () => {
+    const config = parseMeshConfig({ ...base, token: "sk_plain" });
+    assert.equal(config.token, "sk_plain");
+    assert.equal("tokenExpression" in config, false);
+    assert.equal(await resolveMeshConfig(config), config, "the literal path costs nothing and spawns nothing");
+  });
+
+  it("records interpolation as an expression instead of evaluating it at parse time", () => {
+    const config = parseMeshConfig({ ...base, token: "${MESH_TOKEN}" });
+    assert.equal("token" in config, false, "parsing must not read the environment — that would run at load");
+    assert.equal(config.tokenExpression, "${MESH_TOKEN}");
+  });
+
+  it("expands $NAME and ${NAME} the way pi does", async () => {
+    for (const written of ["$MESH_TOKEN", "${MESH_TOKEN}"]) {
+      const resolved = await resolveMeshConfig(parseMeshConfig({ ...base, token: written }), { env });
+      assert.equal(resolved.token, "from-env", `${written} must interpolate`);
+    }
+  });
+
+  it("concatenates literals around a reference, as pi's template does", async () => {
+    const resolved = await resolveMeshConfig(parseMeshConfig({ ...base, token: "sk_${PART_A}${PART_B}" }), { env });
+    assert.equal(resolved.token, "sk_abcd");
+  });
+
+  it("unescapes $$ and $! exactly as pi does", async () => {
+    // pi unescapes even with nothing to interpolate, so the two agree byte for byte.
+    assert.equal((await resolveMeshConfig(parseMeshConfig({ ...base, token: "$$literal" }), { env })).token, "$literal");
+    assert.equal((await resolveMeshConfig(parseMeshConfig({ ...base, token: "$!bang" }), { env })).token, "!bang");
+    assert.equal((await resolveMeshConfig(parseMeshConfig({ ...base, token: "$$${PART_A}" }), { env })).token, "$ab");
+  });
+
+  it("names the missing variable rather than sending an empty token", async () => {
+    await assert.rejects(
+      () => resolveMeshConfig(parseMeshConfig({ ...base, token: "$NOT_SET_ANYWHERE" }), { env }),
+      (err: any) => /\$NOT_SET_ANYWHERE/.test(err.message) && /not set/.test(err.message) && /!pass show/.test(err.message),
+    );
+  });
+
+  it("runs a !command through a shell, exactly as pi does, and trims it", async () => {
+    const resolved = await resolveMeshConfig(parseMeshConfig({ ...base, token: "!printf 'secret-token\\n'" }), { env });
+    assert.equal(resolved.token, "secret-token", "a trailing newline must not travel into the Authorization header");
+  });
+
+  it("gives !command the shell's quoting and pipelines, because pi's does", async () => {
+    const resolved = await resolveMeshConfig(parseMeshConfig({ ...base, token: '!printf "%s-%s" "${PART_A}" "${PART_B}"' }), { env });
+    assert.equal(resolved.token, "ab-cd");
+  });
+
+  it("re-resolves a command on every call instead of caching it", async () => {
+    // pi runs model-config commands per request and promises no caching; a rotated
+    // token must be picked up rather than frozen for the session.
+    const config = parseMeshConfig({ ...base, token: '!date +%s%N' });
+    const first = await resolveMeshConfig(config);
+    const second = await resolveMeshConfig(config);
+    assert.notEqual(first.token, second.token);
+  });
+
+  it("reports a command that fails, with its exit code and own stderr", async () => {
+    await assert.rejects(
+      () => resolveMeshConfig(parseMeshConfig({ ...base, token: "!echo 'vault is sealed' >&2; exit 3" })),
+      (err: any) => /exit code 3/.test(err.message) && /vault is sealed/.test(err.message),
+    );
+  });
+
+  it("reports an empty command output rather than passing a blank token", async () => {
+    await assert.rejects(
+      () => resolveMeshConfig(parseMeshConfig({ ...base, token: "!printf '  \\n'" })),
+      /produced an empty token/,
+    );
+  });
+
+  it("kills a command that overruns its budget", async () => {
+    // The timeout is injected: waiting out the real 10 s would make this a stall.
+    await assert.rejects(
+      () => resolveMeshConfig(parseMeshConfig({ ...base, token: "!sleep 30" }), { timeoutMs: 150 }),
+      /did not finish within 150 ms/,
+    );
+  });
+
+  it("interpolates a namespace but refuses to run a command for one", async () => {
+    const resolved = await resolveMeshConfig(parseMeshConfig({ ...base, namespace: "$NS" }), { env });
+    assert.equal(resolved.namespace, "prod");
+    assert.throws(() => parseMeshConfig({ ...base, namespace: "!echo ns" }), /takes a literal or \$ENV_VAR/);
+  });
+
+  it("rejects a token that is neither a string nor usable", () => {
+    assert.throws(() => parseMeshConfig({ ...base, token: 42 }), /mesh config/);
+  });
+
+  it("never interpolates the endpoint", () => {
+    const config = parseMeshConfig({ ...base, token: "$MESH_TOKEN" });
+    assert.equal(config.endpoint, "http://localhost:6420", "a URL is not a template");
   });
 });
 

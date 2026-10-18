@@ -23,7 +23,7 @@ import type { BrokerManager } from "./broker-manager.ts";
 import { MESH_PROBE_TIMEOUT_MS } from "./constants.ts";
 import { planGc } from "./gc.ts";
 import type { MeshConfig } from "./mesh-config.ts";
-import { loadMeshConfig } from "./mesh-config.ts";
+import { loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import { listMeshNodes, type MeshNodeInfo } from "./mesh-engine.ts";
 import { decodeAgentName, displayPath, listPeers, withTimeout } from "./utils.ts";
 
@@ -173,7 +173,7 @@ async function meshCheck(deps: DoctorDeps): Promise<DoctorCheck> {
   const GUIDE = "see docs/guides/mesh-setup.md";
   let config: MeshConfig;
   try {
-    config = loadMeshConfig(deps.meshConfigPath);
+    config = await resolveMeshConfig(loadMeshConfig(deps.meshConfigPath));
   } catch (err) {
     const shown = displayPath(deps.meshConfigPath) ?? deps.meshConfigPath;
     if (!fs.existsSync(deps.meshConfigPath)) {

@@ -12,7 +12,7 @@
  * fan-out, no listing integration — listings stay names-only by design.
  */
 import { guardMeshConfig } from "./mesh-guard.ts";
-import { XFER_INSTANCE_ACTOR, loadMeshConfig } from "./mesh-config.ts";
+import { XFER_INSTANCE_ACTOR, loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import type { TargetDescriber } from "./targets.ts";
 
 /** Bound on one describe call so an unreachable actor cannot stall targets.list. */
@@ -42,7 +42,7 @@ interface MeshClient {
 
 async function connect(configPath: string): Promise<MeshClient | null> {
   try {
-    const config = loadMeshConfig(configPath);
+    const config = await resolveMeshConfig(loadMeshConfig(configPath));
     // Computed specifier on purpose: a literal `import("rivetkit/client")` would
     // be inlined by esbuild and drag the whole mesh runtime into broker.cjs.
     const specifier = ["rivetkit", "client"].join("/");

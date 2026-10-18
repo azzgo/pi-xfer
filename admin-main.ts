@@ -31,7 +31,7 @@ import { MESH_PROBE_TIMEOUT_MS, XFER_DIR } from "./constants.ts";
 import { collectGarbage } from "./gc.ts";
 import { deriveMeshNodeState, listMeshNodes, listMeshState, meshPoolName, type MeshActorStatus, type MeshNodeState, type MeshRunnerInfo } from "./mesh-engine.ts";
 import { MESH_STATE_MARKS, MESH_STATE_ORDER, poolLabel } from "./mesh-status.ts";
-import { loadMeshConfig } from "./mesh-config.ts";
+import { loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import { MeshNode } from "./mesh.ts";
 import { isEntryPoint, listPeers, withTimeout } from "./utils.ts";
 
@@ -158,7 +158,7 @@ async function meshView(xferDir: string, meshNode: MeshNode | null, notice: Mesh
   if (!fs.existsSync(configPath)) return emptyMeshView({ configured: false, notice });
   let config: MeshConfig;
   try {
-    config = loadMeshConfig(configPath);
+    config = await resolveMeshConfig(loadMeshConfig(configPath));
   } catch (err) {
     return emptyMeshView({ error: err instanceof Error ? err.message : String(err), notice });
   }
@@ -795,7 +795,7 @@ export function createAdminServer(options: AdminServerOptions): AdminServer {
     if (!fs.existsSync(configPath)) return refuse("mesh is not configured — no mesh.config.json in the xfer dir");
     let config: MeshConfig;
     try {
-      config = loadMeshConfig(configPath);
+      config = await resolveMeshConfig(loadMeshConfig(configPath));
     } catch (err) {
       return refuse(`mesh config unusable — ${err instanceof Error ? err.message : String(err)}`);
     }
