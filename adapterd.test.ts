@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -33,12 +34,36 @@ function record(overrides: Partial<InboxRecord> = {}): InboxRecord {
   };
 }
 
-async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+/**
+ * Resolve once a daemon's Unix socket can actually be connected to.
+ *
+ * `fs.existsSync(sock)` is not that moment: `bind()` creates the file before
+ * `listen()` starts accepting, so connecting in that window gets ECONNREFUSED.
+ * Anything that sends right after the socket appears has to wait for a
+ * successful connect — retried until the budget runs out, because the window is
+ * real but short.
+ */
+async function waitForSocket(sockPath: string, timeoutMs = 10000): Promise<void> {
   const started = Date.now();
-  while (!condition()) {
-    if (Date.now() - started > timeoutMs) throw new Error("timed out waiting for condition");
+  let lastError = "never attempted";
+  while (Date.now() - started < timeoutMs) {
+    if (await canConnect(sockPath)) return;
+    lastError = `connect to ${sockPath} failed`;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  throw new Error(`timed out waiting for ${sockPath} to accept connections (${lastError})`);
+}
+
+function canConnect(sockPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ path: sockPath });
+    const done = (ok: boolean): void => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
 }
 
 function waitExit(child: ChildProcess, timeoutMs = 20000): Promise<number | null> {
@@ -269,7 +294,7 @@ describe("xfer-adapterd CLI smoke", () => {
     let stderr = "";
     child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
     try {
-      await waitFor(() => fs.existsSync(endpointForName("agent-smoke", dir)), 10000);
+      await waitForSocket(endpointForName("agent-smoke", dir));
       const doc = path.join(dir, "handoff.md");
       fs.writeFileSync(doc, "cli body");
       await sendNotify("agent-smoke", { type: "xfer-notify", msg_id: "cli-1", from: "sender", file: doc, summary: "s" }, dir);
@@ -287,7 +312,7 @@ describe("xfer-adapterd CLI smoke", () => {
     let stderr = "";
     child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
     try {
-      await waitFor(() => fs.existsSync(endpointForName("agent-stamp", dir)), 10000);
+      await waitForSocket(endpointForName("agent-stamp", dir));
       fs.writeFileSync(metadataForName("agent-sender", dir), JSON.stringify({ xferName: "agent-sender", cwd: "/srv/app" }));
       const doc = path.join(dir, "handoff.md");
       fs.writeFileSync(doc, "kind: notification\n# Doc\n");
@@ -310,7 +335,7 @@ describe("xfer-adapterd CLI smoke", () => {
     let stderr = "";
     child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
     try {
-      await waitFor(() => fs.existsSync(endpointForName("agent-plain", dir)), 10000);
+      await waitForSocket(endpointForName("agent-plain", dir));
       const doc = path.join(dir, "handoff.md");
       fs.writeFileSync(doc, "plain body");
       const sender = spawn(process.execPath, [bundle, "send", "agent-plain", doc, "s", "--kind", "task", "--from", "agent-unknown", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
@@ -356,7 +381,7 @@ describe("xfer-adapterd CLI smoke", () => {
     const dir = freshDir();
     const child = spawn(process.execPath, [bundle, "up", "--name", "agent-sig", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
     try {
-      await waitFor(() => fs.existsSync(endpointForName("agent-sig", dir)), 10000);
+      await waitForSocket(endpointForName("agent-sig", dir));
       child.kill("SIGTERM");
       const code = await waitExit(child);
       assert.equal(code, 0);
