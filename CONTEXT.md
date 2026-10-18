@@ -10,6 +10,14 @@ _Avoid_: network, cluster, swarm, overlay
 One actor on the Mesh engine — one name, one outbound engine connection, one independent participant. The unit of joining, addressing, and liveness; host-agnostic (a pi instance and an Adapter Daemon join the same way).
 _Avoid_: peer (reserved for local socket discovery), bridge, worker, session
 
+**Runner / pool**:
+A live process on a machine that can host a Node's actor, and the named group of them on the engine (`runner_name_selector`; an absent name is the engine's `default` pool). A Node's actor only ever runs inside a runner from its own pool — a Node whose pool has none is on the engine but cannot receive anything.
+_Avoid_: worker, envoy (the engine's own word for it — keep it in engine-facing code only), host
+
+**Delivery verdict**:
+What a listing says about one Node's ability to receive a Handoff, derived from the actor record joined with the runners in its pool. Distinct from **actor status** (`Running` / `Sleeping` / `Idle` / `Crashed` / `Pending`), which is what the engine says about the actor alone — the record can read `no_envoys` while its pool has a live runner, so a verdict is never a status.
+_Avoid_: health, presence (presence belongs to local peers), online/offline
+
 
 ## Adapter Daemon (non-pi Agent Hosts)
 

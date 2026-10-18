@@ -296,11 +296,21 @@ function writeMeshConfig(dir: string, body: Record<string, unknown> = {}): void 
   fs.writeFileSync(path.join(dir, "mesh.config.json"), JSON.stringify({ endpoint: MESH_ENDPOINT, ...body }), "utf-8");
 }
 
-function stubEngine(nodes: MeshNodeInfo[], options: { fail?: string } = {}) {
+function stubEngine(nodes: MeshNodeInfo[], options: { fail?: string; envoys?: string[] | null } = {}) {
   const original = globalThis.fetch;
   const calls: string[] = [];
+  const pools = options.envoys
+    ?? [...new Set(nodes.filter((n) => n.status !== "Idle").map((n) => n.pool ?? "default"))];
   globalThis.fetch = (async (input: any) => {
+    const url = new URL(String(input));
     calls.push(String(input));
+    if (url.pathname === "/envoys") {
+      if (options.envoys === null) return new Response("nope", { status: 500 });
+      return new Response(
+        JSON.stringify({ envoys: pools.map((pool) => ({ pool_name: pool, envoy_key: `e-${pool}`, last_ping_ts: 1 })), pagination: {} }),
+        { status: 200 },
+      );
+    }
     if (options.fail) throw new Error(options.fail);
     return new Response(
       JSON.stringify({
@@ -362,7 +372,7 @@ describe("admin mesh control — presence grouping", () => {
       assert.match(res.body, /<h3 class="subhead">mesh nodes<\/h3>/, "mesh nodes get their own subsection");
       assert.match(res.body, /laptop/);
       assert.equal((res.body.match(/action="\/control\/mesh\/down"/g) ?? []).length, 3, "one down action per node");
-      assert.match(res.body, /idle · no runner/);
+      assert.match(res.body, /no runner in pool &quot;host-b&quot;/);
       assert.match(res.body, /pool host-b/);
       assert.match(res.body, /pool \(default\)/);
       assert.match(res.body, /<b class="mono">mesh<\/b><span class="muted">3 node\(s\) · 3 pool\(s\)<\/span>/, "SERVICES counts nodes and distinct pools");
