@@ -115,4 +115,4 @@ scripts/xfer up --name <my-node-name> --mesh --on-handoff ~/xfer/wake.sh
 | `inbox` model | take-to-read, no retention |
 | `mesh send` | enqueues without joining; needs only `mesh.config.json` |
 | `.sha256` files in pi-xfer | hash only, **no filename** — plain `sha256sum -c <file>` fails |
-| credentials | exactly one place: URL userinfo **or** `namespace`/`token` fields |
+| credentials | `namespace`/`token` fields only — URL userinfo is refused; `token` may be `$VAR` or `!command` |

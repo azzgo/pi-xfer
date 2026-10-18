@@ -189,7 +189,7 @@ var Board = class {
 };
 
 // broker-manager.ts
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 var fs6 = __toESM(require("node:fs"), 1);
 var net2 = __toESM(require("node:net"), 1);
 var path7 = __toESM(require("node:path"), 1);
@@ -519,6 +519,7 @@ function renderHandoffDoc({ msgId, prompt, page: page2, picks, record, fromTarge
 }
 
 // mesh-config.ts
+var import_node_child_process = require("node:child_process");
 var fs3 = __toESM(require("node:fs"), 1);
 var XFER_INSTANCE_ACTOR = "xfer-instance";
 function parseMeshConfig(raw) {
@@ -529,36 +530,56 @@ function parseMeshConfig(raw) {
   if (typeof obj.endpoint !== "string" || obj.endpoint.trim() === "") {
     throw new Error('mesh config needs a non-empty "endpoint"');
   }
+  rejectUrlAuth(obj.endpoint.trim(), obj);
   const config = { endpoint: obj.endpoint.trim() };
-  if (typeof obj.namespace === "string" && obj.namespace !== "") config.namespace = obj.namespace;
-  if (typeof obj.token === "string" && obj.token !== "") config.token = obj.token;
+  if (typeof obj.namespace === "string" && obj.namespace !== "") {
+    if (isCommandValue(obj.namespace)) {
+      throw new Error('mesh config "namespace" takes a literal or $ENV_VAR, not a "!" command');
+    }
+    if (isTemplateValue(obj.namespace)) config.namespaceExpression = obj.namespace;
+    else config.namespace = obj.namespace;
+  }
+  if (obj.token !== void 0) {
+    if (typeof obj.token !== "string") {
+      throw new Error(
+        'mesh config "token" must be a string — a literal, "$MESH_TOKEN", or "!pass show mesh-token". The old { "command": [...] } object form was never released'
+      );
+    }
+    if (obj.token !== "") {
+      if (isTemplateValue(obj.token) || isCommandValue(obj.token)) config.tokenExpression = obj.token;
+      else config.token = obj.token;
+    }
+  }
   if (obj.pool !== void 0) {
     if (typeof obj.pool !== "string" || obj.pool.trim() === "") {
       throw new Error('mesh config "pool" must be a non-empty string');
     }
     config.pool = obj.pool.trim();
   }
-  return withUrlAuth(config);
-}
-function withUrlAuth(config) {
-  try {
-    const url = new URL(config.endpoint);
-    if (url.username || url.password) {
-      if (config.namespace || config.token) {
-        throw new Error(
-          "mesh config sets credentials twice — namespace/token fields AND URL userinfo (https://ns:token@host). Keep exactly one; a stale placeholder in either would otherwise win silently"
-        );
-      }
-      config.namespace = decodeURIComponent(url.username);
-      config.token = decodeURIComponent(url.password);
-      url.username = "";
-      url.password = "";
-      config.endpoint = url.toString();
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("credentials twice")) throw err;
-  }
   return config;
+}
+function rejectUrlAuth(endpoint, raw) {
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return;
+  }
+  if (!url.username && !url.password) return;
+  const namespace = decodeURIComponent(url.username) || "<namespace>";
+  url.username = "";
+  url.password = "";
+  const migrated = {
+    endpoint: url.toString(),
+    namespace,
+    token: "<token>",
+    ...typeof raw.pool === "string" && raw.pool !== "" ? { pool: raw.pool } : {}
+  };
+  throw new Error(
+    `mesh config puts credentials in the endpoint URL (https://namespace:token@host), which is no longer supported — one URL carrying several settings was too easy to get wrong. Move them to their own fields:
+  ${JSON.stringify(migrated, null, 2).replace(/\n/g, "\n  ")}
+The token field also accepts "$MESH_TOKEN" (an environment variable) or "!pass show mesh-token" (a command), so it never has to be written into this file at all.`
+  );
 }
 function loadMeshConfig(configPath) {
   let text;
@@ -574,6 +595,148 @@ function loadMeshConfig(configPath) {
     throw new Error(`mesh config is not valid JSON: ${configPath} — ${err instanceof Error ? err.message : String(err)}`);
   }
   return parseMeshConfig(raw);
+}
+function isCommandValue(value) {
+  return value.startsWith("!");
+}
+function isTemplateValue(value) {
+  return parseTemplate(value).some((part) => part.type === "env") || value.includes("$$") || value.includes("$!");
+}
+var ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
+function parseTemplate(value) {
+  const parts = [];
+  let index = 0;
+  const appendLiteral = (text) => {
+    if (!text) return;
+    const previous = parts[parts.length - 1];
+    if (previous?.type === "literal") {
+      previous.value += text;
+      return;
+    }
+    parts.push({ type: "literal", value: text });
+  };
+  while (index < value.length) {
+    const dollarIndex = value.indexOf("$", index);
+    if (dollarIndex < 0) {
+      appendLiteral(value.slice(index));
+      break;
+    }
+    appendLiteral(value.slice(index, dollarIndex));
+    const nextChar = value[dollarIndex + 1];
+    if (nextChar === "$" || nextChar === "!") {
+      appendLiteral(nextChar);
+      index = dollarIndex + 2;
+      continue;
+    }
+    if (nextChar === "{") {
+      const endIndex = value.indexOf("}", dollarIndex + 2);
+      if (endIndex < 0) {
+        appendLiteral("$");
+        index = dollarIndex + 1;
+        continue;
+      }
+      const name = value.slice(dollarIndex + 2, endIndex);
+      if (ENV_VAR_NAME_RE.test(name)) parts.push({ type: "env", name });
+      else appendLiteral(value.slice(dollarIndex, endIndex + 1));
+      index = endIndex + 1;
+      continue;
+    }
+    const match = value.slice(dollarIndex + 1).match(ENV_VAR_NAME_PREFIX_RE);
+    if (match) {
+      parts.push({ type: "env", name: match[0] });
+      index = dollarIndex + 1 + match[0].length;
+      continue;
+    }
+    appendLiteral("$");
+    index = dollarIndex + 1;
+  }
+  return parts;
+}
+function templateEnvNames(value) {
+  const names = [];
+  for (const part of parseTemplate(value)) {
+    if (part.type === "env" && !names.includes(part.name)) names.push(part.name);
+  }
+  return names;
+}
+var TOKEN_COMMAND_TIMEOUT_MS = 1e4;
+function missingEnvName(value, env = process.env) {
+  for (const name of templateEnvNames(value)) {
+    if (env[name] === void 0) return name;
+  }
+  return null;
+}
+function expandTemplate(value, env) {
+  return parseTemplate(value).map((part) => part.type === "literal" ? part.value : env[part.name] ?? "").join("");
+}
+async function runTokenCommand(command, timeoutMs = TOKEN_COMMAND_TIMEOUT_MS, env = process.env) {
+  const shell2 = process.env.SHELL || "/bin/sh";
+  const child = (0, import_node_child_process.spawn)(shell2, ["-c", command], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env,
+    shell: false
+  });
+  const collect = (async () => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const outcome = await new Promise((resolve, reject) => {
+      child.once("error", (err) => {
+        reject(new Error(`mesh token command "!${command}" could not be started — ${err.message}`));
+      });
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    if (outcome.code !== 0) {
+      const reason = outcome.signal ? `killed by ${outcome.signal}` : `exit code ${outcome.code}`;
+      throw new Error(`mesh token command "!${command}" produced no token (${reason})${stderr.trim() ? ` — ${stderr.trim()}` : ""}`);
+    }
+    const token = stdout.trim();
+    if (!token) throw new Error(`mesh token command "!${command}" produced an empty token`);
+    return token;
+  })();
+  try {
+    return await withTimeout(collect, timeoutMs);
+  } catch (err) {
+    child.kill("SIGKILL");
+    if (err instanceof Error && err.message.startsWith("timed out after")) {
+      throw new Error(`mesh token command "!${command}" did not finish within ${timeoutMs} ms`);
+    }
+    throw err;
+  }
+}
+async function resolveMeshConfig(config, options = {}) {
+  if (!config.tokenExpression && !config.namespaceExpression) return config;
+  const env = options.env ?? process.env;
+  const timeoutMs = options.timeoutMs ?? TOKEN_COMMAND_TIMEOUT_MS;
+  const { tokenExpression, namespaceExpression, ...rest } = config;
+  const resolved = { ...rest };
+  if (tokenExpression !== void 0) {
+    if (isCommandValue(tokenExpression)) {
+      resolved.token = await runTokenCommand(tokenExpression.slice(1), timeoutMs, env);
+    } else {
+      const missing = missingEnvName(tokenExpression, env);
+      if (missing) {
+        throw new Error(
+          `mesh config "token" reads $${missing}, which is not set. Export it in the environment that runs pi, or point the field at a command instead: "!pass show mesh-token"`
+        );
+      }
+      resolved.token = expandTemplate(tokenExpression, env);
+    }
+  }
+  if (namespaceExpression !== void 0) {
+    const missing = missingEnvName(namespaceExpression, env);
+    if (missing) {
+      throw new Error(`mesh config "namespace" reads $${missing}, which is not set`);
+    }
+    resolved.namespace = expandTemplate(namespaceExpression, env);
+  }
+  return resolved;
 }
 function deserializeMeshKey(serialized) {
   if (serialized === void 0 || serialized === null || serialized === "/" || serialized === "") return [];
@@ -612,7 +775,7 @@ function createMeshDescriber(configPath) {
 }
 async function connect(configPath) {
   try {
-    const config = loadMeshConfig(configPath);
+    const config = await resolveMeshConfig(loadMeshConfig(configPath));
     const specifier = ["rivetkit", "client"].join("/");
     const { createClient } = await import(specifier);
     return { client: createClient(guardMeshConfig({ endpoint: config.endpoint, namespace: config.namespace, token: config.token })) };
@@ -1718,7 +1881,7 @@ var BrokerManager = class {
     const logFd = fs6.openSync(logPath, "a");
     let child;
     try {
-      child = (0, import_node_child_process.spawn)(process.execPath, [
+      child = (0, import_node_child_process2.spawn)(process.execPath, [
         BROKER_MAIN,
         "--port",
         String(port),
@@ -2221,7 +2384,7 @@ async function meshView(xferDir, meshNode, notice = null) {
   if (!fs8.existsSync(configPath)) return emptyMeshView({ configured: false, notice });
   let config;
   try {
-    config = loadMeshConfig(configPath);
+    config = await resolveMeshConfig(loadMeshConfig(configPath));
   } catch (err) {
     return emptyMeshView({ error: err instanceof Error ? err.message : String(err), notice });
   }
@@ -2768,7 +2931,7 @@ function createAdminServer(options) {
     if (!fs8.existsSync(configPath)) return refuse("mesh is not configured — no mesh.config.json in the xfer dir");
     let config;
     try {
-      config = loadMeshConfig(configPath);
+      config = await resolveMeshConfig(loadMeshConfig(configPath));
     } catch (err) {
       return refuse(`mesh config unusable — ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -2826,8 +2989,8 @@ async function destroyMeshActor(config, actorId) {
 }
 function openInSystem(targetPath, isFile) {
   const opener = process.platform === "darwin" ? isFile ? ["open", "-t", targetPath] : ["open", targetPath] : process.platform === "win32" ? ["explorer", targetPath] : ["xdg-open", targetPath];
-  import("node:child_process").then(({ spawn: spawn2 }) => {
-    spawn2(opener[0], opener.slice(1), { detached: true, stdio: "ignore" }).unref();
+  import("node:child_process").then(({ spawn: spawn3 }) => {
+    spawn3(opener[0], opener.slice(1), { detached: true, stdio: "ignore" }).unref();
   });
 }
 function startWatchers(xferDir, boardDir, publish) {

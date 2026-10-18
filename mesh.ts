@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
-import { loadMeshConfig, type MeshConfig } from "./mesh-config.ts";
+import { loadMeshConfig, resolveMeshConfig, type MeshConfig } from "./mesh-config.ts";
 import {
   deriveMeshNodeState,
   findMeshNode,
@@ -91,7 +91,15 @@ export class MeshNode {
     return this.engine && this.nodeName ? { online: true, name: this.nodeName } : { online: false };
   }
 
-  /** The pool this host's runner joins, and the engine it points at. */
+  /**
+   * The pool this host's runner joins, and the engine it points at.
+   *
+   * Deliberately **unresolved**: a `$VAR` or `!command` token stays in
+   * `tokenExpression` and is never evaluated or spawned, because every caller of
+   * this is a display path (`/xfer mesh list`, `/xfer mesh status`) that reads
+   * `pool` and `endpoint`. Anything that talks to the engine calls
+   * {@link resolveMeshConfig} itself.
+   */
   config(): MeshConfig {
     return this.configOverride ?? loadMeshConfig(this.configPath);
   }
@@ -108,7 +116,8 @@ export class MeshNode {
    * answers with or without `up`.
    */
   async state(): Promise<MeshListing> {
-    return this.engine ? this.engine.state() : listMeshState(this.configOverride ?? loadMeshConfig(this.configPath));
+    if (this.engine) return this.engine.state();
+    return listMeshState(await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath)));
   }
 
   /** One node's verdict, joined against its pool's live runners. */
@@ -120,7 +129,9 @@ export class MeshNode {
 
   /** Pre-send check for a target; rejects with MeshPreflightError when it cannot receive. */
   async preflight(target: string): Promise<MeshPreflight> {
-    return this.engine ? this.engine.preflight(target) : preflightMeshSend(this.configOverride ?? loadMeshConfig(this.configPath), target);
+    if (this.engine) return this.engine.preflight(target);
+    const config = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
+    return preflightMeshSend(config, target);
   }
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
@@ -135,7 +146,7 @@ export class MeshNode {
   async up(name: string): Promise<void> {
     const current = this.status();
     if (current.online) throw new Error(`mesh is already online as "${current.name}" — /xfer mesh down first`);
-    const config = this.configOverride ?? loadMeshConfig(this.configPath);
+    const config = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
     const session = {
       node: name,
       endpoint: config.endpoint,

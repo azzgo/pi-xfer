@@ -13,7 +13,7 @@ import { MESH_CONFIG_PATH } from "./constants.ts";
 import type { MeshNode } from "./mesh.ts";
 import { ensureRunnerPool, listMeshNodes } from "./mesh-engine.ts";
 import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTableLines, meshUnreachableLines } from "./mesh-status.ts";
-import { loadMeshConfig } from "./mesh-config.ts";
+import { loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
 
@@ -418,7 +418,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         if (sub === "setup") {
           try {
-            const config = loadMeshConfig(MESH_CONFIG_PATH);
+            const config = await resolveMeshConfig(loadMeshConfig(MESH_CONFIG_PATH));
             const lines = [`✓ config OK (${MESH_CONFIG_PATH}) — engine ${config.endpoint}`];
             if (config.pool) {
               const { existed } = await ensureRunnerPool(config);

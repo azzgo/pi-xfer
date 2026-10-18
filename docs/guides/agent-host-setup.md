@@ -67,9 +67,10 @@ file, same engine). Notes:
   [per-host pools](mesh-setup.md#per-host-runner-pools-mixed-fleets). An
   existing actor does not move pools by itself — if you change `pool` later,
   follow the [migration warning](mesh-setup.md) (down, restart, up).
-- Credentials go in **exactly one place**: either URL userinfo
-  (`https://ns:token@host`) or the `namespace`/`token` fields — not both. The
-  config parser refuses both-at-once instead of silently picking one.
+- Credentials go in their **own fields** — `namespace` and `token`. URL userinfo
+  (`https://ns:token@host`) is refused with a migration message: one URL carrying
+  several settings was too easy to get wrong. `token` may be a literal, `$VAR`, or
+  `!command` — see [values that are not literals](mesh-setup.md#values-that-are-not-literals).
 
 ## 3. Choose a delivery mode
 

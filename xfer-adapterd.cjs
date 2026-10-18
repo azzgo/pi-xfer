@@ -188,36 +188,56 @@ function parseMeshConfig(raw) {
   if (typeof obj.endpoint !== "string" || obj.endpoint.trim() === "") {
     throw new Error('mesh config needs a non-empty "endpoint"');
   }
+  rejectUrlAuth(obj.endpoint.trim(), obj);
   const config3 = { endpoint: obj.endpoint.trim() };
-  if (typeof obj.namespace === "string" && obj.namespace !== "") config3.namespace = obj.namespace;
-  if (typeof obj.token === "string" && obj.token !== "") config3.token = obj.token;
+  if (typeof obj.namespace === "string" && obj.namespace !== "") {
+    if (isCommandValue(obj.namespace)) {
+      throw new Error('mesh config "namespace" takes a literal or $ENV_VAR, not a "!" command');
+    }
+    if (isTemplateValue(obj.namespace)) config3.namespaceExpression = obj.namespace;
+    else config3.namespace = obj.namespace;
+  }
+  if (obj.token !== void 0) {
+    if (typeof obj.token !== "string") {
+      throw new Error(
+        'mesh config "token" must be a string — a literal, "$MESH_TOKEN", or "!pass show mesh-token". The old { "command": [...] } object form was never released'
+      );
+    }
+    if (obj.token !== "") {
+      if (isTemplateValue(obj.token) || isCommandValue(obj.token)) config3.tokenExpression = obj.token;
+      else config3.token = obj.token;
+    }
+  }
   if (obj.pool !== void 0) {
     if (typeof obj.pool !== "string" || obj.pool.trim() === "") {
       throw new Error('mesh config "pool" must be a non-empty string');
     }
     config3.pool = obj.pool.trim();
   }
-  return withUrlAuth(config3);
-}
-function withUrlAuth(config3) {
-  try {
-    const url3 = new URL(config3.endpoint);
-    if (url3.username || url3.password) {
-      if (config3.namespace || config3.token) {
-        throw new Error(
-          "mesh config sets credentials twice — namespace/token fields AND URL userinfo (https://ns:token@host). Keep exactly one; a stale placeholder in either would otherwise win silently"
-        );
-      }
-      config3.namespace = decodeURIComponent(url3.username);
-      config3.token = decodeURIComponent(url3.password);
-      url3.username = "";
-      url3.password = "";
-      config3.endpoint = url3.toString();
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("credentials twice")) throw err;
-  }
   return config3;
+}
+function rejectUrlAuth(endpoint, raw) {
+  let url3;
+  try {
+    url3 = new URL(endpoint);
+  } catch {
+    return;
+  }
+  if (!url3.username && !url3.password) return;
+  const namespace = decodeURIComponent(url3.username) || "<namespace>";
+  url3.username = "";
+  url3.password = "";
+  const migrated = {
+    endpoint: url3.toString(),
+    namespace,
+    token: "<token>",
+    ...typeof raw.pool === "string" && raw.pool !== "" ? { pool: raw.pool } : {}
+  };
+  throw new Error(
+    `mesh config puts credentials in the endpoint URL (https://namespace:token@host), which is no longer supported — one URL carrying several settings was too easy to get wrong. Move them to their own fields:
+  ${JSON.stringify(migrated, null, 2).replace(/\n/g, "\n  ")}
+The token field also accepts "$MESH_TOKEN" (an environment variable) or "!pass show mesh-token" (a command), so it never has to be written into this file at all.`
+  );
 }
 function loadMeshConfig(configPath) {
   let text;
@@ -233,6 +253,145 @@ function loadMeshConfig(configPath) {
     throw new Error(`mesh config is not valid JSON: ${configPath} — ${err instanceof Error ? err.message : String(err)}`);
   }
   return parseMeshConfig(raw);
+}
+function isCommandValue(value) {
+  return value.startsWith("!");
+}
+function isTemplateValue(value) {
+  return parseTemplate(value).some((part) => part.type === "env") || value.includes("$$") || value.includes("$!");
+}
+function parseTemplate(value) {
+  const parts = [];
+  let index = 0;
+  const appendLiteral = (text) => {
+    if (!text) return;
+    const previous = parts[parts.length - 1];
+    if (previous?.type === "literal") {
+      previous.value += text;
+      return;
+    }
+    parts.push({ type: "literal", value: text });
+  };
+  while (index < value.length) {
+    const dollarIndex = value.indexOf("$", index);
+    if (dollarIndex < 0) {
+      appendLiteral(value.slice(index));
+      break;
+    }
+    appendLiteral(value.slice(index, dollarIndex));
+    const nextChar = value[dollarIndex + 1];
+    if (nextChar === "$" || nextChar === "!") {
+      appendLiteral(nextChar);
+      index = dollarIndex + 2;
+      continue;
+    }
+    if (nextChar === "{") {
+      const endIndex = value.indexOf("}", dollarIndex + 2);
+      if (endIndex < 0) {
+        appendLiteral("$");
+        index = dollarIndex + 1;
+        continue;
+      }
+      const name = value.slice(dollarIndex + 2, endIndex);
+      if (ENV_VAR_NAME_RE.test(name)) parts.push({ type: "env", name });
+      else appendLiteral(value.slice(dollarIndex, endIndex + 1));
+      index = endIndex + 1;
+      continue;
+    }
+    const match = value.slice(dollarIndex + 1).match(ENV_VAR_NAME_PREFIX_RE);
+    if (match) {
+      parts.push({ type: "env", name: match[0] });
+      index = dollarIndex + 1 + match[0].length;
+      continue;
+    }
+    appendLiteral("$");
+    index = dollarIndex + 1;
+  }
+  return parts;
+}
+function templateEnvNames(value) {
+  const names = [];
+  for (const part of parseTemplate(value)) {
+    if (part.type === "env" && !names.includes(part.name)) names.push(part.name);
+  }
+  return names;
+}
+function missingEnvName(value, env = process.env) {
+  for (const name of templateEnvNames(value)) {
+    if (env[name] === void 0) return name;
+  }
+  return null;
+}
+function expandTemplate(value, env) {
+  return parseTemplate(value).map((part) => part.type === "literal" ? part.value : env[part.name] ?? "").join("");
+}
+async function runTokenCommand(command, timeoutMs = TOKEN_COMMAND_TIMEOUT_MS, env = process.env) {
+  const shell = process.env.SHELL || "/bin/sh";
+  const child = (0, import_node_child_process.spawn)(shell, ["-c", command], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env,
+    shell: false
+  });
+  const collect = (async () => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const outcome = await new Promise((resolve2, reject) => {
+      child.once("error", (err) => {
+        reject(new Error(`mesh token command "!${command}" could not be started — ${err.message}`));
+      });
+      child.once("close", (code, signal) => resolve2({ code, signal }));
+    });
+    if (outcome.code !== 0) {
+      const reason = outcome.signal ? `killed by ${outcome.signal}` : `exit code ${outcome.code}`;
+      throw new Error(`mesh token command "!${command}" produced no token (${reason})${stderr.trim() ? ` — ${stderr.trim()}` : ""}`);
+    }
+    const token = stdout.trim();
+    if (!token) throw new Error(`mesh token command "!${command}" produced an empty token`);
+    return token;
+  })();
+  try {
+    return await withTimeout(collect, timeoutMs);
+  } catch (err) {
+    child.kill("SIGKILL");
+    if (err instanceof Error && err.message.startsWith("timed out after")) {
+      throw new Error(`mesh token command "!${command}" did not finish within ${timeoutMs} ms`);
+    }
+    throw err;
+  }
+}
+async function resolveMeshConfig(config3, options = {}) {
+  if (!config3.tokenExpression && !config3.namespaceExpression) return config3;
+  const env = options.env ?? process.env;
+  const timeoutMs = options.timeoutMs ?? TOKEN_COMMAND_TIMEOUT_MS;
+  const { tokenExpression, namespaceExpression, ...rest } = config3;
+  const resolved = { ...rest };
+  if (tokenExpression !== void 0) {
+    if (isCommandValue(tokenExpression)) {
+      resolved.token = await runTokenCommand(tokenExpression.slice(1), timeoutMs, env);
+    } else {
+      const missing = missingEnvName(tokenExpression, env);
+      if (missing) {
+        throw new Error(
+          `mesh config "token" reads $${missing}, which is not set. Export it in the environment that runs pi, or point the field at a command instead: "!pass show mesh-token"`
+        );
+      }
+      resolved.token = expandTemplate(tokenExpression, env);
+    }
+  }
+  if (namespaceExpression !== void 0) {
+    const missing = missingEnvName(namespaceExpression, env);
+    if (missing) {
+      throw new Error(`mesh config "namespace" reads $${missing}, which is not set`);
+    }
+    resolved.namespace = expandTemplate(namespaceExpression, env);
+  }
+  return resolved;
 }
 function deserializeMeshKey(serialized) {
   if (serialized === void 0 || serialized === null || serialized === "/" || serialized === "") return [];
@@ -255,12 +414,17 @@ function deserializeMeshKey(serialized) {
   parts.push(current);
   return parts;
 }
-var fs2, XFER_INSTANCE_ACTOR, HANDOFF_QUEUE;
+var import_node_child_process, fs2, XFER_INSTANCE_ACTOR, HANDOFF_QUEUE, ENV_VAR_NAME_RE, ENV_VAR_NAME_PREFIX_RE, TOKEN_COMMAND_TIMEOUT_MS;
 var init_mesh_config = __esm({
   "mesh-config.ts"() {
+    import_node_child_process = require("node:child_process");
     fs2 = __toESM(require("node:fs"), 1);
+    init_utils();
     XFER_INSTANCE_ACTOR = "xfer-instance";
     HANDOFF_QUEUE = "handoff";
+    ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
+    TOKEN_COMMAND_TIMEOUT_MS = 1e4;
   }
 });
 
@@ -49362,7 +49526,7 @@ init_utils();
 // adapterd.src/daemon.ts
 var fs8 = __toESM(require("node:fs"), 1);
 var path10 = __toESM(require("node:path"), 1);
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 init_constants();
 
 // mesh.ts
@@ -49408,7 +49572,15 @@ var MeshNode = class {
   status() {
     return this.engine && this.nodeName ? { online: true, name: this.nodeName } : { online: false };
   }
-  /** The pool this host's runner joins, and the engine it points at. */
+  /**
+   * The pool this host's runner joins, and the engine it points at.
+   *
+   * Deliberately **unresolved**: a `$VAR` or `!command` token stays in
+   * `tokenExpression` and is never evaluated or spawned, because every caller of
+   * this is a display path (`/xfer mesh list`, `/xfer mesh status`) that reads
+   * `pool` and `endpoint`. Anything that talks to the engine calls
+   * {@link resolveMeshConfig} itself.
+   */
   config() {
     return this.configOverride ?? loadMeshConfig(this.configPath);
   }
@@ -49423,7 +49595,8 @@ var MeshNode = class {
    * answers with or without `up`.
    */
   async state() {
-    return this.engine ? this.engine.state() : listMeshState(this.configOverride ?? loadMeshConfig(this.configPath));
+    if (this.engine) return this.engine.state();
+    return listMeshState(await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath)));
   }
   /** One node's verdict, joined against its pool's live runners. */
   async nodeState(target2) {
@@ -49433,7 +49606,9 @@ var MeshNode = class {
   }
   /** Pre-send check for a target; rejects with MeshPreflightError when it cannot receive. */
   async preflight(target2) {
-    return this.engine ? this.engine.preflight(target2) : preflightMeshSend(this.configOverride ?? loadMeshConfig(this.configPath), target2);
+    if (this.engine) return this.engine.preflight(target2);
+    const config3 = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
+    return preflightMeshSend(config3, target2);
   }
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
@@ -49448,7 +49623,7 @@ var MeshNode = class {
   async up(name) {
     const current = this.status();
     if (current.online) throw new Error(`mesh is already online as "${current.name}" — /xfer mesh down first`);
-    const config3 = this.configOverride ?? loadMeshConfig(this.configPath);
+    const config3 = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
     const session = {
       node: name,
       endpoint: config3.endpoint,
@@ -49788,7 +49963,7 @@ async function startAdapterd(options) {
     if (!options.onHandoff) return;
     let child;
     try {
-      child = (0, import_node_child_process.spawn)(options.onHandoff, {
+      child = (0, import_node_child_process2.spawn)(options.onHandoff, {
         shell: true,
         stdio: ["pipe", "inherit", "inherit"],
         env: {
@@ -50027,7 +50202,7 @@ async function runUp(argv, flags) {
     const configPath = str(flags["mesh-config"]) ?? MESH_CONFIG_PATH;
     const engine = str(flags.engine);
     try {
-      const config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) }) : loadMeshConfig(configPath);
+      const config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) }) : await resolveMeshConfig(loadMeshConfig(configPath));
       mesh = { configPath, config: config3 };
     } catch (err) {
       fail(`❌ --mesh requested but mesh is not configured — ${errorText2(err)}`);
@@ -50139,7 +50314,7 @@ async function runMeshSend(argv, flags) {
   const engine = str(flags.engine);
   let config3;
   try {
-    config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) }) : loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH);
+    config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) }) : await resolveMeshConfig(loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH));
   } catch (err) {
     fail(`❌ mesh is not configured — ${errorText2(err)}`);
     return;
