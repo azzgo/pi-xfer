@@ -48454,6 +48454,10 @@ function appendMeshLogLine(logPath, line) {
   } catch {
   }
 }
+function logMeshEvent(logPath, level, message, fields = {}) {
+  if (!shouldLog(level)) return;
+  appendMeshLogLine(logPath, formatMeshLogLine(level, message, fields));
+}
 function splitArgs(args) {
   const [first, second] = args;
   if (typeof first === "string") return { fields: {}, message: first };
@@ -48683,6 +48687,7 @@ async function withTimeout(promise2, ms) {
 }
 
 // mesh-engine.ts
+var DELIVERED_WINDOW_SIZE = 3;
 var MAX_NODE_DESCRIPTION = 500;
 function quietMeshRuntime() {
   if (!process.env.RIVET_LOG_LEVEL) process.env.RIVET_LOG_LEVEL = "silent";
@@ -48703,6 +48708,17 @@ async function applyDescriptionAction(state, value) {
 }
 async function readDescriptionAction(state) {
   return state.description ?? "";
+}
+function isDuplicateMeshHandoff(state, message) {
+  return (state.delivered ?? []).includes(message.id);
+}
+function recordMeshDelivery(state, message) {
+  const window2 = [...(state.delivered ?? []).filter((id) => id !== message.id), message.id];
+  state.delivered = window2.slice(-DELIVERED_WINDOW_SIZE);
+  return state.delivered;
+}
+function meshDuplicateLogLine(write, message, selfKey) {
+  write("info", "mesh duplicate", { id: message.id, from: message.from, to: selfKey || "(unknown)" });
 }
 var NO_ENVOYS_ERROR = "no_envoys";
 function isNoEnvoys(error62) {
@@ -48731,7 +48747,7 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
         // Written through the state proxy, so the note lives with the actor on
         // the engine: it survives node restart/reconnect and stays readable
         // while this node is offline.
-        state: { description: "" },
+        state: { description: "", delivered: [] },
         actions: {
           setDescription: (c, value) => applyDescriptionAction(c.state, value),
           getDescription: (c) => readDescriptionAction(c.state)
@@ -48742,7 +48758,16 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
         run: async (c) => {
           const selfKey = c.key[0] ?? "";
           for await (const message of c.queue.iter()) {
+            if (isDuplicateMeshHandoff(c.state, message.body)) {
+              meshDuplicateLogLine(
+                (level, event2, fields) => logMeshEvent(options.logPath ?? MESH_LOG_PATH, level, event2, fields),
+                message.body,
+                selfKey
+              );
+              continue;
+            }
             onHandoff(message.body, selfKey);
+            recordMeshDelivery(c.state, message.body);
           }
         }
       });
