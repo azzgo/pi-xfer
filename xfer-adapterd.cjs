@@ -48776,9 +48776,9 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
     async preflight(target2) {
       return preflightMeshSend(config3, target2);
     },
-    async queueSend(target2, message) {
+    async queueSend(target2, message, verified) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
-      await preflightMeshSend(config3, target2);
+      if (!verified) await preflightMeshSend(config3, target2);
       const handle = client.get(XFER_INSTANCE_ACTOR, [target2]);
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
@@ -49371,8 +49371,9 @@ var MeshNode = class {
     const message = { id, from, to: target2, summary: params.summary, document: params.document };
     let warning = null;
     try {
-      warning = (await this.engine.preflight(target2)).warning;
-      await this.engine.queueSend(target2, message);
+      const verified = await this.engine.preflight(target2);
+      warning = verified.warning;
+      await this.engine.queueSend(target2, message, verified);
     } catch (err) {
       logMeshEvent(this.logPath, "error", "mesh send failed", {
         from,

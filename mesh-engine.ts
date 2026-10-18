@@ -130,8 +130,14 @@ export interface MeshEngine {
   state(): Promise<MeshListing>;
   /** Permanently destroy one actor. */
   destroyNode(actorId: string): Promise<void>;
-  /** Fire-and-forget enqueue of an inline handoff to the target node. */
-  queueSend(target: string, message: MeshHandoffMessage): Promise<void>;
+  /**
+   * Fire-and-forget enqueue of an inline handoff to the target node.
+   *
+   * `verified` is a verdict the caller already paid for — passing it is what
+   * keeps a send at one engine round. Omitted (or `null`) means the check runs
+   * here, so a caller that never checked cannot enqueue blind.
+   */
+  queueSend(target: string, message: MeshHandoffMessage, verified?: MeshPreflight | null): Promise<void>;
   /** Pre-send check: rejects with {@link MeshPreflightError} when the target cannot receive. */
   preflight(target: string): Promise<MeshPreflight>;
   /** Set this node's own description; resolves with the stored (normalized) value. */
@@ -244,9 +250,9 @@ export function createRivetEngine(
       return preflightMeshSend(config, target);
     },
 
-    async queueSend(target: string, message: MeshHandoffMessage) {
+    async queueSend(target: string, message: MeshHandoffMessage, verified?: MeshPreflight | null) {
       if (!client) throw new Error("mesh is not online — run /xfer mesh up first");
-      await preflightMeshSend(config, target);
+      if (!verified) await preflightMeshSend(config, target);
       const handle = client.get(XFER_INSTANCE_ACTOR, [target]);
       try {
         await handle.send(HANDOFF_QUEUE, message, { signal: AbortSignal.timeout(QUEUE_SEND_TIMEOUT_MS) });
