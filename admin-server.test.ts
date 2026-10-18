@@ -12,7 +12,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Board } from "./board.js";
-import { createAdminServer, type AdminEvent, type AdminServer } from "./admin-main.js";
+import { createAdminServer, type AdminEvent, type AdminServer, type AdminServerOptions } from "./admin-main.js";
+import type { MeshConfig } from "./mesh-config.js";
+import type { MeshNode } from "./mesh.js";
+import { serializeMeshKey } from "./mesh-config.js";
+import type { MeshNodeInfo } from "./mesh-engine.js";
 
 const tmpDirs: string[] = [];
 const servers: AdminServer[] = [];
@@ -27,7 +31,7 @@ interface Harness {
   counters: { shutdowns: number };
 }
 
-function makeHarness(options: { heartbeatMs?: number } = {}): Harness {
+function makeHarness(options: { heartbeatMs?: number; meshNode?: MeshNode; destroyMeshNode?: AdminServerOptions["destroyMeshNode"] } = {}): Harness {
   const xferDir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-admin-server-test-"));
   tmpDirs.push(xferDir);
   const boardDir = path.join(xferDir, "board");
@@ -43,6 +47,8 @@ function makeHarness(options: { heartbeatMs?: number } = {}): Harness {
     shutdown: () => {
       counters.shutdowns += 1;
     },
+    ...(options.meshNode ? { meshNode: options.meshNode } : {}),
+    ...(options.destroyMeshNode ? { destroyMeshNode: options.destroyMeshNode } : {}),
   });
   servers.push(admin);
   const h: Harness = { admin, port: 0, xferDir, boardDir, published, opened, counters };
@@ -281,6 +287,237 @@ describe("admin control endpoints", () => {
     const res = await get(port, "/control?selfcheck=1");
     assert.match(res.body, /peers: 0 socket/);
     assert.match(res.body, /broker: not running/);
+  });
+});
+
+const MESH_ENDPOINT = "http://127.0.0.1:1";
+
+function writeMeshConfig(dir: string, body: Record<string, unknown> = {}): void {
+  fs.writeFileSync(path.join(dir, "mesh.config.json"), JSON.stringify({ endpoint: MESH_ENDPOINT, ...body }), "utf-8");
+}
+
+function stubEngine(nodes: MeshNodeInfo[], options: { fail?: string } = {}) {
+  const original = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    calls.push(String(input));
+    if (options.fail) throw new Error(options.fail);
+    return new Response(
+      JSON.stringify({
+        actors: nodes.map((n) => ({
+          actor_id: n.actorId,
+          key: serializeMeshKey([n.name]),
+          runner_name_selector: n.pool,
+          ...(n.status === "Running" ? { connectable_ts: 1, start_ts: 1 } : {}),
+          ...(n.status === "Sleeping" ? { sleep_ts: 5 } : {}),
+          ...(n.status === "Idle" ? { sleep_ts: 5, error: "no_envoys" } : {}),
+          ...(n.status === "Crashed" ? { error: "boom" } : {}),
+        })),
+      }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+  return { calls, restore: () => { globalThis.fetch = original; } };
+}
+
+interface FakeMeshNode {
+  node: MeshNode;
+  ups: string[];
+  downs: number;
+  online: { name: string } | null;
+}
+
+function fakeMeshNode(options: { upError?: string; upDelayMs?: number } = {}): FakeMeshNode {
+  const state: FakeMeshNode = { node: null as unknown as MeshNode, ups: [], downs: 0, online: null };
+  state.node = {
+    status: () => (state.online ? { online: true, name: state.online.name } : { online: false }),
+    up: async (name: string) => {
+      if (options.upDelayMs) await new Promise((resolve) => setTimeout(resolve, options.upDelayMs));
+      if (options.upError) throw new Error(options.upError);
+      state.ups.push(name);
+      state.online = { name };
+    },
+    down: async () => {
+      state.downs += 1;
+      state.online = null;
+    },
+  } as unknown as MeshNode;
+  return state;
+}
+
+describe("admin mesh control — presence grouping", () => {
+  it("groups local peers and mesh nodes, one row per node with status and pool", async () => {
+    const h = makeHarness();
+    writeMeshConfig(h.xferDir, { pool: "host-a" });
+    fs.writeFileSync(path.join(h.xferDir, "laptop.json"), JSON.stringify({ pid: process.pid, sessionName: "s3" }), "utf-8");
+    fs.writeFileSync(path.join(h.xferDir, "laptop.sock"), "", "utf-8");
+    const stub = stubEngine([
+      { name: "doubao", actorId: "a1", status: "Idle", pool: "host-b" },
+      { name: "agent-grok", actorId: "a2", status: "Running", pool: "host-c" },
+      { name: "quiet", actorId: "a3", status: "Sleeping" },
+    ]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control");
+      assert.equal(res.status, 200);
+      assert.match(res.body, /<h3>local peers<\/h3>/, "peers get their own subsection");
+      assert.match(res.body, /<h3 class="subhead">mesh nodes<\/h3>/, "mesh nodes get their own subsection");
+      assert.match(res.body, /laptop/);
+      assert.equal((res.body.match(/action="\/control\/mesh\/down"/g) ?? []).length, 3, "one down action per node");
+      assert.match(res.body, /idle · no runner/);
+      assert.match(res.body, /pool host-b/);
+      assert.match(res.body, /pool \(default\)/);
+      assert.match(res.body, /<form method="post" action="\/control\/mesh\/up"/, "the up action carries a name field");
+      assert.match(res.body, /class="btn sm primary">up</);
+    } finally { stub.restore(); }
+  });
+
+  it("asks for confirmation before destroying a node that is Running on another host", async () => {
+    const h = makeHarness();
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([
+      { name: "agent-grok", actorId: "a2", status: "Running", pool: "host-c" },
+      { name: "quiet", actorId: "a3", status: "Sleeping" },
+    ]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control");
+      assert.match(res.body, /data-confirm="&quot;agent-grok&quot; is Running on another host right now/);
+      assert.equal((res.body.match(/data-confirm="/g) ?? []).length, 1, "only the Running node carries the guard");
+      assert.match(res.body, /<b class="mono">quiet<\/b>[\s\S]{0,400}?class="btn sm danger">down<\/button><\/form><\/div>/, "the unguarded action still renders as a plain danger button");
+    } finally { stub.restore(); }
+  });
+
+  it("renders a readable engine error instead of an empty mesh section", async () => {
+    const h = makeHarness();
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([], { fail: "connect ECONNREFUSED" });
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control");
+      assert.match(res.body, /<div class="notice warn mono">engine error — connect ECONNREFUSED<\/div>/);
+    } finally { stub.restore(); }
+  });
+
+  it("says not configured when there is no mesh.config.json", async () => {
+    const h = makeHarness();
+    const port = await listen(h);
+    const res = await get(port, "/control");
+    assert.match(res.body, /not configured — no mesh.config.json/);
+  });
+});
+
+describe("admin mesh control — up / down actions", () => {
+  it("up brings this daemon online under the submitted name and reports it", async () => {
+    const mesh = fakeMeshNode();
+    const h = makeHarness({ meshNode: mesh.node });
+    writeMeshConfig(h.xferDir, { pool: "host-a" });
+    const stub = stubEngine([]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control/mesh/up", "POST", "name=laptop");
+      assert.equal(res.status, 303);
+      assert.match(res.location ?? "", /^\/control\?notice=ok%7C/);
+      assert.deepEqual(mesh.ups, ["laptop"]);
+      await waitFor(() => h.published.some((e) => e.kind === "mesh"), "the mesh up event");
+      assert.match(h.published.find((e) => e.kind === "mesh")!.text, /mesh node went up — laptop/);
+      const page = await get(port, res.location ?? "/control");
+      assert.match(page.body, /<div class="notice ok">[^<]*laptop[^<]*is online<\/div>/, "the notice lands on the page it redirects to");
+      assert.match(page.body, /<span class="pill" style="color:#8250df;background:#fbefff">laptop<\/span>/, "the services row names the daemon's own node");
+    } finally { stub.restore(); }
+  });
+
+  it("up refuses without a bound mesh node and says so on the page", async () => {
+    const h = makeHarness();
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control/mesh/up", "POST", "name=laptop");
+      assert.equal(res.status, 303);
+      assert.match(decodeURIComponent(res.location ?? ""), /no mesh lifecycle bound to the daemon/);
+      const page = await get(port, res.location ?? "/control");
+      assert.match(page.body, /<div class="notice warn">mesh up is unavailable in this build/);
+    } finally { stub.restore(); }
+  });
+
+  it("up surfaces a refusal (e.g. already Running elsewhere) as a warning notice", async () => {
+    const mesh = fakeMeshNode({ upError: 'mesh node "laptop" is already Running on another host' });
+    const h = makeHarness({ meshNode: mesh.node });
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control/mesh/up", "POST", "name=laptop");
+      assert.equal(res.status, 303);
+      assert.match(decodeURIComponent(res.location ?? ""), /already Running on another host/);
+      await waitFor(() => h.published.some((e) => e.kind === "mesh"), "the refusal event");
+      assert.match(h.published.find((e) => e.kind === "mesh")!.text, /mesh up failed — laptop/, "an engine-side refusal is reported as a failed up");
+    } finally { stub.restore(); }
+  });
+
+  it("down destroys another host's actor through the injected engine seam", async () => {
+    const destroyed: Array<{ actorId: string; endpoint: string }> = [];
+    const h = makeHarness({
+      destroyMeshNode: async (config: MeshConfig, actorId: string) => { destroyed.push({ actorId, endpoint: config.endpoint }); },
+    });
+    writeMeshConfig(h.xferDir, { namespace: "ns" });
+    const stub = stubEngine([{ name: "phone", actorId: "a9", status: "Sleeping", pool: "host-b" }]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control/mesh/down", "POST", "name=phone&actor=a9");
+      assert.equal(res.status, 303);
+      assert.deepEqual(destroyed, [{ actorId: "a9", endpoint: MESH_ENDPOINT }]);
+      assert.match(decodeURIComponent(res.location ?? ""), /notice=ok\|mesh node "phone" was destroyed/);
+      await waitFor(() => h.published.some((e) => e.kind === "mesh"), "the mesh down event");
+    } finally { stub.restore(); }
+  });
+
+  it("down refuses when the actor changed since the page rendered", async () => {
+    const destroyed: string[] = [];
+    const h = makeHarness({ destroyMeshNode: async (_config: MeshConfig, actorId: string) => { destroyed.push(actorId); } });
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([{ name: "phone", actorId: "fresh", status: "Sleeping" }]);
+    try {
+      const port = await listen(h);
+      const stale = await get(port, "/control/mesh/down", "POST", "name=phone&actor=stale");
+      assert.match(decodeURIComponent(stale.location ?? ""), /changed since this page rendered/);
+      assert.deepEqual(destroyed, [], "a stale action never destroys");
+      const missing = await get(port, "/control/mesh/down", "POST", "name=ghost&actor=");
+      assert.match(decodeURIComponent(missing.location ?? ""), /is not in the engine listing/);
+      assert.deepEqual(destroyed, []);
+    } finally { stub.restore(); }
+  });
+
+  it("down on this daemon's own node tears the local node down instead of a remote actor", async () => {
+    const mesh = fakeMeshNode();
+    mesh.online = { name: "laptop" };
+    const destroyed: string[] = [];
+    const h = makeHarness({
+      meshNode: mesh.node,
+      destroyMeshNode: async (_config: MeshConfig, actorId: string) => { destroyed.push(actorId); },
+    });
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([{ name: "laptop", actorId: "a1", status: "Running" }]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control/mesh/down", "POST", "name=laptop&actor=a1");
+      assert.equal(mesh.downs, 1, "the local MeshNode.down() is the path taken");
+      assert.deepEqual(destroyed, [], "no second destroy on top of it");
+      assert.match(decodeURIComponent(res.location ?? ""), /\(this daemon\) is offline/);
+    } finally { stub.restore(); }
+  });
+
+  it("down reports a failed destroy instead of pretending it worked", async () => {
+    const h = makeHarness({ destroyMeshNode: async () => { throw new Error("mesh engine DELETE /actors/a9 failed: 500 nope"); } });
+    writeMeshConfig(h.xferDir);
+    const stub = stubEngine([{ name: "phone", actorId: "a9", status: "Crashed" }]);
+    try {
+      const port = await listen(h);
+      const res = await get(port, "/control/mesh/down", "POST", "name=phone&actor=a9");
+      assert.match(decodeURIComponent(res.location ?? ""), /notice=warn\|mesh engine DELETE \/actors\/a9 failed: 500 nope/);
+      assert.match(h.published.find((e) => e.kind === "mesh")?.text ?? "", /mesh down failed — phone/);
+    } finally { stub.restore(); }
   });
 });
 

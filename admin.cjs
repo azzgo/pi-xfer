@@ -2064,6 +2064,9 @@ var EXTENSION_VERSION = (() => {
     return "?";
   }
 })();
+var MESH_UP_TIMEOUT_MS = 6e4;
+var MESH_DOWN_TIMEOUT_MS = 3e4;
+var MESH_UP_NAME_MAX = 64;
 var EventHub = class {
   clients = /* @__PURE__ */ new Set();
   add(res) {
@@ -2098,19 +2101,47 @@ function processAlive2(pid) {
     return err.code === "EPERM";
   }
 }
-async function meshView(xferDir) {
+async function meshView(xferDir, meshNode, notice = null) {
   const configPath = path9.join(xferDir, "mesh.config.json");
-  if (!fs8.existsSync(configPath)) return { configured: false, error: null, nodes: [] };
+  if (!fs8.existsSync(configPath)) return { configured: false, error: null, nodes: [], config: null, self: null, notice };
+  let config;
   try {
-    const nodes = await listMeshNodes(loadMeshConfig(configPath));
-    return { configured: true, error: null, nodes };
+    config = loadMeshConfig(configPath);
   } catch (err) {
+    return { configured: true, error: err instanceof Error ? err.message : String(err), nodes: [], config: null, self: null, notice };
+  }
+  const status = meshNode?.status();
+  const self = status?.online ? { name: status.name, pool: config.pool ?? "(default)" } : null;
+  try {
+    const nodes = await listMeshNodes(config);
+    return { configured: true, error: null, nodes, config, self, notice };
+  } catch (err) {
+    return { configured: true, error: err instanceof Error ? err.message : String(err), nodes: [], config, self, notice };
+  }
+}
+async function loadMeshedView(xferDir, meshNode, notice = null) {
+  try {
+    return await withTimeout(meshView(xferDir, meshNode, notice), MESH_PROBE_TIMEOUT_MS);
+  } catch {
     return {
       configured: true,
-      error: err instanceof Error ? err.message : String(err),
-      nodes: []
+      error: `engine did not answer within ${MESH_PROBE_TIMEOUT_MS} ms`,
+      nodes: [],
+      config: null,
+      self: null,
+      notice
     };
   }
+}
+function meshNoticeParam(tone, text) {
+  return `notice=${encodeURIComponent(`${tone}|${text}`)}`;
+}
+function parseMeshNotice(value) {
+  if (!value) return null;
+  const split = value.indexOf("|");
+  if (split <= 0) return null;
+  const tone = value.slice(0, split) === "ok" ? "ok" : "warn";
+  return { tone, text: value.slice(split + 1) };
 }
 var KIND_COLORS = {
   peer: ["#1a7f37", "#dafbe1"],
@@ -2122,11 +2153,7 @@ var KIND_COLORS = {
 };
 var TONES = { peers: "#1a7f37", mesh: "#8250df", board: "#0969da", broker: "#9a6700" };
 var esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-var meshNodeLabel = (node) => {
-  const label = esc(node.name);
-  if (node.status !== "Idle") return label;
-  return `${label} (idle: no runner in pool "${esc(node.pool ?? "(default)")}")`;
-};
+var escAttribute = (s) => esc(s).replace(/[`\u0000-\u001f]/g, "");
 var md = (src) => esc(src).replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h3>$1</h3>").replace(/^# (.*)$/gm, "<h3>$1</h3>").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`(.+?)`/g, "<code>$1</code>").replace(/^- (.*)$/gm, "<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>").replace(/\n{2,}/g, "<br><br>");
 var css = () => {
   const c = { bg: "#f3efe6", panel: "#fffdf8", line: "#e4dccb", text: "#1c1917", muted: "#6b6256", dim: "#8a8174", hover: "#efe8da", soft: "#e7dfd0", nav: "#fffdf8", navText: "#6b6256", accent: "#1d4ed8" };
@@ -2159,6 +2186,13 @@ var css = () => {
   .btn.on { background:${c.accent}; color:#fff; }
   .dot { width:8px; height:8px; border-radius:99px; display:inline-block; flex:none; }
   h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:${c.muted}; margin-bottom:12px; font-weight:600; }
+  h3 { font-size:11.5px; text-transform:uppercase; letter-spacing:.09em; color:${c.dim}; margin:2px 0 6px; font-weight:600; }
+  .rules { display:flex; gap:16px; flex-wrap:wrap; color:${c.muted}; font-size:12.5px; margin:2px 0 12px; }
+  .rules span { display:inline-flex; gap:6px; align-items:center; }
+  .notice { border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:13px; border:1px solid ${c.line}; }
+  .subhead { margin:20px 0 8px; }
+  .notice.ok { background:#dafbe1; color:#0f5323; border-color:#aceebb; }
+  .notice.warn { background:#fff8c5; color:#7d4e00; border-color:#eac54f; }
   h1 { font-size:28px; font-weight:650; letter-spacing:-.02em; margin-bottom:6px; line-height:1.2; }
   .lede { color:${c.muted}; margin-bottom:22px; font-size:15px; }
   nav { display:flex; gap:2px; padding:12px 28px; border-bottom:1px solid ${c.line}; background:${c.nav}; align-items:center; }
@@ -2220,6 +2254,12 @@ var CLIENT_SCRIPT = `<script>
       el.style.display = filter === 'all' || el.dataset.kind === filter ? '' : 'none';
     });
   };
+  document.querySelectorAll('form').forEach((form) => {
+    form.addEventListener('submit', (e) => {
+      const btn = form.querySelector('[data-confirm]');
+      if (btn && !window.confirm(btn.dataset.confirm)) e.preventDefault();
+    });
+  });
   document.querySelectorAll('[data-filter]').forEach((btn) => {
     btn.addEventListener('click', () => {
       filter = btn.dataset.filter;
@@ -2275,6 +2315,40 @@ var CLIENT_SCRIPT = `<script>
   };
 })();
 </script>`;
+var STATUS_COLORS = {
+  Running: { dot: "#1a7f37", text: "running" },
+  Sleeping: { dot: "#9a6700", text: "sleeping" },
+  Idle: { dot: "#8250df", text: "idle · no runner" },
+  Crashed: { dot: "#cf222e", text: "crashed" },
+  Pending: { dot: "#0969da", text: "pending" },
+  Unknown: { dot: "#8a8174", text: "unknown" }
+};
+var STATUS_LEGEND = `<div class="rules">${[["#1a7f37", "running"], ["#9a6700", "sleeping"], ["#8250df", "idle · no runner"], ["#cf222e", "crashed"], ["#0969da", "pending"]].map(([dot, label]) => `<span><span class="dot" style="background:${dot}"></span>${label}</span>`).join("")}</div>`;
+var meshStatusColor = (status) => STATUS_COLORS[status ?? "Unknown"] ?? STATUS_COLORS.Unknown;
+var meshDownForm = (node, confirmMessage) => `<form method="post" action="/control/mesh/down"><input type="hidden" name="name" value="${escAttribute(node.name)}"><input type="hidden" name="actor" value="${escAttribute(node.actorId)}"><button class="btn sm danger"${confirmMessage ? ` data-confirm="${esc(confirmMessage)}"` : ""}>down</button></form>`;
+var meshNodeRow = (node, self) => {
+  const color = meshStatusColor(node.status);
+  const isSelf = self?.name === node.name;
+  const pool = node.pool ?? "(default)";
+  const runningElsewhere = node.status === "Running" && !isSelf;
+  const confirmMessage = runningElsewhere ? `"${node.name}" is Running on another host right now. Destroying its actor cuts that host off mid-session. Destroy it anyway?` : null;
+  return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">
+    <span class="dot" style="background:${color.dot}"></span><b class="mono">${esc(node.name)}</b>
+    <span class="muted">${color.text}</span>
+    <span class="dim mono">pool ${esc(pool)}</span>
+    ${isSelf ? `<span class="pill" style="color:#8250df;background:#fbefff">this node</span>` : ""}
+    <span style="flex:1"></span>${meshDownForm(node, confirmMessage)}</div>`;
+};
+var meshViewBody = (mesh) => {
+  if (!mesh.configured) return `<div class="empty">not configured — no mesh.config.json in the xfer dir</div>`;
+  if (mesh.error !== null) return `<div class="notice warn mono">engine error — ${esc(mesh.error)}</div>`;
+  const rows = mesh.nodes.map((node) => meshNodeRow(node, mesh.self)).join("");
+  return `${STATUS_LEGEND}${rows || `<div class="empty">no mesh nodes</div>`}`;
+};
+var meshUpForm = (mesh, daemonName) => {
+  const placeholder = mesh.config?.pool ?? "(default)";
+  return `<form method="post" action="/control/mesh/up" class="row" style="margin-top:12px;gap:8px"><input name="name" required maxlength="${MESH_UP_NAME_MAX}" placeholder="node name (e.g. ${esc(placeholder)})" style="flex:1;min-width:0;border:1px solid var(--soft);border-radius:99px;padding:7px 14px;font:inherit;font-size:13px;background:#fff"><button class="btn sm primary">up</button></form><div class="muted" style="margin-top:8px;font-size:12.5px">brings this daemon online as that node${daemonName ? ` (currently "${esc(daemonName)}")` : ""}</div>`;
+};
 var presenceRows = (peers) => peers.length === 0 ? `<div class="empty">no local peers</div>` : peers.map((p) => {
   const col = p.online ? "#1a7f37" : "#cf222e";
   return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--hover)">
@@ -2314,21 +2388,37 @@ var controlPage = (ctx, peers, mesh, broker, selfCheck) => {
         <form method="post" action="/control/broker/stop"><button class="btn sm danger">stop</button></form></div>` : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span>
         <b class="mono">broker</b><span class="muted">stopped</span><span style="flex:1"></span>
         <form method="post" action="/control/broker/start"><button class="btn sm primary">start</button></form></div>`;
-  const meshRow = !mesh.configured ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8a8174"></span><b class="mono">mesh</b><span class="muted">not configured (mesh.config.json)</span></div>` : mesh.error !== null ? `<div class="row" style="padding:6px 0"><span class="dot" style="background:#cf222e"></span><b class="mono">mesh</b><span class="muted">${esc(mesh.error)}</span></div>` : `<div class="row" style="padding:6px 0"><span class="dot" style="background:#8250df"></span><b class="mono">mesh</b><span class="muted">${mesh.nodes.length} node(s): ${mesh.nodes.map(meshNodeLabel).join(", ") || "—"}</span></div>`;
+  const meshSelf = mesh.self ? `<span class="pill" style="color:#8250df;background:#fbefff">${esc(mesh.self.name)}</span>` : `<span class="dim">not online</span>`;
+  const meshPoint = mesh.error !== null ? "#cf222e" : mesh.configured ? "#8250df" : "#8a8174";
+  const notice = mesh.notice ? `<div class="notice ${mesh.notice.tone}">${esc(mesh.notice.text)}</div>` : "";
   return shell(
     "control",
     "Control",
     "Presence and the few actions this console is allowed to take.",
     `
+    ${notice}
     <div class="grid" style="grid-template-columns:1fr 1fr">
-      <div class="panel"><h2>presence</h2>${presenceRows(peers)}</div>
+      <div class="panel"><h2>presence</h2>
+        <h3>local peers</h3>${presenceRows(peers)}
+        <h3 class="subhead">mesh nodes</h3>${meshViewBody(mesh)}
+      </div>
       <div>
         <div class="panel" style="margin-bottom:14px"><h2>services</h2>
           ${brokerRow}
           <div class="row" style="padding:6px 0"><span class="dot" style="background:#1a7f37"></span>
             <b class="mono">admin</b><span class="muted">:${ctx.port} (this)</span><span style="flex:1"></span>
             <form method="post" action="/control/admin/stop"><button class="btn sm danger">stop</button></form></div>
-          ${meshRow}
+          <div class="row" style="padding:6px 0"><span class="dot" style="background:${meshPoint}"></span>
+            <b class="mono">mesh</b><span class="muted">${mesh.configured ? `${mesh.nodes.length} node(s)` : "not configured"}</span>
+            <span style="flex:1"></span>${meshSelf}</div>
+        </div>
+        <div class="panel" style="margin-bottom:14px"><h2>mesh control</h2>
+          ${meshUpForm(mesh, mesh.self?.name ?? "")}
+          <div class="muted" style="margin-top:12px;font-size:12.5px">
+            "down" destroys that node's actor — the same path /xfer mesh down takes. A node that is Running on
+            another host is destroyed only after an explicit confirmation.</div>
+          <div class="muted" style="margin-top:6px;font-size:12.5px">
+            Up needs this engine's runner in the node's pool; adoption keeps the actor's description.</div>
         </div>
         <div class="panel"><h2>maintenance</h2>
           <div class="row"><form method="post" action="/control/gc"><button class="btn">run gc</button></form>
@@ -2345,6 +2435,9 @@ function createAdminServer(options) {
   const { xferDir, boardDir } = options;
   const hub = new EventHub();
   const brokerManager = new BrokerManager({ xferDir });
+  const meshNode = options.meshNode ?? null;
+  const destroyMeshNode = options.destroyMeshNode ?? destroyMeshActor;
+  let meshBusy = null;
   let port = DEFAULT_ADMIN_PORT;
   const openPath = options.openPath ?? openInSystem;
   const heartbeatMs = options.heartbeatMs ?? 15e3;
@@ -2364,11 +2457,7 @@ function createAdminServer(options) {
       const online = peers.filter((p) => p.online).length;
       const cards = new Board(boardDir).list();
       const broker = await brokerManager.probe();
-      let mesh = { configured: false, error: null, nodes: [] };
-      try {
-        mesh = await withTimeout(meshView(xferDir), MESH_PROBE_TIMEOUT_MS);
-      } catch {
-      }
+      const mesh = await loadMeshedView(xferDir, meshNode);
       const meshLine = mesh.configured ? mesh.error ? "engine error" : `${mesh.nodes.length} node(s)` : "not configured";
       const body = `
       <div class="grid stats">
@@ -2405,11 +2494,7 @@ function createAdminServer(options) {
     }
     if (pathname === "/control") {
       const peers = peerRows(xferDir);
-      let mesh = { configured: false, error: null, nodes: [] };
-      try {
-        mesh = await withTimeout(meshView(xferDir), MESH_PROBE_TIMEOUT_MS);
-      } catch {
-      }
+      const mesh = await loadMeshedView(xferDir, meshNode, parseMeshNotice(query.get("notice")));
       const broker = await brokerManager.probe();
       return page(false, controlPage(ctx, peers, mesh, broker, query.get("selfcheck") === "1" ? selfCheckReport(peers, mesh, broker) : null));
     }
@@ -2531,6 +2616,14 @@ function createAdminServer(options) {
         redirect(res, back("/control?selfcheck=1"));
         return;
       }
+      if (url.pathname === "/control/mesh/up") {
+        await handleMeshUp(form.get("name") ?? "", res, back);
+        return;
+      }
+      if (url.pathname === "/control/mesh/down") {
+        await handleMeshDown(form.get("name") ?? "", form.get("actor") ?? "", res, back);
+        return;
+      }
       if (url.pathname === "/board/open") {
         const card = form.get("card") ?? "";
         if (card === "") {
@@ -2558,6 +2651,77 @@ function createAdminServer(options) {
       res.end(`admin: action failed — ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  async function handleMeshUp(name, res, back) {
+    const target = name.trim();
+    const refuse = (text) => {
+      publish({ t: now(), kind: "mesh", text: `mesh up refused — ${target || "(no name)"}`, detail: text });
+      redirect(res, back(`/control?${meshNoticeParam("warn", text)}`));
+    };
+    if (!meshNode) return refuse("mesh up is unavailable in this build — no mesh lifecycle bound to the daemon");
+    if (target === "") return refuse("mesh up needs a node name");
+    if (target.length > MESH_UP_NAME_MAX) return refuse(`mesh up refused — node names are at most ${MESH_UP_NAME_MAX} characters`);
+    if (meshBusy) return refuse(`mesh is busy — ${meshBusy} is still in flight`);
+    try {
+      meshBusy = `up "${target}"`;
+      await withTimeout(meshNode.up(target), MESH_UP_TIMEOUT_MS);
+      publish({ t: now(), kind: "mesh", text: `mesh node went up — ${target}`, detail: "started via admin" });
+      redirect(res, back(`/control?${meshNoticeParam("ok", `mesh node "${target}" is online`)}`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      publish({ t: now(), kind: "mesh", text: `mesh up failed — ${target}`, detail: message });
+      redirect(res, back(`/control?${meshNoticeParam("warn", message)}`));
+    } finally {
+      meshBusy = null;
+    }
+  }
+  async function handleMeshDown(name, actorId, res, back) {
+    const target = name.trim();
+    const refuse = (text) => {
+      publish({ t: now(), kind: "mesh", text: `mesh down refused — ${target || "(no name)"}`, detail: text });
+      redirect(res, back(`/control?${meshNoticeParam("warn", text)}`));
+    };
+    if (target === "") return refuse("mesh down needs a node name");
+    const configPath = path9.join(xferDir, "mesh.config.json");
+    if (!fs8.existsSync(configPath)) return refuse("mesh is not configured — no mesh.config.json in the xfer dir");
+    let config;
+    try {
+      config = loadMeshConfig(configPath);
+    } catch (err) {
+      return refuse(`mesh config unusable — ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const selfStatus = meshNode?.status();
+    if (meshNode && selfStatus?.online && selfStatus.name === target) {
+      try {
+        await withTimeout(meshNode.down(), MESH_DOWN_TIMEOUT_MS);
+        publish({ t: now(), kind: "mesh", text: `mesh node went down — ${target}`, detail: "this daemon's own node, via admin" });
+        redirect(res, back(`/control?${meshNoticeParam("ok", `mesh node "${target}" (this daemon) is offline`)}`));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        publish({ t: now(), kind: "mesh", text: `mesh down failed — ${target}`, detail: message });
+        redirect(res, back(`/control?${meshNoticeParam("warn", message)}`));
+      }
+      return;
+    }
+    if (meshBusy) return refuse(`mesh is busy — ${meshBusy} is still in flight`);
+    try {
+      meshBusy = `down "${target}"`;
+      const nodes = await withTimeout(listMeshNodes(config), MESH_PROBE_TIMEOUT_MS);
+      const node = nodes.find((candidate) => candidate.name === target);
+      if (!node) return refuse(`mesh node "${target}" is not in the engine listing — nothing to destroy`);
+      if (actorId !== "" && actorId !== node.actorId) {
+        return refuse(`mesh node "${target}" changed since this page rendered — reload the page before destroying it`);
+      }
+      await withTimeout(destroyMeshNode(config, node.actorId), MESH_DOWN_TIMEOUT_MS);
+      publish({ t: now(), kind: "mesh", text: `mesh node went down — ${target}`, detail: `actor ${node.actorId} destroyed via admin` });
+      redirect(res, back(`/control?${meshNoticeParam("ok", `mesh node "${target}" was destroyed (actor ${node.actorId})`)}`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      publish({ t: now(), kind: "mesh", text: `mesh down failed — ${target}`, detail: message });
+      redirect(res, back(`/control?${meshNoticeParam("warn", message)}`));
+    } finally {
+      meshBusy = null;
+    }
+  }
   return {
     server,
     publish,
@@ -2566,6 +2730,16 @@ function createAdminServer(options) {
       port = p;
     }
   };
+}
+async function destroyMeshActor(config, actorId) {
+  const url = new URL(`/actors/${encodeURIComponent(actorId)}`, config.endpoint);
+  if (config.namespace) url.searchParams.set("namespace", config.namespace);
+  const headers = {};
+  if (config.token) headers.Authorization = `Bearer ${config.token}`;
+  const response = await fetch(url, { method: "DELETE", headers });
+  if (!response.ok) {
+    throw new Error(`mesh engine DELETE ${url.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
+  }
 }
 function openInSystem(targetPath, isFile) {
   const opener = process.platform === "darwin" ? isFile ? ["open", "-t", targetPath] : ["open", targetPath] : process.platform === "win32" ? ["explorer", targetPath] : ["xdg-open", targetPath];
