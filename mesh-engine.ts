@@ -1,6 +1,6 @@
 import { HANDOFF_QUEUE, XFER_INSTANCE_ACTOR, deserializeMeshKey, type MeshConfig } from "./mesh-config.ts";
 import { MeshRemoteBlockedError, assertEndpointReachable, guardMeshConfig } from "./mesh-guard.ts";
-import { createMeshLogSink } from "./mesh-log.ts";
+import { createMeshLogSink, logMeshEvent, MESH_LOG_PATH, type MeshLogLevel } from "./mesh-log.ts";
 import { ensureNativeRuntimeReady } from "./mesh-native.ts";
 import { withTimeout } from "./utils.ts";
 
@@ -18,7 +18,18 @@ export interface MeshHandoffMessage {
 export interface XferInstanceState {
   /** Self-declared capability note: what requests this node handles. Absent = "". */
   description: string;
+  /** Handoff ids already delivered, oldest first. Absent on actors that never received one. */
+  delivered?: string[];
 }
+
+/**
+ * How many delivered handoff ids the receiver remembers. The durable queue
+ * redelivers a message whose runner died after the delivery and before the ack,
+ * and a sender's recovery probe reuses the original id — both land next to the
+ * window's live edge, so a short window is enough. 3 rather than 10 unless real
+ * logs show edge redelivery is common; revisit the bound then, not speculatively.
+ */
+export const DELIVERED_WINDOW_SIZE = 3;
 
 /** Upper bound on a node description, in characters. */
 export const MAX_NODE_DESCRIPTION = 500;
@@ -68,6 +79,32 @@ export async function applyDescriptionAction(state: XferInstanceState, value: un
 
 export async function readDescriptionAction(state: XferInstanceState): Promise<string> {
   return state.description ?? "";
+}
+
+/**
+ * Receiver-side dedupe, decided before the message's document is written: a hit
+ * is a redelivery of work already applied and is dropped, a miss is delivered.
+ * The window only changes through {@link recordMeshDelivery}, after the
+ * delivery, so a crash repeats work instead of losing a handoff.
+ */
+export function isDuplicateMeshHandoff(state: XferInstanceState, message: Pick<MeshHandoffMessage, "id">): boolean {
+  return (state.delivered ?? []).includes(message.id);
+}
+
+/** Slide one delivered handoff id into the window, evicting the oldest past the bound. */
+export function recordMeshDelivery(state: XferInstanceState, message: Pick<MeshHandoffMessage, "id">): string[] {
+  const window = [...(state.delivered ?? []).filter((id) => id !== message.id), message.id];
+  state.delivered = window.slice(-DELIVERED_WINDOW_SIZE);
+  return state.delivered;
+}
+
+/** The one `mesh duplicate` record a dropped redelivery writes. */
+export function meshDuplicateLogLine(
+  write: (level: MeshLogLevel, message: string, fields: Record<string, unknown>) => void,
+  message: Pick<MeshHandoffMessage, "id" | "from">,
+  selfKey: string,
+): void {
+  write("info", "mesh duplicate", { id: message.id, from: message.from, to: selfKey || "(unknown)" });
 }
 
 /**
@@ -188,7 +225,7 @@ export function createRivetEngine(
         // Written through the state proxy, so the note lives with the actor on
         // the engine: it survives node restart/reconnect and stays readable
         // while this node is offline.
-        state: { description: "" } satisfies XferInstanceState,
+        state: { description: "", delivered: [] } satisfies XferInstanceState,
         actions: {
           setDescription: (c, value: unknown) => applyDescriptionAction(c.state, value),
           getDescription: (c) => readDescriptionAction(c.state),
@@ -199,7 +236,16 @@ export function createRivetEngine(
         run: async (c) => {
           const selfKey = c.key[0] ?? "";
           for await (const message of c.queue.iter()) {
+            if (isDuplicateMeshHandoff(c.state, message.body)) {
+              meshDuplicateLogLine(
+                (level, event, fields) => logMeshEvent(options.logPath ?? MESH_LOG_PATH, level, event, fields),
+                message.body,
+                selfKey,
+              );
+              continue;
+            }
             onHandoff(message.body, selfKey);
+            recordMeshDelivery(c.state, message.body);
           }
         },
       });
