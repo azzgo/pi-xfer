@@ -7,6 +7,7 @@ import {
   deriveMeshNodeState,
   findMeshNode,
   listMeshState,
+  meshSendFailureFields,
   preflightMeshSend,
   type MeshEngine,
   type MeshHandoffMessage,
@@ -215,9 +216,20 @@ export class MeshNode {
     return this.requireEngine().setDescription(text);
   }
 
-  /** Fire-and-forget inline handoff to another mesh node. */
-  async send(target: string, params: { summary: string; document: string }): Promise<{ id: string; warning: string | null }> {
-    const id = msgId();
+  /**
+   * Fire-and-forget inline handoff to another mesh node.
+   *
+   * A failure throws a `MeshSendError`, whose `kind` is the triage of the
+   * enqueue — "not-delivered" (the engine refused it), "unknown" (we stopped
+   * waiting, so it may still arrive) or "failed". Passing `id` re-sends the same
+   * handoff under the original id, which is the recovery probe the receiver's
+   * dedupe window covers; minting a fresh id instead would read as a new handoff.
+   */
+  async send(
+    target: string,
+    params: { summary: string; document: string },
+    id: string = msgId(),
+  ): Promise<{ id: string; warning: string | null }> {
     const from = this.nodeName;
     if (!this.engine || !from) throw new Error("mesh is not online — run /xfer mesh up first");
     const message: MeshHandoffMessage = { id, from, to: target, summary: params.summary, document: params.document };
@@ -232,6 +244,7 @@ export class MeshNode {
         to: target,
         id,
         bytes: params.document.length,
+        ...meshSendFailureFields(err),
         error: err instanceof Error ? err.message : String(err),
       });
       throw err;

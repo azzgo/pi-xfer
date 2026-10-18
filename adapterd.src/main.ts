@@ -276,7 +276,7 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
     log(id);
     if (preflight?.warning) fail(`⚠️ ${preflight.warning}`);
   } catch (err) {
-    fail(`❌ mesh send to "${target}" failed: ${errorText(err)}`);
+    fail(`❌ ${errorText(err)}`);
   }
 }
 
