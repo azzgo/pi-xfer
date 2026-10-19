@@ -1,7 +1,7 @@
 # Transport matrix — research input (end-to-end capability of every messaging surface in the tree)
 
-Provenance: direct read-only code walkthrough by the pi session in
-`/home/ison/dev/self/pi-xfer` (branch `main`), 2026-10-19. No file was created or
+Provenance: direct read-only code walkthrough by the pi session in project `pi-xfer`
+(branch `main`), 2026-10-19. No file was created or
 modified except this one. No engine was started, no tunnel/relay contacted,
 `XFER_ALLOW_REMOTE` was never set, and no test was run — source plus the tree's
 own hermetic test files were read only. Terminology follows `CONTEXT.md`

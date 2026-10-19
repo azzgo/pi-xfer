@@ -1,6 +1,6 @@
 # Identity, addressing, discovery, reachability — research input (naming / same-name conflict / identity binding / reachability judgement / capability declaration / credentials, local + mesh + adapterd)
 
-Provenance: commissioned read-only walkthrough of `/home/ison/dev/self/pi-xfer` at
+Provenance: commissioned read-only walkthrough of project `pi-xfer` at
 `ae1121c` (branch `main`, 2026-10-18), requested by the human node of this project. No code was
 changed; the only file written is this one. Nothing here touched a live deployment: no engine was
 started, no `~/.pi/xfer` state was read, `XFER_ALLOW_REMOTE` was never set. Every engine fact below
