@@ -74,7 +74,7 @@ export default function (pi: ExtensionAPI) {
     name: "xfer_to",
     label: "Transfer to Pi",
     description:
-      "Send a one-way handoff markdown document to another Pi agent over its xfer socket; returns immediately with a handoff_id (no reply wait). Use /xfer list for target names. Declare `kind`: \"task\" asks the target for output and comes back with exactly one conclusion (done, blocked, or needing input); \"notification\" informs and stays silent unless the target lacks information or the document conflicts with fact. Never send a handoff that only acknowledges or confirms.",
+      "Send a one-way handoff markdown document to another Pi agent over its xfer socket; returns immediately with a handoff_id (no reply wait). Use /xfer list for target names. Declare `kind`: \"task\" asks the target for output and comes back with exactly one conclusion (done, blocked, or needing input); \"notification\" informs and stays silent unless the target lacks information or the document conflicts with fact. Never send a handoff that only acknowledges or confirms. Send only when the user asks for a handoff, or when you are blocked on that specific target and a reverse handoff is what unblocks you. Never send on your own initiative to check on another agent, to keep a thread alive, or to pass work to a third agent.",
 
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 
@@ -158,7 +158,7 @@ export default function (pi: ExtensionAPI) {
     name: "xfer_mesh_to",
     label: "Transfer to Mesh Node",
     description:
-      "Send a one-way handoff markdown document to another Pi agent over the xfer mesh (cross-machine RivetKit transport); returns immediately with a handoff_id (no reply wait). Use /xfer mesh list for node names; the mesh must be online (/xfer mesh up). The document is sent inline. Declare `kind`: \"task\" asks the target for output and comes back with exactly one conclusion (done, blocked, or needing input); \"notification\" informs and stays silent unless the target lacks information or the document conflicts with fact. Never send a handoff that only acknowledges or confirms.",
+      "Send a one-way handoff markdown document to another Pi agent over the xfer mesh (cross-machine RivetKit transport); returns immediately with a handoff_id (no reply wait). Use /xfer mesh list for node names; the mesh must be online (/xfer mesh up). The document is sent inline. Declare `kind`: \"task\" asks the target for output and comes back with exactly one conclusion (done, blocked, or needing input); \"notification\" informs and stays silent unless the target lacks information or the document conflicts with fact. Never send a handoff that only acknowledges or confirms. Send only when the user asks for a handoff, or when you are blocked on that specific target and a reverse handoff is what unblocks you. Never send on your own initiative to check on another agent, to keep a thread alive, or to pass work to a third agent.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     parameters: Type.Object({
       target: Type.String({ description: "Target mesh node name (see /xfer mesh list)." }),

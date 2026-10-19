@@ -1,8 +1,8 @@
 # Milestone 4 design — items 2–5 (scope decisions)
 
 > Design node, 2026-10-19. Items 0+1 are in `phase4-design-p0-p1.md` (ADR-0020). This file
-> records the go/no-go calls on the remaining four items. Three are closed; item 4 is not,
-> and the reason is a dependency rather than a judgement.
+> records the go/no-go calls on the remaining four items. Four are closed;
+> and all four are now closed.
 
 ## Item 2 — MCP as an outbound surface: **do, local stdio gateway only**
 
@@ -80,10 +80,32 @@ Not building it is not the same as closing the door — `generic.md` already cov
 with a shell. A host that needs more can fork or send a PR, and that route is now documented
 rather than folklore.
 
-## Item 4 — loop guard: **unresolved, and blocked behind a deferred decision**
+## Item 4 — loop guard: **do not build**
 
-Nothing here is a judgement about whether the guard is worth building. The dependency chain
-is what blocks it:
+Decided 2026-10-19. Two reasons, and the second is the one that will still hold when
+someone arrives with Reason's consecutive-message cap.
+
+**1. The probability is low, because a human is usually behind each send.** The tool
+description and the skill both push against the shapes that would generate traffic on
+their own — "never send a handoff that only acknowledges or confirms" — and an agent
+generally sends because someone asked it to. One caveat recorded honestly: the prompt-side
+gate that was meant to hide `xfer_to` when no peer exists is **not implemented**
+(`index.ts:66` computes `hasPeers` and reads `getActiveTools()` into a variable, then does
+nothing), so the tool is always in the prompt. The description's content still discourages
+acknowledgement-shaped sends; it is the absence that is not enforced.
+
+**2. A guard without causation can only guess, and guessing wrong breaks something real.**
+The loop the guard would catch is not distinguishable from one a human built on purpose. A
+heuristic that stops it would stop that too.
+
+The one case the human-in-the-loop defence does not cover is worth recording, because the
+protocol produces it on purpose: ADR-0018 instructs a receiver that is *blocked* to declare
+its reverse Handoff as a `task`, so two mutually blocked agents can ping-pong with nobody
+present. That is a degenerate case a human resolves on sight — and paying for it would mean
+first reopening `phase4-features.md`'s out-of-scope on causal fields, then accepting a
+heuristic that also catches deliberate relays.
+
+What a guard would need, and why it is not cheap:
 
 ```
 guard against agents working each other in a circle
@@ -94,17 +116,14 @@ guard against agents working each other in a circle
               → phase4-features.md puts thread/reply/causal fields OUT OF SCOPE
 ```
 
-And the transport-time `outcome` cannot substitute, by decision: outcome is silent on
-replies (ADR-0020). So item 4 has no home for its ledger today either:
+The transport-time `outcome` cannot substitute, by decision: outcome is silent on replies
+(ADR-0020). And the ledger has no home today — the tmpdir handoff docs carry only a `kind`
+stamp and a cwd stamp and have no reaper; the Board's `pending` (`board.ts:112`) is the
+`/xfer board` compose slot, one in-memory `PendingWrite`, unrelated despite the name; and
+`XferInstanceState` could structurally hold an outbound ledger but is useless without the
+causation field.
 
-- `os.tmpdir()` handoff docs carry a `kind` stamp and a cwd stamp and nothing else, and have
-  no reaper
-- the Board's `pending` (`board.ts:112`) is the `/xfer board` compose slot — one in-memory
-  `PendingWrite`, unrelated to task tracking despite the name
-- `XferInstanceState` on the engine could hold an *outbound* ledger (it survives reconnect
-  and is readable by name), which is the one structurally plausible home — but it is useless
-  without the causation field above
-
-So the next move on item 4 is not a counter. It is a decision about whether handoffs carry
-causation, which `phase4-features.md` already deferred to a later milestone. Until that
-lands, item 4 should stay undesigned rather than be designed against a hole.
+A coarser guard — "N consecutive agent↔agent messages with no human input", which is what
+Reason caps and Claude Code rate-limits — was considered and declined as well. It is a
+heuristic, not the guard, and shipping it would make item 4 look resolved while catching
+only the most clumsy loops.

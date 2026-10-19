@@ -78,5 +78,11 @@ describe("handoff tools: the declared kind", () => {
       assert.doesNotMatch(tool.description, /only xfer when you have meaningful new information/);
       assert.match(tool.description, /Never send a handoff that only acknowledges or confirms/);
     });
+
+    it(`${name} states when a send is permitted, not only what a send contains`, () => {
+      const tool = tools.get(name)!;
+      assert.match(tool.description, /Send only when the user asks for a handoff, or when you are blocked on that specific target/);
+      assert.match(tool.description, /Never send on your own initiative/);
+    });
   }
 });
