@@ -34,7 +34,21 @@ an ambiguity into a real duplicate.
   crashed one, or `delivered` comes back true about a Node you did not name.
 - Outcome says nothing about whether a reverse Handoff follows. Item 4's loop guard
   cannot be built on it — that guard is about the semantic layer, and needs its own basis.
-- Item 3's `held` is not `queued`: `queued` means it will arrive on its own, `held` means
-  it arrived and is waiting for a decision. If item 3 proceeds it adds a fifth value.
+- **There is no inbound `held` state, and adding one to the mesh would not be a feature.**
+  Decided 2026-10-19, after the local-only variant was also considered and rejected as not
+  worth the state it introduces: accept-everything or stop-listening is the permanent shape.
+  `held` cannot work on the mesh at all — the actor's `run` calls `onHandoff` (synchronous,
+  `void`) and then writes `recordMeshDelivery` unconditionally on the next line, so a held
+  message is recorded as delivered, any redelivery is dropped as a duplicate, and a receiver
+  restart loses it. Supporting it would mean changing the durable-queue contract ADR-0013
+  defines. This is worth recording because Reason's vocabulary is `stored | delivered | held
+  | refused`, so a future reader comparing the two will ask why one value is missing here.
 - Local gains no preflight. Its Node axis is degenerate (the endpoint exists or it does
   not), and unlike mesh a false pass costs only a failed connect and a `unlink`.
+
+- A public relay for remote MCP clients (cloud agents, phone hosts) is **deferred out of
+  Milestone 4** by decision, not by omission: it is client-role on the mesh
+  (`sendMeshHandoff`, no join, no actor) but needs authentication, because an unauthenticated
+  endpoint that can enqueue into someone's mesh is a different exposure than the unix socket
+  ADR-0019 reasoned about. Auth is something someone maintains; it does not belong to a
+  convenience feature. Milestone 4's item 2 is scoped to a local stdio gateway only.

@@ -10,6 +10,9 @@ generated command.
 |---|---|
 | Cursor | `cursor` |
 | any other host (Claude Code, grok bot, a custom harness, plain shell) | `generic` |
+| a host not listed above | `generic` first — it covers anything with a shell. Only
+  add a named preset if your host needs somewhere else installed or a different
+  launch command; send a PR or fork. |
 
 ## 2. Install into your skill directory
 
@@ -44,3 +47,11 @@ handoffs). A non-zero exit printing `no daemon "X" — start one with
 \`xfer-adapterd up --name X\`` means that name was never started. The
 recommended launch command is regenerated on every install, so an agent never
 has to construct flags itself.
+
+## Adding a host preset
+
+A preset is `hosts/<name>.md` plus a `--host` branch. It carries **where the skill
+installs and what the launch command is — nothing else.** In particular a preset must not
+carry delivery logic: no code that decides how a handoff reaches the agent. That line is
+deliberate, because per-host delivery is the thing that drifts with other projects'
+releases and cannot be covered by this repo's hermetic tests.
