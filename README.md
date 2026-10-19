@@ -85,6 +85,8 @@ cannot load beside this one and collide on `xfer_to` / `xfer_mesh_to` / `--xfer`
 
 The committed bundles (`broker.cjs`, `admin.cjs`, `mesh-runtime.cjs`, `web-picker.user.js`) are built with esbuild targeting **Node 20+**; the extension host runs on whatever Node pi requires (`engines: >=22`). `npm test` fails if a committed bundle is stale — run `npm run build` and commit the artifacts.
 
+Contributions and host presets: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Acknowledgements
 
 - Design inspiration: [the video that started it](https://www.youtube.com/watch?v=PIdETjcXNIk)
