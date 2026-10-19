@@ -66,7 +66,7 @@ hostname clients use, scheme included, no trailing slash. Leaving it unset is th
 `pi-xfer` command may be pointed at one. Register it with the engine's own API, once:
 
 The example joins the pool `cloudflare` by default — that value lives in `wrangler.toml` as
-`POOL_NAME`, and the Worker reads it from there (`poolName` in `src/agent-do.ts`). To use a different
+`POOL_NAME`, and the Worker reads it from there (`nodeConfig()` in `src/node-config.ts`). To use a different
 name, change it in `wrangler.toml` **and** below: this runner-config name is the one string that has
 to match on both sides.
 
@@ -173,12 +173,10 @@ From the local machine with the mesh up:
 **Pass**: a row for `cf-node` appears, and its state is not `○ no runner` — the serverless pool holds
 the Worker.
 
-**If no row appears at all**, the actor does not exist yet, and nothing in this example can be
-trusted to have created it. The Worker's `registerSelf` (a `getOrCreate` fired under
-`ctx.waitUntil` on its first call) is **unproven** — in the recorded run the actor was created by the
-out-of-band call in step 4, so its presence in the listing proved nothing about self-registration.
-Run step 4's client once (`getOrCreate` creates the actor as a side effect), then look again. A row
-that appears *only* after that is a row step 4 created.
+**No row before the first delivery is expected**: nothing creates this node's actor except a
+delivery, so an empty listing here says nothing about the deploy. Run step 4's client once
+(`getOrCreate` creates the actor in pool `cloudflare` as a side effect), then look again — the row
+that appears is the one step 4 created.
 
 **A `○ no runner` row** means step 1's pool was not registered where the actor was placed — check the
 pool name on both sides. **A `wrangler tail` with no `/api/rivet` requests** during any of this means
@@ -298,14 +296,13 @@ see, not what you would expect.
 | `wrangler tail` shows `in-Worker pool registration failed` on **every** invocation, and Cloudflare starts answering `Too many subrequests` | the registration retried a rejection: a 400 is not transient, so retrying only spends the invocation's subrequest budget (41 attempts did). It also starves the engine's actor wake-up scheduling while it lasts, so unrelated sends to this node time out | already fixed: the Worker attempts registration **at most once per isolate** and never retries. If you see it, you are running an older build — redeploy; then check the 400's message (row above) instead of retrying |
 | `mesh send` refuses: `no runner in pool "cloudflare"` | correct behaviour on a cold serverless pool — the engine starts runners only for pending deliveries | first send from a bare client (§4), or wait, then retry |
 | Actor is stuck: `/actors` shows an `error` no restart clears | the actor record's `error` is sticky — it is not cleared when a runner appears | destroy and recreate: `DELETE /actors/<id>?namespace=<ns>`, then `getOrCreate` again (§4 does it) |
-| Listing shows the node but the runner never starts | self-registration is unproven; the actor may exist with no runner behind it | treat the listing as presence only; the runner arrives on the first delivery (§4) |
+| Listing shows the node but the runner never starts | the actor exists but its pool has no live runner behind it | send the first handoff from a bare client (§4) — that is what starts the runner |
 | `wrangler tail` shows `/api/rivet/start` repeating with 503 | in-Worker/out-of-band pool registration still failing | read the tail's `in-Worker pool registration failed` line, then re-run step 1 |
 
 ## What this does not prove
 
-- **Nothing about self-registration.** `registerSelf` exists and is wired, but the recorded run's
-  actor came from an out-of-band `getOrCreate`; a node appearing in a listing has not been shown to
-  come from the Worker's own call.
+- **Nothing about this node before its first delivery.** The actor is created by the delivery in §4,
+  not by the Worker; a row in a listing only proves an actor exists, never that a runner can host it.
 - **Nothing about scale or load.** One probe, one reply.
 - **Nothing about wake-up latency.** A serverless actor that is asleep is woken by the engine's own
   schedule; the example does not measure it.

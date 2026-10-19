@@ -1,12 +1,6 @@
-/**
- * The only part of this example that runs under `npm test`: the Durable Object's
- * answer logic, against a stand-in for DO storage. A Durable Object has no local
- * emulator, so the *deployment* is verified manually (see VERIFICATION.md); what
- * this covers is the code that would silently send two answers or none.
- */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AgentDurableObject, echoDocument, poolName, replyIdFor, type AgentStorage } from "./src/agent-do.ts";
+import { AgentDurableObject, echoDocument, replyIdFor, type AgentStorage } from "./src/agent-do.ts";
 import type { MeshHandoffMessage } from "./src/mesh-actor.ts";
 
 function memoryStorage(): AgentStorage {
@@ -92,10 +86,6 @@ describe("pi-durable-cf example: the Durable Object's answer", () => {
     }
   });
 
-  it("joins the cloudflare pool unless POOL_NAME says otherwise", () => {
-    assert.equal(poolName({}), "cloudflare");
-    assert.equal(poolName({ POOL_NAME: "edge" }), "edge");
-  });
 
   it("states the echo plainly when nothing is configured", () => {
     assert.match(echoDocument(handoff), /This is the fixed echo/);

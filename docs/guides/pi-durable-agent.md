@@ -77,7 +77,7 @@ A node is `actor type + key`: `xfer-instance` plus the node name (`NODE_NAME`, d
 Nothing else. The pool decides *where* the actor is placed.
 
 - The example joins the pool **`cloudflare`** by default — `POOL_NAME` in `wrangler.toml`, read
-  through `poolName()`. Rename it freely, but the engine-side runner-config must carry the same name:
+  through `nodeConfig()`. Rename it freely, but the engine-side runner-config must carry the same name:
   it is the one string that has to match on both sides.
 - **No pi-xfer command may be pointed at a serverless pool.** `ensureRunnerPool()` hardcodes
   `{ normal: {} }` and cannot express one, so `/xfer mesh setup` (and the runner-less pools it
@@ -140,9 +140,9 @@ hit for real.
 - **Documented scope stops at the round trip:** send in, answer, arrive back, verified by hand. Cron
   wake-ups, batching, cross-node summarising and scheduled work are platform-specific and not
   covered — a serverless actor is a poor source by design.
-- **Self-registration is unproven.** The Worker *tries* to create its own actor
-  (`registerSelf`, under `ctx.waitUntil`), but the recorded runs created it out of band. Treat a row
-  in `/xfer mesh list` as presence, not as proof the Worker registered itself.
+- **The Worker never creates its own actor.** A serverless pool has no runner to host one until
+  something is enqueued, so the first delivery is what brings the row up. Treat a row in
+  `/xfer mesh list` as presence, never as proof the node can receive.
 
 If those limits fit how you want to use it, the procedure is short and the payoff is a node that
 exists only when someone needs it.

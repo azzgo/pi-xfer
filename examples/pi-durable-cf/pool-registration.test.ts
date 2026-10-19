@@ -1,103 +1,135 @@
-/**
- * The parts of the Worker that are pure data: the serverless pool body it writes
- * and the comparison that decides whether to write at all. A live run found that
- * a unit slip here is rejected by the engine as an *illegal config* rather than
- * as a mistake, and that retrying the rejection floods the invocation's
- * subrequest budget — so the shape is pinned here instead of only in prose.
- */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  poolRegistrationBody,
-  poolRegistrationMatches,
-  poolServerlessBody,
-  SERVERLESS_POOL_TIMING,
-  timingIsLegal,
-} from "./src/pool-config.ts";
+import { nodeConfig, SERVERLESS_BASE_PATH } from "./src/node-config.ts";
+import { ensurePoolRegistered, poolRegistration, SERVERLESS_POOL_TIMING } from "./src/pool-config.ts";
 
-const BASE_PATH = "/api/rivet";
-const env = { WORKER_PUBLIC_URL: "https://worker.example.com", MESH_TOKEN: "tok" };
-const body = () => poolServerlessBody(env, BASE_PATH);
+const config = nodeConfig({
+  AGENT: {} as never,
+  WORKER_PUBLIC_URL: "https://worker.example.com",
+  MESH_ENDPOINT: "https://engine.example.com",
+  MESH_NAMESPACE: "default",
+  MESH_TOKEN: "tok",
+});
 
-describe("pi-durable-cf example: the pool registration the Worker writes", () => {
+interface Canned {
+  ok?: boolean;
+  status?: number;
+  json?: unknown;
+}
+
+function stubFetch(canned: Canned[]) {
+  const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    const next = canned.shift();
+    if (!next) throw new Error(`unexpected fetch: ${String(url)}`);
+    calls.push({
+      url: String(url),
+      method: init?.method ?? "GET",
+      ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+    });
+    const status = next.status ?? 200;
+    return new Response(JSON.stringify(next.json ?? {}), { status });
+  }) as typeof fetch;
+  return { fetcher, calls };
+}
+
+const registration = poolRegistration(config);
+const storedBody = {
+  url: registration.url,
+  headers: { "x-rivet-token": "tok" },
+  request_lifespan: SERVERLESS_POOL_TIMING.requestLifespan,
+  drain_grace_period: SERVERLESS_POOL_TIMING.drainGracePeriod,
+};
+
+describe("pi-durable-cf example: the pool record the Worker writes", () => {
   it("carries a grace period strictly below the lifespan, both in seconds", () => {
-    const serverless = body();
     assert.ok(
       SERVERLESS_POOL_TIMING.drainGracePeriod < SERVERLESS_POOL_TIMING.requestLifespan,
       "the engine refuses a grace period that is not less than the lifespan",
     );
-    assert.equal(serverless.request_lifespan, SERVERLESS_POOL_TIMING.requestLifespan);
-    assert.equal(serverless.drain_grace_period, SERVERLESS_POOL_TIMING.drainGracePeriod);
-    assert.equal(timingIsLegal(SERVERLESS_POOL_TIMING), true);
+    assert.equal(storedBody.request_lifespan, 30000, "seconds, not milliseconds");
+    assert.ok("drain_grace_period" in storedBody, "omitted falls back to the engine's 1800 s default and is refused");
+    assert.ok((storedBody.drain_grace_period as number) < 1800);
   });
 
-  it("states the grace period explicitly, because the engine's default 1800 s is larger", () => {
-    assert.ok("drain_grace_period" in body(), "an omitted grace period falls back to 1800 s and is rejected");
-    assert.ok((body().drain_grace_period as number) < 1800);
+  it("points the pool at the Worker's base path, and at nothing else", () => {
+    assert.equal(registration.url, `https://worker.example.com${SERVERLESS_BASE_PATH}`);
+    assert.ok(registration.url.startsWith(config.workerUrl), "the engine must never be given its own address");
   });
 
-  it("sends the lifespan in seconds, not milliseconds", () => {
-    assert.equal(body().request_lifespan, 30000);
+  it("is the one spelling both writers use: RivetKit's configurePool and the runner-config", () => {
+    assert.deepEqual(Object.keys(registration).sort(), ["drainGracePeriod", "name", "requestLifespan", "url"]);
+    assert.equal(registration.name, "cloudflare");
+    assert.equal(registration.requestLifespan, SERVERLESS_POOL_TIMING.requestLifespan);
+  });
+});
+
+describe("pi-durable-cf example: making the engine hold this pool", () => {
+  it("writes nothing when the engine already holds exactly this record", async () => {
+    const { fetcher, calls } = stubFetch([{ json: { datacenters: { default: { serverless: storedBody } } } }]);
+    assert.equal(await ensurePoolRegistered(config, fetcher), "already correct");
+    assert.equal(calls.length, 1, "a warm pool costs one GET per isolate, not a write on every /start");
+    assert.equal(calls[0].method, "GET");
+    assert.match(calls[0].url, /runner-configs\/cloudflare\?namespace=default$/);
   });
 
-  it("points the pool at the Worker, never at an engine", () => {
-    assert.equal(body().url, "https://worker.example.com/api/rivet");
+  it("re-registers when the stored record drifted, even by one field", async () => {
+    for (const drift of [
+      { ...storedBody, url: "https://elsewhere/api/rivet" },
+      { ...storedBody, drain_grace_period: 1800 },
+      { ...storedBody, request_lifespan: 30 },
+      { headers: {} },
+    ]) {
+      const { fetcher, calls } = stubFetch([
+        { json: { datacenters: { default: { serverless: drift } } } },
+        { json: { datacenters: [{ name: "default" }] } },
+        {},
+      ]);
+      assert.equal(await ensurePoolRegistered(config, fetcher), "wrote", `${JSON.stringify(drift)} must not pass as correct`);
+      assert.equal(calls.length, 3);
+    }
   });
 
-  it("rejects a timing pair the engine would refuse", () => {
-    assert.equal(timingIsLegal({ requestLifespan: 30, drainGracePeriod: 1800 }), false);
-    assert.equal(timingIsLegal({ requestLifespan: 300, drainGracePeriod: 300 }), false, "strictly less, not equal");
-    assert.equal(timingIsLegal({ requestLifespan: 0, drainGracePeriod: 0 }), false);
-    assert.equal(timingIsLegal({ requestLifespan: Number.NaN, drainGracePeriod: 10 }), false);
+  it("re-registers when any one datacenter drifted — a half-correct record is not correct", async () => {
+    const { fetcher, calls } = stubFetch([
+      { json: { datacenters: { default: { serverless: storedBody }, second: { serverless: { ...storedBody, request_lifespan: 30 } } } } },
+      { json: { datacenters: [{ name: "default" }, { name: "second" }] } },
+      {},
+    ]);
+    assert.equal(await ensurePoolRegistered(config, fetcher), "wrote");
+    assert.equal(calls.length, 3);
   });
 
-  it("writes the same serverless object for every datacenter", () => {
-    const serverless = body();
-    const written = poolRegistrationBody(serverless, ["default", "second"]) as {
-      datacenters: Record<string, { serverless: unknown }>;
-    };
+  it("writes the same serverless object to every datacenter the engine reports", async () => {
+    const { fetcher, calls } = stubFetch([
+      { status: 404 },
+      { json: { datacenters: [{ name: "default" }, { name: "second" }] } },
+      {},
+    ]);
+    await ensurePoolRegistered(config, fetcher);
+    const written = calls[2].body as { datacenters: Record<string, { serverless: Record<string, unknown>; metadata: unknown }> };
     assert.deepEqual(Object.keys(written.datacenters), ["default", "second"]);
-    assert.equal(written.datacenters.default.serverless, serverless);
-    assert.equal(written.datacenters.second.serverless, serverless);
+    assert.deepEqual(written.datacenters.default.serverless, written.datacenters.second.serverless);
+    assert.deepEqual(written.datacenters.default.metadata, {});
   });
 
-  it("matches only a config identical to it, datacenter by datacenter", () => {
-    const serverless = body();
-    const stored = { datacenters: { default: { serverless } } };
-    assert.equal(poolRegistrationMatches(stored, serverless, ["default"]), true);
-    assert.equal(poolRegistrationMatches(stored, serverless, []), true, "no names means: accept what is there");
+  it("never retries: a refused body is refused the same way every time, and a retry only spends subrequests", async () => {
+    const { fetcher, calls } = stubFetch([
+      { json: {} },
+      { json: { datacenters: [{ name: "default" }] } },
+      { status: 400 },
+    ]);
+    await assert.rejects(() => ensurePoolRegistered(config, fetcher), /PUT \/runner-configs 400/);
+    assert.equal(calls.length, 3, "exactly one attempt; the 41-attempt retry storm is the bug this shape prevents");
   });
 
-  it("treats a missing, extra or drifted datacenter as a mismatch", () => {
-    const serverless = body();
-    assert.equal(poolRegistrationMatches({ datacenters: { default: { serverless } } }, serverless, ["default", "other"]), false);
-    assert.equal(poolRegistrationMatches({ datacenters: {} }, serverless, ["default"]), false);
-    assert.equal(poolRegistrationMatches(null, serverless, []), false);
-    assert.equal(
-      poolRegistrationMatches(
-        { datacenters: { default: { serverless: { ...serverless, url: "https://elsewhere/api/rivet" } } } },
-        serverless,
-        [],
-      ),
-      false,
-    );
-    assert.equal(
-      poolRegistrationMatches(
-        { datacenters: { default: { serverless: { ...serverless, drain_grace_period: 1800 } } } },
-        serverless,
-        [],
-      ),
-      false,
-      "the config that caused the retry storm is a mismatch, not a match",
-    );
-    assert.equal(
-      poolRegistrationMatches(
-        { datacenters: { default: { serverless } , second: { serverless: { ...serverless, request_lifespan: 30 } } } },
-        serverless,
-        [],
-      ),
-      false,
-      "a half-correct config is still re-registered",
-    );
+  it("reports which datacenter listing failed instead of writing a partial pool", async () => {
+    const { fetcher, calls } = stubFetch([{ json: {} }, { status: 503 }]);
+    await assert.rejects(() => ensurePoolRegistered(config, fetcher), /GET \/datacenters 503/);
+    assert.equal(calls.length, 2);
+  });
+
+  it("refuses to register a pool with nowhere to register", async () => {
+    await assert.rejects(() => ensurePoolRegistered({ ...config, endpoint: undefined }), /no engine endpoint/);
   });
 });

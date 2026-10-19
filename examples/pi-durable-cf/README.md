@@ -43,11 +43,13 @@ laptop (pi, mesh up)          Cloudflare
 | File | Role |
 |---|---|
 | `src/mesh-actor.ts` | the `xfer-instance` actor — the same state, queue and actions the extension runs |
-| `src/agent-do.ts` | the Durable Object (the agent's memory, the echo, the DeepSeek seam) and the `Env` |
-| `src/worker.ts` | the Worker: registry in wasm, the actor, the DO, the reply path, pool registration |
-| `src/pool-config.ts` | the pool body and timing (seconds) — dependency-free so it is testable |
+| `src/node-config.ts` | what this node is configured as: every env var name, and the base path |
+| `src/agent-do.ts` | the Durable Object — the agent's memory, the echo, and the one function to replace |
+| `src/pool-config.ts` | the pool record: timing in seconds, its one spelling, and making the engine hold it |
+| `src/worker.ts` | the Worker: the registry in wasm, the reply path, and the routing |
+| `node-config.test.ts` | the configuration defaults and the `RIVET_*` fallback |
 | `agent-do.test.ts` | the answer logic: echo, redelivery, model fallback |
-| `pool-registration.test.ts` | the pool body: grace period below lifespan, no re-write when it matches |
+| `pool-registration.test.ts` | the pool record: grace below lifespan, one GET on a warm pool, never a retry |
 | `VERIFICATION.md` | the manual closed-loop procedure (the one live-deployment exception) |
 | `wrangler.toml` | DO binding, migration, `routes`, the vars and secrets |
 
@@ -117,13 +119,13 @@ taught, and each one fails as something else:
   engine POSTs `/start` to. Pointing it at the engine makes the engine call itself and fail as an
   empty `serverless start payload`.
 - **`serverless.basePath` and that URL path are one string** (`SERVERLESS_BASE_PATH` in
-  `src/worker.ts`): the Worker only routes what starts with it, and the engine only treats
+  `src/node-config.ts`): the Worker only routes what starts with it, and the engine only treats
   `<basePath>/start` as a start.
-- **Everything time-sensitive goes under `ctx.waitUntil`.** `registerSelf` and the in-Worker pool PUT
-  are background IO; without it the isolate cancels them the moment the response returns — and
-  background work must also be **finite**: the registration attempts once per isolate and never
-  retries, because a rejected config is answered with the same 400 forever, and 41 attempts spent
-  the whole subrequest budget on a live run.
+- **Everything time-sensitive goes under `ctx.waitUntil`.** The in-Worker pool PUT is background IO;
+  without it the isolate cancels it the moment the response returns — and background work must also be
+  **finite**: `ensurePoolRegistered` attempts once per isolate and never retries, because a rejected
+  config is answered with the same 400 forever, and 41 attempts spent the whole subrequest budget on a
+  live run.
 - `RIVET_ENDPOINT`/`RIVET_NAMESPACE` exist because parts of the wasm runtime read the engine through
   RivetKit's env-var fallback (`getRivetEndpoint`) rather than the config object. They must agree
   with the secrets; drift shows up as an actor the registry cannot see.
@@ -144,7 +146,7 @@ reaches a real deployment, which is a human decision each time.
    `/etc/rivet/config.json` with `topology.datacenters[].public_url` set to your engine's public
    hostname, or the engine answers `endpoint_mismatch` when it starts a runner.
 2. 🔴 **Register the pool out of band, before the first deploy.** The pool is named `cloudflare` by
-   default (`POOL_NAME` in `wrangler.toml`, read through `poolName()`); rename it in that one place
+   default (`POOL_NAME` in `wrangler.toml`, resolved by `nodeConfig()`); rename it in that one place
    and the register command must carry the same name. The body points at the **Worker**, never the
    engine, and carries **both** timing fields:
    `{"datacenters":{"default":{"serverless":{"url":"https://<worker-domain>/api/rivet","headers":{},"request_lifespan":30000,"drain_grace_period":600}}}}`.
@@ -168,11 +170,11 @@ reaches a real deployment, which is a human decision each time.
    `xfer-adapterd mesh send`'s pre-check refuses exactly that, by design. `VERIFICATION.md` step 4
    has the `node -e` script (create-or-get, then enqueue). `mesh send` is the path for a warm pool.
 
-The Worker also registers its own pool (`configurePool`, and an explicit PUT on its first call) so
+The Worker also registers its own pool (`configurePool`, and `ensurePoolRegistered` on its first call) so
 the record cannot drift from the out-of-band one — but that only runs once a runner exists, which is
-why step 2 comes first. Its `registerSelf` (`getOrCreate` under `ctx.waitUntil`) is **unproven**: in
-the recorded run the actor was created out of band, so a node in a listing does not yet prove the
-Worker self-registered.
+why step 2 comes first. The node's actor is created by the first delivery (step 5), never by the
+Worker on its own: a serverless pool has no runner to host the actor until something is enqueued, so
+`/xfer mesh list` shows no row until then.
 
 With no `DEEPSEEK_API_KEY` the node echoes. That is not a stub — it is how the mesh path gets proven
 before any credential exists.

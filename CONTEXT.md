@@ -38,6 +38,12 @@ Fixing a skill into a target directory for one Agent Host, producing the host co
 _Avoid_: deploy, setup, onboarding
 Glossary for the xfer extension. Implementation details live in `docs/`; this file only fixes terms.
 
+## Example (copyable scaffold)
+
+**Scaffold**:
+A directory under `examples/` meant to be copied and adapted, never depended on: it imports nothing from the extension itself and is never published to npm. Its contract is "it runs as written once you edit the named places", so every file states exactly one job, and a fact a copier must change is named at the place that carries it. A guarantee that only exists inside this repository — a conformance test against the extension, say — lives outside the Scaffold, never inside a shipped file.
+_Avoid_: template, starter, sample, demo, reference implementation, example (too loose — an example is any illustration; a Scaffold is meant to be taken)
+
 ## Board (async cross-agent collaboration)
 
 **Board**:

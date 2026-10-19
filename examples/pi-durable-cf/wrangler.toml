@@ -54,7 +54,7 @@ POOL_NAME = "cloudflare"
 # environment.
 WORKER_PUBLIC_URL = "https://pi-durable.azzgo.top"
 # The pool's timing is NOT a var. It lives in `SERVERLESS_POOL_TIMING` in
-# `src/worker.ts` because the value is a contract between three writers (the
+# `src/pool-config.ts` because the value is a contract between three writers (the
 # registry's `configurePool`, the Worker's own runner-config PUT, and the
 # out-of-band runner-config in VERIFICATION.md step 1), all of which must carry
 # the same numbers. Both fields are in SECONDS — the engine's unit and
