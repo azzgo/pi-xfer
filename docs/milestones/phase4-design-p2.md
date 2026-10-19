@@ -44,17 +44,20 @@ a daemon or a registered node of their own").
 
 The mesh tool is in scope, and the reason it is verifiable is worth stating precisely
 because an earlier draft of this plan got it wrong. The gateway never talks to the engine:
-it builds an argv and forks `xfer-adapterd`, so its mesh tool is tested exactly like its
-local tool — by asserting the argv, with no engine in the process. Everything below that
-layer (`sendMeshHandoff`, the fail-closed preflight, the `not-delivered | unknown | failed`
-triage) is already covered hermetically by `mesh.test.ts` through `fakeDeps`, and this change
-does not touch it. What genuinely needs a human yes is an *end-to-end* smoke against a real
-engine — that is a verification step, not a reason to withhold the tool. Excluding it would
-also have left a send-only host that can reach the local machine but not the mesh, which is
+it builds an argv and forks `xfer-adapterd`, so its mesh tool is verifiable in two ways: a
+stub asserts the argv with no engine in the process, and — because a test may start its own
+loopback control plane and the guard only blocks non-loopback — a second test can drive the
+tool end to end against one. Everything below that layer (`sendMeshHandoff`, the fail-closed
+preflight, the `not-delivered | unknown | failed` triage) is already covered by `mesh.test.ts`
+through `fakeDeps`, and this change does not touch it. Conflating "should this be built"
+with "how is this tested" is the mistake this paragraph exists to prevent: the deployed engine
+being off-limits is a rule about *pollution*, not a reason to withhold a tool. Excluding it
+would also have left a send-only host that can reach the local machine but not the mesh, which is
 the same half-solution as shipping send without list.
 
 `--no-preflight` is deliberately **not** exposed as a tool parameter: it is an escape hatch
 for a human debugging the engine, and a model should not reach for it.
+
 Receiving is out of scope: no inbox, no `xfer_inbox`, no `--on-handoff`. Delivery into a
 non-pi agent's context is item 5, which was declined.
 non-pi agent's context is item 5, which was declined.
@@ -150,9 +153,10 @@ in `commands.ts`.
    inbound delivery will find nothing, and the skill must not imply otherwise.
 5. **The gateway hands a model a second path to the engine.** `xfer_mesh_send` is thin, and
    the layer under it is already tested, so this is not a correctness risk — it is an
-   exposure one. The rule that keeps it contained: **no test may execute it against a real
-   config**, and `--no-preflight` is not exposed, so a model cannot disable the fail-closed
-   check. A gateway pointed at a mesh is exactly where the preflight earns its keep.
+   exposure one, contained by three rules: `--no-preflight` is not exposed, so a model cannot
+   disable the fail-closed check; the guard blocks the deployed engine for any process the
+   test tree spawns, the gateway included; and loopback coverage means the path is exercised
+   for real rather than asserted at the argv.
 6. **The `.mjs` is untyped.** No compile-time check on argument shapes; the tests carry that
    weight instead.
 
@@ -161,12 +165,19 @@ in `commands.ts`.
 - `npm test` green, including: a real stdio JSON-RPC handshake against `mcp-gateway.mjs`
   (`initialize`, `tools/list`, `tools/call`); stdout purity including the error path; and a
   stub `xfer-adapterd` on `--xfer-adapterd` asserting the exact argv for **all three tools**,
-  so a CLI flag change cannot silently diverge from a tool schema. The mesh tool's test
-  asserts argv only — the stub never opens a socket, so the suite touches no engine.
-- Hermetic: every test points `--dir` at a fresh `os.tmpdir()`.
-- **No engine during tests.** Nothing in the suite may execute `xfer_mesh_send` against a real
-  `mesh.config.json`, and every test points `--dir` at a fresh `os.tmpdir()`.
-- **The end-to-end smoke is a human decision**, per AGENTS.md's rule that even a read against
-  the deployed engine needs a yes. Proposed, not assumed: `initialize` + `tools/list`, one
-  `xfer_send` against a local `xfer-adapterd`, and — only with a separate yes — one
-  `xfer_mesh_send` against whatever engine the config names.
+  so a CLI flag change cannot silently diverge from a tool schema.
+- **Hermetic, and the barrier is structural rather than a rule to remember.** `node --test`
+  sets `NODE_TEST_CONTEXT`, the environment is inherited by every descendant, and
+  `mesh-guard.ts` refuses any non-loopback endpoint from both outbound planes. So the rule is
+  precise, and worth stating precisely:
+  - **Allowed:** `fakeDeps` stubs, and a control plane the test starts itself on loopback —
+    `{"endpoint": "http://127.0.0.1:6420"}`. A test may therefore drive `xfer_mesh_send`
+    end to end against a loopback engine, and should: argv-only coverage leaves the join
+    and preflight path unexercised by the new file.
+  - **Forbidden:** the endpoint, tunnel or relay named in the real
+    `~/.pi/xfer/mesh.config.json`, and anything that needs its token. Not because it is a
+    test — because it is *someone's deployment*, and a stray enqueue leaves a mark on it.
+- Every test points `--dir` at a fresh `os.tmpdir()`.
+- **A smoke against the real engine is still a human decision**, per AGENTS.md — and now it
+  buys little that a loopback test does not, so it is only worth asking for once the loopback
+  path is green.
