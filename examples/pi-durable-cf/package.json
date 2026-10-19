@@ -14,7 +14,7 @@
     "rivetkit": "2.3.26"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20251001.0",
+    "@cloudflare/workers-types": "^5.20251001.0",
     "typescript": "^5.9.2",
     "wrangler": "^4.0.0"
   }

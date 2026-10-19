@@ -51,6 +51,5 @@
 ## Follow-ups / Deferred
 
 - CF actor 与手机输入源的定时采集/汇总用法 — 属读者自己的 agent 仓库,按规格不写。
-- `registerSelf`(Worker 自注册)未证实生效 — 首次创建用带外 `getOrCreate`,文档已如实标注。
 - serverless 池被非法配置锤过后会卡死(需 PUT 踢池)— 根因已修(`20fb171`),文档保留排障行以防外部引擎版本差异。
 - 引擎版本与 rivetkit 版本的对齐矩阵 — 仅钉 `2.3.26` 一组,跨大版本不承诺。

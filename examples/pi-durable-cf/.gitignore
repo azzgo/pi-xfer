@@ -3,3 +3,5 @@ node_modules/
 dist/
 .dev.vars
 pnpm-lock.yaml
+
+package-lock.json
