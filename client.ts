@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES } from "./constants.ts";
+import type { XferNotifyOutcome } from "./types.ts";
 import { endpointForName } from "./utils.ts";
 
 /** JSON-lines payload with a `msg_id` used to match the ack. */
@@ -9,8 +10,19 @@ export interface XferOutboundMessage {
   [key: string]: unknown;
 }
 
-/** Connect to target socket, send, wait matching ack, close. */
-export function sendNotify(target: string, msg: XferOutboundMessage, xferDir?: string): Promise<void> {
+/**
+ * Connect to target socket, send, wait matching ack, close.
+ *
+ * Resolves `delivered` when the ack carries it and `unknown` when the connection dies
+ * first or an older receiver acks without the field — an absent field is never read as
+ * `delivered`. Rejects when the target is absent or the transport fails; the caller
+ * turns that into `not-delivered` or `unknown` as it sees fit.
+ */
+export function sendNotify(
+  target: string,
+  msg: XferOutboundMessage,
+  xferDir?: string,
+): Promise<XferNotifyOutcome> {
   return new Promise((resolve, reject) => {
     const endpoint = endpointForName(target, xferDir);
     if (!fs.existsSync(endpoint)) {
@@ -26,7 +38,7 @@ export function sendNotify(target: string, msg: XferOutboundMessage, xferDir?: s
       finish(new Error("connect timeout"));
     }, CONNECT_TIMEOUT_MS);
 
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, outcome: XferNotifyOutcome = "unknown") => {
       if (settled) return;
       settled = true;
       clearTimeout(connectTimer);
@@ -36,7 +48,7 @@ export function sendNotify(target: string, msg: XferOutboundMessage, xferDir?: s
         reject(error);
       } else {
         sock.end();
-        resolve();
+        resolve(outcome);
       }
     };
 
@@ -73,9 +85,11 @@ export function sendNotify(target: string, msg: XferOutboundMessage, xferDir?: s
           finish(new Error("invalid ack"));
           return;
         }
-        const ack = response as { type?: unknown; msg_id?: unknown };
+        const ack = response as { type?: unknown; msg_id?: unknown; outcome?: unknown };
         if (ack.type === "ack" && ack.msg_id === msg.msg_id) {
-          finish();
+          // An ack without the field came from an older receiver: `unknown`, never
+          // `delivered`. The claim has to be earned, not inferred from the ack itself.
+          finish(undefined, ack.outcome === "delivered" ? "delivered" : "unknown");
           return;
         }
       }

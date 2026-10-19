@@ -133,3 +133,31 @@ describe("inbound envelope: handoff kind", () => {
     assert.match(content, /asks you for output/);
   });
 });
+describe("inbound routing: idle vs busy", () => {
+  function routed(options: { idle: boolean; pending: boolean }): string {
+    const calls: Array<{ deliverAs?: string; triggerTurn?: boolean }> = [];
+    const pi = {
+      sendMessage: (_m: unknown, opts: { deliverAs?: string; triggerTurn?: boolean }) => calls.push(opts),
+    };
+    const state = new XferState();
+    state.runtimeContext = {
+      isIdle: () => options.idle,
+      hasPendingMessages: () => options.pending,
+    } as never;
+    new XferController(pi as never, state).deliverInbound(notify(doc()));
+    assert.equal(calls.length, 1);
+    return calls[0]!.deliverAs ?? "(none)";
+  }
+
+  it("opens a new turn when the session is idle and nothing is queued", () => {
+    assert.equal(routed({ idle: true, pending: false }), "followUp");
+  });
+
+  it("steers when the session is idle but a message is still queued", () => {
+    assert.equal(routed({ idle: true, pending: true }), "steer");
+  });
+
+  it("steers when the session is busy", () => {
+    assert.equal(routed({ idle: false, pending: false }), "steer");
+  });
+});

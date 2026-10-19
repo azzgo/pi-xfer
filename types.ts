@@ -22,6 +22,19 @@ export interface XferNotifyMessage {
   summary: string;
 }
 
+
+/**
+ * Where one Handoff came to rest, as far as the network can honestly tell (ADR-0020).
+ * Transport-time only — never "was it read": `pi.sendMessage` returns void and
+ * ADR-0015 kept no durable archive.
+ *
+ * Both transports use the same four values and each reaches only the subset it can
+ * support: mesh has a durable queue so it can say `queued`, local has none so it can
+ * say `delivered`. `unknown` must never be presented as a reason to retry — a second
+ * send is what turns an ambiguity into a real duplicate.
+ */
+export type XferNotifyOutcome = "queued" | "delivered" | "unknown" | "not-delivered";
+
 /** This agent's identity for the current session. */
 export interface Identity {
   name: string;

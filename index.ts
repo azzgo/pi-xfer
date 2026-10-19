@@ -18,6 +18,7 @@ import { registerXferCommand } from "./commands.ts";
 import { XferController } from "./controller.ts";
 import { MESH_CONFIG_PATH } from "./constants.ts";
 import { MeshNode } from "./mesh.ts";
+import type { XferNotifyOutcome } from "./types.ts";
 import { XferState } from "./state.ts";
 import { listPeers, msgId } from "./utils.ts";
 
@@ -91,7 +92,7 @@ export default function (pi: ExtensionAPI) {
       handoff_id: Type.String(),
       target: Type.String(),
       document: Type.String(),
-      status: Type.String(),
+      outcome: Type.String({ description: "Where this handoff landed: delivered (handed to the target's session), unknown (cannot say — do not resend), not-delivered (no such peer)." }),
     }),
 
     async execute(_callId, params, _signal, onUpdate, ctx) {
@@ -114,8 +115,9 @@ export default function (pi: ExtensionAPI) {
         });
       }
 
+      let outcome: XferNotifyOutcome;
       try {
-        await sendNotify(target, {
+        outcome = await sendNotify(target, {
           type: "xfer-notify",
           msg_id: mid,
           from: senderName,
@@ -123,13 +125,24 @@ export default function (pi: ExtensionAPI) {
           summary,
         });
       } catch (err: any) {
-        try { fs.unlinkSync(tmpFile); } catch { /* ok */ }
-        const notFound = /not found/.test(String(err?.message));
+        const absent = /not found/.test(String(err?.message));
+        // A `not-delivered` never reached a session, so the doc is safe to drop. An
+        // `unknown` may already have arrived and been read — the target's delivery message
+        // points at this path, so deleting it would leave a dangling reference.
+        if (absent) {
+          try { fs.unlinkSync(tmpFile); } catch { /* ok */ }
+        }
+        if (absent) {
+          throw new Error(
+            `xfer: not delivered to "${target}" — ${err.message}` +
+            ` — if this handoff arrived from the web picker, that sender is a browser userscript, not an xfer agent: do not xfer back; query the page via the broker page-tool CLI instead (see the doc's "Follow-up channel")`,
+          );
+        }
+        // `unknown` never reads as "try again": a second send of the same content is
+        // what turns an ambiguity into a real duplicate (ADR-0020).
         throw new Error(
-          `xfer: failed to notify "${target}" — ${err.message}` +
-          (notFound
-            ? ` — if this handoff arrived from the web picker, that sender is a browser userscript, not an xfer agent: do not xfer back; query the page via the broker page-tool CLI instead (see the doc's "Follow-up channel")`
-            : ""),
+          `xfer: outcome unknown for "${target}" — ${err.message}. The handoff may or may not ` +
+          `have arrived; do not resend it. Check with the target before sending again.`,
         );
       }
 
@@ -137,7 +150,8 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{
           type: "text",
-          text: `✅ Sent to "${target}" (handoff_id: ${mid})\n\nDoc: ${tmpFile}\n\n` +
+          text: `✅ ${outcome} to "${target}" (handoff_id: ${mid})\n\nDoc: ${tmpFile}\n\n` +
+                `Delivered means handed to the target's session — not that it has been read.\n\n` +
                 (kind === "task"
                   ? `Task handoff — the target returns a conclusion once it has one.`
                   : `Notification handoff — no reply expected unless the target is missing information.`),
@@ -146,9 +160,9 @@ export default function (pi: ExtensionAPI) {
           target,
           handoff_id: mid,
           document: tmpFile,
-          status: "sent",
+          outcome,
         },
-        structuredContent: { handoff_id: mid, target, document: tmpFile, status: "sent" },
+        structuredContent: { handoff_id: mid, target, document: tmpFile, outcome },
       };
     },
   });
@@ -171,7 +185,7 @@ export default function (pi: ExtensionAPI) {
     outputSchema: Type.Object({
       handoff_id: Type.String(),
       target: Type.String(),
-      status: Type.String(),
+      outcome: Type.String({ description: "Where this handoff landed: queued (on the engine, waiting for a runner), unknown (cannot say — do not resend), not-delivered (nothing was sent)." }),
     }),
     async execute(_callId, params, _signal, onUpdate, _ctx) {
       const { target, summary, handoff_document, kind } = params as any;
@@ -184,18 +198,21 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{
             type: "text",
-            text: `✅ Sent to mesh node "${target}" (handoff_id: ${id})\n\n` +
+            text: `✅ queued on the mesh for "${target}" (handoff_id: ${id})\n\n` +
                   (warning ? `⚠️ ${warning}\n\n` : "") +
+                  `Queued means the engine holds it until a runner in the target's pool picks it ` +
+                  `up — not that it has been read.\n\n` +
                   (kind === "task"
                     ? `Task handoff — the target returns a conclusion once it has one.`
                     : `Notification handoff — no reply expected unless the target is missing information.`),
           }],
-          details: { target, handoff_id: id, status: "sent", ...(warning ? { warning } : {}) },
-          structuredContent: { handoff_id: id, target, status: "sent" },
+          details: { target, handoff_id: id, outcome: "queued", ...(warning ? { warning } : {}) },
+          structuredContent: { handoff_id: id, target, outcome: "queued" },
         };
       } catch (err: any) {
         // An unknown outcome has its own headline in the error text; prefixing it
-        // with "failed" here would re-assert what the triage just refused to.
+        // with "failed" here would re-assert what the triage just refused to. A
+        // preflight refusal never reached the engine, so it is `not-delivered`.
         if (err?.kind === "not-delivered" || err?.kind === "unknown" || err?.kind === "failed") throw err;
         throw new Error(`xfer mesh: could not send to "${target}" — ${err.message}`);
       }

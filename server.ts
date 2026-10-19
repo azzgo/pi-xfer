@@ -34,8 +34,14 @@ export function createServer(delivery: InboundDelivery): net.Server {
 
         // only handle xfer-notify (one-way handoff)
         if (msg.type === "xfer-notify" && typeof msg.msg_id === "string") {
+          // The ack is written only after `deliver` returns, so the ordering already
+          // carries the claim: if delivery throws, no ack goes out and the sender's ack
+          // timeout resolves to `unknown`. The claim is "handed to this session", never
+          // "read" — `pi.sendMessage` returns void (ADR-0020).
           delivery.deliver(msg as XferNotifyMessage);
-          socket.write(JSON.stringify({ type: "ack", msg_id: msg.msg_id }) + "\n");
+          socket.write(
+            JSON.stringify({ type: "ack", msg_id: msg.msg_id, outcome: "delivered" }) + "\n",
+          );
         }
       }
     });

@@ -36,6 +36,7 @@ Full walkthrough in [`docs/guides/quickstart.md`](docs/guides/quickstart.md) · 
 | **Local transport** | Unix-socket peers at `~/.pi/xfer/<name>.sock`; `/xfer list`, zombie GC (`/xfer gc`), metadata files, install self-check (`/xfer doctor`); `/xfer broker start|status|stop|logs` daemon for the web picker |
 | **Mesh transport** | Opt-in cross-machine delivery over [RivetKit](https://rivet.dev) (`/xfer mesh status/up/down/list`, with a per-node delivery verdict and a pre-send check); one in-process actor per instance, engine-side discovery, durable queue, bundle + on-demand native runtime (see `docs/adr/0013`) |
 | **Node descriptions** | Self-declared capability note per mesh node (`/xfer desc <text>`, no text clears); stored on the node's actor, read per node and attached to the broker's `targets` listing so a picker user can pick by fit. Unverified self-declaration — routing stays with the consumer |
+| **Handoff outcome** | Both `xfer_to` and `xfer_mesh_to` report where the handoff landed — `delivered` / `queued` / `unknown` / `not-delivered` — as far as each transport can honestly tell. Never "was it read": `unknown` is a real answer and is never a reason to resend (see `docs/adr/0020`) |
 | **Board** | Machine-local async collaboration cards (`/xfer board`); append-only entries, human-cleaned (see `docs/adr/0014`) |
 | **Web picker** | Tampermonkey userscript + local broker: pick page elements, record interaction spans, submit as handoff (see `docs/dev/web-picker.md`) |
 

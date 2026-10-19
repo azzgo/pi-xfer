@@ -70,8 +70,19 @@ export class XferState {
     this.writeMetadata();
   }
 
+  /**
+   * Whether a Handoff arriving now would be injected into an idle turn or steered
+   * into the running one. `isIdle()` alone reads a queued-but-not-started message as
+   * free, and then `deliverAs: "followUp"` parks the Handoff behind work that was
+   * already waiting — which would make a reported `delivered` false.
+   */
   isRuntimeIdle(): boolean {
     if (!this.runtimeContext) return true;
-    try { return this.runtimeContext.isIdle(); } catch { return true; }
+    try {
+      const ctx = this.runtimeContext;
+      return ctx.isIdle() && !ctx.hasPendingMessages();
+    } catch {
+      return true;
+    }
   }
 }

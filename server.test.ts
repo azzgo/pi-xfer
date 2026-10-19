@@ -83,7 +83,7 @@ describe("listenServer (unix regression)", () => {
         await once(client, "connect");
         client.write(JSON.stringify(frame) + "\n");
         const ackLine = await readLine(client);
-        assert.deepEqual(JSON.parse(ackLine), { type: "ack", msg_id: frame.msg_id });
+        assert.deepEqual(JSON.parse(ackLine), { type: "ack", msg_id: frame.msg_id, outcome: "delivered" });
         await waitFor(() => delivered.length > 0, "the deliver callback");
         assert.deepEqual(delivered, [frame]);
       } finally {

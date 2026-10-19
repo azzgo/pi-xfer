@@ -9,6 +9,7 @@ import { createRivetEngine } from "../mesh-engine.ts";
 import { createServer } from "../server.ts";
 import type { XferNotifyMessage } from "../types.ts";
 import { endpointForName, metadataForName } from "../utils.ts";
+import { claimEndpoint } from "../endpoint-claim.ts";
 import { appendInbox, inboxPathForName, type InboxRecord } from "./inbox.ts";
 
 /** Where an inbound handoff goes, one step at a time (first = always). */
@@ -72,9 +73,7 @@ export async function startAdapterd(options: AdapterdOptions): Promise<AdapterdH
 
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(dir, 0o700); } catch { /* best effort */ }
-  for (const stale of [endpoint, metadataPath]) {
-    try { fs.unlinkSync(stale); } catch { /* absent is fine */ }
-  }
+  await claimEndpoint(name, dir);
 
   const handoffChildren = new Set<Promise<void>>();
   let closed = false;

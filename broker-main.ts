@@ -248,7 +248,9 @@ function nextRequestId(): string {
  * matching ack ≤ ACK_TIMEOUT_MS) but bound to the broker's own xfer dir — the
  * module-level XFER_DIR constant points at ~/.pi/xfer, not the daemon's dir.
  * A missing socket rejects with code target_not_found; any other failure with
- * delivery_failed. The caller owns the handoff doc and keeps it either way.
+ * delivery_failed. The ack's `outcome` field is deliberately not interpreted here:
+ * the broker's own ack to the browser is a different vocabulary, and reading the
+ * receiver's field as `delivered` on absence would invent a claim.
  */
 function pushXferNotify(
   xferDir: string,

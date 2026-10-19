@@ -9,6 +9,7 @@ import { readHandoffKind } from "./handoff-kind.ts";
 import { createServer, listenServer } from "./server.ts";
 import { XferState } from "./state.ts";
 import type { XferNotifyMessage } from "./types.ts";
+import { claimEndpoint } from "./endpoint-claim.ts";
 import { deriveName, endpointForName, metadataForName } from "./utils.ts";
 import { FROM_WEB_PICKER } from "./wire.ts";
 
@@ -95,8 +96,15 @@ export class XferController {
     try { fs.chmodSync(XFER_DIR, 0o700); } catch { /* best effort */ }
     const endpoint = endpointForName(name);
     const metadata = metadataForName(name);
-    try { fs.unlinkSync(endpoint); } catch { /* ok */ }
-    try { fs.unlinkSync(metadata); } catch { /* ok */ }
+    try {
+      await claimEndpoint(name, XFER_DIR);
+    } catch (error) {
+      ctx.ui.notify(
+        `❌ xfer could not start: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      );
+      return;
+    }
 
     const state = this.state;
     state.runtimeContext = ctx;
@@ -129,6 +137,20 @@ export class XferController {
     const ident = state.identity;
     if (!ident) return;
 
+    if (newName !== ident.name) {
+      // Claim the new name before releasing the old one. A failed rename must leave the
+      // session exactly as it was — otherwise the agent goes silent under neither name.
+      try {
+        await claimEndpoint(newName, XFER_DIR);
+      } catch (error) {
+        ctx.ui.notify(
+          `❌ Failed to rename xfer: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+        return;
+      }
+    }
+
     const oldEndpoint = ident.endpoint;
     const oldMetadata = ident.metadata;
     try { ident.server?.close(); } catch { /* ok */ }
@@ -138,8 +160,6 @@ export class XferController {
     ident.name = newName;
     ident.endpoint = endpointForName(newName);
     ident.metadata = metadataForName(newName);
-    try { fs.unlinkSync(ident.endpoint); } catch { /* ok */ }
-    try { fs.unlinkSync(ident.metadata); } catch { /* ok */ }
 
     ident.server = this.createInboundServer();
     state.markDirty();

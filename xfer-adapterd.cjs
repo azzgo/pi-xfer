@@ -160,6 +160,23 @@ function isEntryPoint(names) {
   if (!invoked) return false;
   return names.includes(path3.basename(invoked));
 }
+function readPeerMetadata(xferName, xferDir = XFER_DIR) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path3.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const value = raw;
+    return {
+      ...typeof value.sessionName === "string" ? { sessionName: value.sessionName } : {},
+      ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
+      ...typeof value.model === "string" ? { model: value.model } : {},
+      ...typeof value.status === "string" ? { status: value.status } : {},
+      ...typeof value.pid === "number" ? { pid: value.pid } : {},
+      ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {}
+    };
+  } catch {
+    return {};
+  }
+}
 async function withTimeout(promise2, ms) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -171,9 +188,10 @@ async function withTimeout(promise2, ms) {
     clearTimeout(timer);
   }
 }
-var path3;
+var fs, path3;
 var init_utils = __esm({
   "utils.ts"() {
+    fs = __toESM(require("node:fs"), 1);
     path3 = __toESM(require("node:path"), 1);
     init_constants();
   }
@@ -242,7 +260,7 @@ The token field also accepts "$MESH_TOKEN" (an environment variable) or "!pass s
 function loadMeshConfig(configPath) {
   let text;
   try {
-    text = fs2.readFileSync(configPath, "utf-8");
+    text = fs3.readFileSync(configPath, "utf-8");
   } catch {
     throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
   }
@@ -436,11 +454,11 @@ function deserializeMeshKey(serialized) {
   parts.push(current);
   return parts;
 }
-var import_node_child_process, fs2, XFER_INSTANCE_ACTOR, HANDOFF_QUEUE, ENV_VAR_NAME_RE, ENV_VAR_NAME_PREFIX_RE, TOKEN_COMMAND_TIMEOUT_MS;
+var import_node_child_process, fs3, XFER_INSTANCE_ACTOR, HANDOFF_QUEUE, ENV_VAR_NAME_RE, ENV_VAR_NAME_PREFIX_RE, TOKEN_COMMAND_TIMEOUT_MS;
 var init_mesh_config = __esm({
   "mesh-config.ts"() {
     import_node_child_process = require("node:child_process");
-    fs2 = __toESM(require("node:fs"), 1);
+    fs3 = __toESM(require("node:fs"), 1);
     init_utils();
     XFER_INSTANCE_ACTOR = "xfer-instance";
     HANDOFF_QUEUE = "handoff";
@@ -483,7 +501,7 @@ function formatMeshLogLine(level, message, fields = {}) {
 }
 function appendMeshLogLine(logPath, line) {
   try {
-    fs4.appendFileSync(logPath, `${line}
+    fs5.appendFileSync(logPath, `${line}
 `, { encoding: "utf-8", mode: 384 });
   } catch {
   }
@@ -528,10 +546,10 @@ function createMeshLogSink(options = {}) {
   });
   return make({});
 }
-var fs4, path5, MESH_LOG_PATH, MESH_LOG_LEVEL, LEVEL_RANK;
+var fs5, path5, MESH_LOG_PATH, MESH_LOG_LEVEL, LEVEL_RANK;
 var init_mesh_log = __esm({
   "mesh-log.ts"() {
-    fs4 = __toESM(require("node:fs"), 1);
+    fs5 = __toESM(require("node:fs"), 1);
     path5 = __toESM(require("node:path"), 1);
     init_constants();
     MESH_LOG_PATH = path5.join(XFER_DIR, "mesh.log");
@@ -595,8 +613,8 @@ async function downloadNativeBinding(opts) {
   }
   const tgz = Buffer.from(await response.arrayBuffer());
   const addon = extractNodeFromTgz(tgz);
-  fs5.mkdirSync(path6.dirname(dest), { recursive: true, mode: 448 });
-  fs5.writeFileSync(dest, addon, { mode: 384 });
+  fs6.mkdirSync(path6.dirname(dest), { recursive: true, mode: 448 });
+  fs6.writeFileSync(dest, addon, { mode: 384 });
   return dest;
 }
 function extractNodeFromTgz(tgz) {
@@ -666,10 +684,10 @@ function extractTgzToDir(tgz, destDir) {
     const dest = path6.join(destDir, rel);
     const mode = Number.parseInt(header.subarray(100, 108).toString("utf8").replace(/[\0 ]*$/g, "").trim(), 8) & 511;
     if (type === "5") {
-      fs5.mkdirSync(dest, { recursive: true });
+      fs6.mkdirSync(dest, { recursive: true });
     } else if (type === "0" || type === "\0") {
-      fs5.mkdirSync(path6.dirname(dest), { recursive: true });
-      fs5.writeFileSync(dest, Buffer.from(body), { mode: mode || 420 });
+      fs6.mkdirSync(path6.dirname(dest), { recursive: true });
+      fs6.writeFileSync(dest, Buffer.from(body), { mode: mode || 420 });
     }
   }
 }
@@ -690,7 +708,7 @@ async function ensureEngineCliReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
   if (!triple) throw new Error("mesh: no engine-cli package exists for this platform");
   const root = path6.join(cacheDir, "napi", RIVETKIT_VERSION, "engine-cli");
   const entry = path6.join(root, "node_modules", "@rivetkit", "engine-cli", "index.js");
-  if (fs5.existsSync(entry)) return entry;
+  if (fs6.existsSync(entry)) return entry;
   const registry2 = "https://registry.npmjs.org";
   const fetchImpl0 = fetchImpl ?? fetch;
   const wrapper = await downloadTarball("@rivetkit/engine-cli", RIVETKIT_VERSION, registry2, fetchImpl0);
@@ -711,17 +729,17 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
     );
   }
   const dest = nativeBindingPath(RIVETKIT_VERSION, triple, cacheDir);
-  if (!fs5.existsSync(dest)) {
+  if (!fs6.existsSync(dest)) {
     await downloadNativeBinding({ triple, cacheDir, fetchImpl });
   }
   installNapiRequireShim(dest);
   const engineCliEntry = await ensureEngineCliReady(cacheDir, fetchImpl);
   globalThis.__meshEngineCliEntry = engineCliEntry;
 }
-var fs5, path6, zlib, RIVETKIT_VERSION, NAPI_SCOPE, NAPI_BASE;
+var fs6, path6, zlib, RIVETKIT_VERSION, NAPI_SCOPE, NAPI_BASE;
 var init_mesh_native = __esm({
   "mesh-native.ts"() {
-    fs5 = __toESM(require("node:fs"), 1);
+    fs6 = __toESM(require("node:fs"), 1);
     path6 = __toESM(require("node:path"), 1);
     zlib = __toESM(require("node:zlib"), 1);
     init_constants();
@@ -2114,7 +2132,7 @@ var require_atomic_sleep = __commonJS({
 var require_sonic_boom = __commonJS({
   "node_modules/sonic-boom/index.js"(exports2, module2) {
     "use strict";
-    var fs11 = require("fs");
+    var fs13 = require("fs");
     var EventEmitter = require("events");
     var inherits = require("util").inherits;
     var path13 = require("path");
@@ -2171,20 +2189,20 @@ var require_sonic_boom = __commonJS({
       const mode = sonic.mode;
       if (sonic.sync) {
         try {
-          if (sonic.mkdir) fs11.mkdirSync(path13.dirname(file2), { recursive: true });
-          const fd = fs11.openSync(file2, flags, mode);
+          if (sonic.mkdir) fs13.mkdirSync(path13.dirname(file2), { recursive: true });
+          const fd = fs13.openSync(file2, flags, mode);
           fileOpened(null, fd);
         } catch (err) {
           fileOpened(err);
           throw err;
         }
       } else if (sonic.mkdir) {
-        fs11.mkdir(path13.dirname(file2), { recursive: true }, (err) => {
+        fs13.mkdir(path13.dirname(file2), { recursive: true }, (err) => {
           if (err) return fileOpened(err);
-          fs11.open(file2, flags, mode, fileOpened);
+          fs13.open(file2, flags, mode, fileOpened);
         });
       } else {
-        fs11.open(file2, flags, mode, fileOpened);
+        fs13.open(file2, flags, mode, fileOpened);
       }
     }
     function SonicBoom(opts) {
@@ -2225,8 +2243,8 @@ var require_sonic_boom = __commonJS({
         this.flush = flushBuffer;
         this.flushSync = flushBufferSync;
         this._actualWrite = actualWriteBuffer;
-        fsWriteSync = () => fs11.writeSync(this.fd, this._writingBuf);
-        fsWrite = () => fs11.write(this.fd, this._writingBuf, this.release);
+        fsWriteSync = () => fs13.writeSync(this.fd, this._writingBuf);
+        fsWrite = () => fs13.write(this.fd, this._writingBuf, this.release);
       } else if (contentMode === void 0 || contentMode === kContentModeUtf8) {
         this._writingBuf = "";
         this.write = write;
@@ -2235,15 +2253,15 @@ var require_sonic_boom = __commonJS({
         this._actualWrite = actualWrite;
         fsWriteSync = () => {
           if (Buffer.isBuffer(this._writingBuf)) {
-            return fs11.writeSync(this.fd, this._writingBuf);
+            return fs13.writeSync(this.fd, this._writingBuf);
           }
-          return fs11.writeSync(this.fd, this._writingBuf, "utf8");
+          return fs13.writeSync(this.fd, this._writingBuf, "utf8");
         };
         fsWrite = () => {
           if (Buffer.isBuffer(this._writingBuf)) {
-            return fs11.write(this.fd, this._writingBuf, this.release);
+            return fs13.write(this.fd, this._writingBuf, this.release);
           }
-          return fs11.write(this.fd, this._writingBuf, "utf8", this.release);
+          return fs13.write(this.fd, this._writingBuf, "utf8", this.release);
         };
       } else {
         throw new Error(`SonicBoom supports "${kContentModeUtf8}" and "${kContentModeBuffer}", but passed ${contentMode}`);
@@ -2300,7 +2318,7 @@ var require_sonic_boom = __commonJS({
           }
         }
         if (this._fsync) {
-          fs11.fsyncSync(this.fd);
+          fs13.fsyncSync(this.fd);
         }
         const len = this._len;
         if (this._reopening) {
@@ -2414,7 +2432,7 @@ var require_sonic_boom = __commonJS({
       const onDrain = () => {
         if (!this._fsync) {
           try {
-            fs11.fsync(this.fd, (err) => {
+            fs13.fsync(this.fd, (err) => {
               this._flushPending = false;
               cb(err);
             });
@@ -2516,7 +2534,7 @@ var require_sonic_boom = __commonJS({
       const fd = this.fd;
       this.once("ready", () => {
         if (fd !== this.fd) {
-          fs11.close(fd, (err) => {
+          fs13.close(fd, (err) => {
             if (err) {
               return this.emit("error", err);
             }
@@ -2565,7 +2583,7 @@ var require_sonic_boom = __commonJS({
           buf = this._bufs[0];
         }
         try {
-          const n = Buffer.isBuffer(buf) ? fs11.writeSync(this.fd, buf) : fs11.writeSync(this.fd, buf, "utf8");
+          const n = Buffer.isBuffer(buf) ? fs13.writeSync(this.fd, buf) : fs13.writeSync(this.fd, buf, "utf8");
           const releasedBufObj = releaseWritingBuf(buf, this._len, n);
           buf = releasedBufObj.writingBuf;
           this._len = releasedBufObj.len;
@@ -2581,7 +2599,7 @@ var require_sonic_boom = __commonJS({
         }
       }
       try {
-        fs11.fsyncSync(this.fd);
+        fs13.fsyncSync(this.fd);
       } catch {
       }
     }
@@ -2602,7 +2620,7 @@ var require_sonic_boom = __commonJS({
           buf = mergeBuf(this._bufs[0], this._lens[0]);
         }
         try {
-          const n = fs11.writeSync(this.fd, buf);
+          const n = fs13.writeSync(this.fd, buf);
           buf = buf.subarray(n);
           this._len = Math.max(this._len - n, 0);
           if (buf.length <= 0) {
@@ -2630,13 +2648,13 @@ var require_sonic_boom = __commonJS({
       this._writingBuf = this._writingBuf.length ? this._writingBuf : this._bufs.shift() || "";
       if (this.sync) {
         try {
-          const written = Buffer.isBuffer(this._writingBuf) ? fs11.writeSync(this.fd, this._writingBuf) : fs11.writeSync(this.fd, this._writingBuf, "utf8");
+          const written = Buffer.isBuffer(this._writingBuf) ? fs13.writeSync(this.fd, this._writingBuf) : fs13.writeSync(this.fd, this._writingBuf, "utf8");
           release(null, written);
         } catch (err) {
           release(err);
         }
       } else {
-        fs11.write(this.fd, this._writingBuf, release);
+        fs13.write(this.fd, this._writingBuf, release);
       }
     }
     function actualWriteBuffer() {
@@ -2645,7 +2663,7 @@ var require_sonic_boom = __commonJS({
       this._writingBuf = this._writingBuf.length ? this._writingBuf : mergeBuf(this._bufs.shift(), this._lens.shift());
       if (this.sync) {
         try {
-          const written = fs11.writeSync(this.fd, this._writingBuf);
+          const written = fs13.writeSync(this.fd, this._writingBuf);
           release(null, written);
         } catch (err) {
           release(err);
@@ -2654,7 +2672,7 @@ var require_sonic_boom = __commonJS({
         if (kCopyBuffer) {
           this._writingBuf = Buffer.from(this._writingBuf);
         }
-        fs11.write(this.fd, this._writingBuf, release);
+        fs13.write(this.fd, this._writingBuf, release);
       }
     }
     function actualClose(sonic) {
@@ -2670,12 +2688,12 @@ var require_sonic_boom = __commonJS({
       sonic._lens = [];
       assert3(typeof sonic.fd === "number", `sonic.fd must be a number, got ${typeof sonic.fd}`);
       try {
-        fs11.fsync(sonic.fd, closeWrapped);
+        fs13.fsync(sonic.fd, closeWrapped);
       } catch {
       }
       function closeWrapped() {
         if (sonic.fd !== 1 && sonic.fd !== 2) {
-          fs11.close(sonic.fd, done);
+          fs13.close(sonic.fd, done);
         } else {
           done();
         }
@@ -28022,27 +28040,27 @@ var require_process = __commonJS({
 var require_filesystem = __commonJS({
   "node_modules/detect-libc/lib/filesystem.js"(exports2, module2) {
     "use strict";
-    var fs11 = require("fs");
+    var fs13 = require("fs");
     var LDD_PATH = "/usr/bin/ldd";
     var SELF_PATH = "/proc/self/exe";
     var MAX_LENGTH = 2048;
-    var readFileSync7 = (path13) => {
-      const fd = fs11.openSync(path13, "r");
+    var readFileSync8 = (path13) => {
+      const fd = fs13.openSync(path13, "r");
       const buffer = Buffer.alloc(MAX_LENGTH);
-      const bytesRead = fs11.readSync(fd, buffer, 0, MAX_LENGTH, 0);
-      fs11.close(fd, () => {
+      const bytesRead = fs13.readSync(fd, buffer, 0, MAX_LENGTH, 0);
+      fs13.close(fd, () => {
       });
       return buffer.subarray(0, bytesRead);
     };
     var readFile = (path13) => new Promise((resolve2, reject) => {
-      fs11.open(path13, "r", (err, fd) => {
+      fs13.open(path13, "r", (err, fd) => {
         if (err) {
           reject(err);
         } else {
           const buffer = Buffer.alloc(MAX_LENGTH);
-          fs11.read(fd, buffer, 0, MAX_LENGTH, 0, (_, bytesRead) => {
+          fs13.read(fd, buffer, 0, MAX_LENGTH, 0, (_, bytesRead) => {
             resolve2(buffer.subarray(0, bytesRead));
-            fs11.close(fd, () => {
+            fs13.close(fd, () => {
             });
           });
         }
@@ -28051,7 +28069,7 @@ var require_filesystem = __commonJS({
     module2.exports = {
       LDD_PATH,
       SELF_PATH,
-      readFileSync: readFileSync7,
+      readFileSync: readFileSync8,
       readFile
     };
   }
@@ -28100,7 +28118,7 @@ var require_detect_libc = __commonJS({
     "use strict";
     var childProcess = require("child_process");
     var { isLinux, getReport } = require_process();
-    var { LDD_PATH, SELF_PATH, readFile, readFileSync: readFileSync7 } = require_filesystem();
+    var { LDD_PATH, SELF_PATH, readFile, readFileSync: readFileSync8 } = require_filesystem();
     var { interpreterPath } = require_elf();
     var cachedFamilyInterpreter;
     var cachedFamilyFilesystem;
@@ -28192,7 +28210,7 @@ var require_detect_libc = __commonJS({
       }
       cachedFamilyFilesystem = null;
       try {
-        const lddContent = readFileSync7(LDD_PATH);
+        const lddContent = readFileSync8(LDD_PATH);
         cachedFamilyFilesystem = getFamilyFromLddContent(lddContent);
       } catch (e) {
       }
@@ -28217,7 +28235,7 @@ var require_detect_libc = __commonJS({
       }
       cachedFamilyInterpreter = null;
       try {
-        const selfContent = readFileSync7(SELF_PATH);
+        const selfContent = readFileSync8(SELF_PATH);
         const path13 = interpreterPath(selfContent);
         cachedFamilyInterpreter = familyFromInterpreterPath(path13);
       } catch (e) {
@@ -28281,7 +28299,7 @@ var require_detect_libc = __commonJS({
       }
       cachedVersionFilesystem = null;
       try {
-        const lddContent = readFileSync7(LDD_PATH);
+        const lddContent = readFileSync8(LDD_PATH);
         const versionMatch = lddContent.match(RE_GLIBC_VERSION);
         if (versionMatch) {
           cachedVersionFilesystem = versionMatch[1];
@@ -28352,7 +28370,7 @@ var require_detect_libc = __commonJS({
 // node_modules/node-gyp-build-optional-packages/index.js
 var require_node_gyp_build_optional_packages = __commonJS({
   "node_modules/node-gyp-build-optional-packages/index.js"(exports2, module2) {
-    var fs11 = require("fs");
+    var fs13 = require("fs");
     var path13 = require("path");
     var url3 = require("url");
     var vars = process.config && process.config.variables || {};
@@ -28418,27 +28436,27 @@ var require_node_gyp_build_optional_packages = __commonJS({
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target2 + "\n    attempted loading from: " + dir + " and package: " + platformPackage + "\n");
       function resolve2(dir2) {
-        var tuples = readdirSync2(path13.join(dir2, "prebuilds")).map(parseTuple);
+        var tuples = readdirSync3(path13.join(dir2, "prebuilds")).map(parseTuple);
         var tuple2 = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple2) return;
         return resolveFile(path13.join(dir2, "prebuilds", tuple2.name));
       }
       function resolveFile(prebuilds) {
-        var parsed = readdirSync2(prebuilds).map(parseTags);
+        var parsed = readdirSync3(prebuilds).map(parseTags);
         var candidates = parsed.filter(matchTags(runtime, abi));
         var winner = candidates.sort(compareTags(runtime))[0];
         if (winner) return path13.join(prebuilds, winner.file);
       }
     };
-    function readdirSync2(dir) {
+    function readdirSync3(dir) {
       try {
-        return fs11.readdirSync(dir);
+        return fs13.readdirSync(dir);
       } catch (err) {
         return [];
       }
     }
     function getFirst(dir, filter) {
-      var files = readdirSync2(dir).filter(filter);
+      var files = readdirSync3(dir).filter(filter);
       return files[0] && path13.join(dir, files[0]);
     }
     function matchBuild(name) {
@@ -49363,11 +49381,11 @@ function installAgentSkill(options) {
   }
   const root = options.skillsRoot ?? findSkillsRoot();
   const into = options.into;
-  fs9.mkdirSync(into, { recursive: true });
+  fs11.mkdirSync(into, { recursive: true });
   const render = (text) => text.replaceAll("{{LAUNCH_COMMAND}}", options.launchCommand).replaceAll("{{NAME}}", options.name).replaceAll("{{HOST}}", options.host);
   const files = [];
   const write = (target2, content) => {
-    fs9.writeFileSync(target2, content, { encoding: "utf-8", mode: 420 });
+    fs11.writeFileSync(target2, content, { encoding: "utf-8", mode: 420 });
     files.push(target2);
   };
   write(path11.join(into, "SKILL.md"), render(readTemplate(root, "SKILL.md")));
@@ -49391,21 +49409,21 @@ function findSkillsRoot(baseDir = __dirname) {
     path11.join(baseDir, "..", "..", "skills", "xfer-agent")
   ];
   for (const candidate of candidates) {
-    if (fs9.existsSync(path11.join(candidate, "SKILL.md"))) return candidate;
+    if (fs11.existsSync(path11.join(candidate, "SKILL.md"))) return candidate;
   }
   throw new Error(`xfer-agent skill templates not found — looked in ${candidates.join(", ")}`);
 }
 function readTemplate(root, rel) {
   try {
-    return fs9.readFileSync(path11.join(root, rel), "utf-8");
+    return fs11.readFileSync(path11.join(root, rel), "utf-8");
   } catch (err) {
     throw new Error(`missing skill template ${rel} under ${root} — ${err instanceof Error ? err.message : String(err)}`);
   }
 }
-var fs9, path11, AGENT_HOSTS;
+var fs11, path11, AGENT_HOSTS;
 var init_install = __esm({
   "adapterd.src/install.ts"() {
-    fs9 = __toESM(require("node:fs"), 1);
+    fs11 = __toESM(require("node:fs"), 1);
     path11 = __toESM(require("node:path"), 1);
     AGENT_HOSTS = ["cursor", "generic"];
   }
@@ -49417,19 +49435,19 @@ __export(main_exports, {
   main: () => main
 });
 module.exports = __toCommonJS(main_exports);
-var fs10 = __toESM(require("node:fs"), 1);
+var fs12 = __toESM(require("node:fs"), 1);
 var os4 = __toESM(require("node:os"), 1);
 var path12 = __toESM(require("node:path"), 1);
 
 // client.ts
-var fs = __toESM(require("node:fs"), 1);
+var fs2 = __toESM(require("node:fs"), 1);
 var net = __toESM(require("node:net"), 1);
 init_constants();
 init_utils();
 function sendNotify(target2, msg, xferDir) {
   return new Promise((resolve2, reject) => {
     const endpoint = endpointForName(target2, xferDir);
-    if (!fs.existsSync(endpoint)) {
+    if (!fs2.existsSync(endpoint)) {
       reject(new Error(`peer "${target2}" not found`));
       return;
     }
@@ -49440,7 +49458,7 @@ function sendNotify(target2, msg, xferDir) {
     const connectTimer = setTimeout(() => {
       finish(new Error("connect timeout"));
     }, CONNECT_TIMEOUT_MS);
-    const finish = (error62) => {
+    const finish = (error62, outcome = "unknown") => {
       if (settled) return;
       settled = true;
       clearTimeout(connectTimer);
@@ -49450,7 +49468,7 @@ function sendNotify(target2, msg, xferDir) {
         reject(error62);
       } else {
         sock.end();
-        resolve2();
+        resolve2(outcome);
       }
     };
     sock.on("connect", () => {
@@ -49488,7 +49506,7 @@ function sendNotify(target2, msg, xferDir) {
         }
         const ack = response;
         if (ack.type === "ack" && ack.msg_id === msg.msg_id) {
-          finish();
+          finish(void 0, ack.outcome === "delivered" ? "delivered" : "unknown");
           return;
         }
       }
@@ -49518,7 +49536,7 @@ function stampHandoffKind(document2, kind) {
 }
 
 // sender-cwd-stamp.ts
-var fs3 = __toESM(require("node:fs"), 1);
+var fs4 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 var STAMP_LINE = /^<!--\s*xfer:sender-cwd\s+cwd=(.+?)\s+project=(\S*)\s+machine=(\S*?)(?:\s+branch=(\S*?))?\s*-->$/;
 function formatSenderCwdStamp(stamp) {
@@ -49541,12 +49559,12 @@ function readGitBranch(cwd) {
   try {
     const git = path4.join(cwd, ".git");
     let headPath = path4.join(git, "HEAD");
-    if (!fs3.statSync(git).isDirectory()) {
-      const pointer = /^gitdir:\s*(.+)$/m.exec(fs3.readFileSync(git, "utf-8"));
+    if (!fs4.statSync(git).isDirectory()) {
+      const pointer = /^gitdir:\s*(.+)$/m.exec(fs4.readFileSync(git, "utf-8"));
       if (!pointer) return null;
       headPath = path4.join(pointer[1].trim(), "HEAD");
     }
-    const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(fs3.readFileSync(headPath, "utf-8").trim());
+    const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(fs4.readFileSync(headPath, "utf-8").trim());
     return ref?.[1].trim() || null;
   } catch {
     return null;
@@ -49566,13 +49584,13 @@ function senderCwdStampFor(cwd, machine) {
 init_utils();
 
 // adapterd.src/daemon.ts
-var fs8 = __toESM(require("node:fs"), 1);
+var fs10 = __toESM(require("node:fs"), 1);
 var path10 = __toESM(require("node:path"), 1);
 var import_node_child_process2 = require("node:child_process");
 init_constants();
 
 // mesh.ts
-var fs6 = __toESM(require("node:fs"), 1);
+var fs7 = __toESM(require("node:fs"), 1);
 var os3 = __toESM(require("node:os"), 1);
 var path8 = __toESM(require("node:path"), 1);
 var url2 = __toESM(require("node:url"), 1);
@@ -49817,7 +49835,7 @@ var MeshNode = class {
       return;
     }
     const docPath = path8.join(os3.tmpdir(), `pi-xfer-${message.id}.md`);
-    fs6.writeFileSync(docPath, message.document, { encoding: "utf-8", mode: 384 });
+    fs7.writeFileSync(docPath, message.document, { encoding: "utf-8", mode: 384 });
     logMeshEvent(this.logPath, "info", "mesh inbound", {
       id: message.id,
       from: message.from,
@@ -49894,7 +49912,9 @@ function createServer2(delivery) {
         }
         if (msg.type === "xfer-notify" && typeof msg.msg_id === "string") {
           delivery.deliver(msg);
-          socket.write(JSON.stringify({ type: "ack", msg_id: msg.msg_id }) + "\n");
+          socket.write(
+            JSON.stringify({ type: "ack", msg_id: msg.msg_id, outcome: "delivered" }) + "\n"
+          );
         }
       }
     });
@@ -49904,8 +49924,76 @@ function createServer2(delivery) {
 // adapterd.src/daemon.ts
 init_utils();
 
+// endpoint-claim.ts
+var fs8 = __toESM(require("node:fs"), 1);
+init_utils();
+
+// gc.ts
+var net3 = __toESM(require("node:net"), 1);
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = err.code;
+    if (code === "ESRCH") return false;
+    return true;
+  }
+}
+function socketHasListener(sockPath, timeoutMs = 1e3) {
+  return new Promise((resolve2) => {
+    let settled = false;
+    const conn = net3.connect({ path: sockPath });
+    const finish = (listening) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      conn.destroy();
+      resolve2(listening);
+    };
+    const timer = setTimeout(() => finish(true), timeoutMs);
+    timer.unref?.();
+    conn.once("connect", () => finish(true));
+    conn.once("error", (err) => {
+      const dead = err.code === "ECONNREFUSED" || err.code === "ENOENT" || err.code === "ENOTSOCK";
+      finish(!dead);
+    });
+  });
+}
+
+// endpoint-claim.ts
+async function nameIsLive(name, xferDir) {
+  const pid = readPeerMetadata(name, xferDir).pid;
+  if (typeof pid === "number" && processAlive(pid)) return true;
+  const endpoint = endpointForName(name, xferDir);
+  if (!fs8.existsSync(endpoint)) return false;
+  return socketHasListener(endpoint);
+}
+var NameTakenError = class extends Error {
+  /** The name that could not be claimed. */
+  peerName;
+  constructor(peerName) {
+    super(
+      `the name "${peerName}" is already in use by a live xfer peer — stop that one, or pick another name with /xfer name <new> (adapter daemon: --name <new>)`
+    );
+    this.name = "NameTakenError";
+    this.peerName = peerName;
+  }
+};
+async function claimEndpoint(name, xferDir) {
+  const endpoint = endpointForName(name, xferDir);
+  const metadata = metadataForName(name, xferDir);
+  if (await nameIsLive(name, xferDir)) throw new NameTakenError(name);
+  for (const file2 of [endpoint, metadata]) {
+    try {
+      fs8.unlinkSync(file2);
+    } catch {
+    }
+  }
+}
+
 // adapterd.src/inbox.ts
-var fs7 = __toESM(require("node:fs"), 1);
+var fs9 = __toESM(require("node:fs"), 1);
 var path9 = __toESM(require("node:path"), 1);
 init_constants();
 init_utils();
@@ -49913,8 +50001,8 @@ function inboxPathForName(name, dir = XFER_DIR) {
   return path9.join(dir, `${encodeAgentName(name)}.inbox.jsonl`);
 }
 function appendInbox(record2, inboxPath) {
-  fs7.mkdirSync(path9.dirname(inboxPath), { recursive: true, mode: 448 });
-  fs7.appendFileSync(inboxPath, `${JSON.stringify(record2)}
+  fs9.mkdirSync(path9.dirname(inboxPath), { recursive: true, mode: 448 });
+  fs9.appendFileSync(inboxPath, `${JSON.stringify(record2)}
 `, { encoding: "utf-8", mode: 384 });
 }
 function parseInbox(content) {
@@ -49928,7 +50016,7 @@ function parseInbox(content) {
 function listInbox(inboxPath) {
   let content;
   try {
-    content = fs7.readFileSync(inboxPath, "utf-8");
+    content = fs9.readFileSync(inboxPath, "utf-8");
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
@@ -49938,15 +50026,15 @@ function listInbox(inboxPath) {
 function takeInbox(inboxPath) {
   const taken = `${inboxPath}.take-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    fs7.renameSync(inboxPath, taken);
+    fs9.renameSync(inboxPath, taken);
   } catch (err) {
     if (err.code === "ENOENT") return [];
     throw err;
   }
   try {
-    return parseInbox(fs7.readFileSync(taken, "utf-8"));
+    return parseInbox(fs9.readFileSync(taken, "utf-8"));
   } finally {
-    fs7.rmSync(taken, { force: true });
+    fs9.rmSync(taken, { force: true });
   }
 }
 
@@ -49958,17 +50046,12 @@ async function startAdapterd(options) {
   const metadataPath = metadataForName(name, dir);
   const inboxPath = inboxPathForName(name, dir);
   const startedAt = Date.now();
-  fs8.mkdirSync(dir, { recursive: true, mode: 448 });
+  fs10.mkdirSync(dir, { recursive: true, mode: 448 });
   try {
-    fs8.chmodSync(dir, 448);
+    fs10.chmodSync(dir, 448);
   } catch {
   }
-  for (const stale of [endpoint, metadataPath]) {
-    try {
-      fs8.unlinkSync(stale);
-    } catch {
-    }
-  }
+  await claimEndpoint(name, dir);
   const handoffChildren = /* @__PURE__ */ new Set();
   let closed = false;
   const writeMetadata = () => {
@@ -49988,15 +50071,15 @@ async function startAdapterd(options) {
 `;
     const temp = `${metadataPath}.tmp-${process.pid}`;
     try {
-      fs8.writeFileSync(temp, serialized, { encoding: "utf-8", mode: 384 });
-      fs8.renameSync(temp, metadataPath);
+      fs10.writeFileSync(temp, serialized, { encoding: "utf-8", mode: 384 });
+      fs10.renameSync(temp, metadataPath);
       try {
-        fs8.chmodSync(metadataPath, 384);
+        fs10.chmodSync(metadataPath, 384);
       } catch {
       }
     } catch {
       try {
-        fs8.unlinkSync(temp);
+        fs10.unlinkSync(temp);
       } catch {
       }
     }
@@ -50037,7 +50120,7 @@ async function startAdapterd(options) {
   const delivered = (msg, transport) => {
     let document2 = null;
     try {
-      document2 = fs8.readFileSync(msg.file, "utf-8");
+      document2 = fs10.readFileSync(msg.file, "utf-8");
     } catch {
       document2 = null;
     }
@@ -50086,11 +50169,11 @@ async function startAdapterd(options) {
       } catch {
       }
       try {
-        fs8.unlinkSync(endpoint);
+        fs10.unlinkSync(endpoint);
       } catch {
       }
       try {
-        fs8.unlinkSync(metadataPath);
+        fs10.unlinkSync(metadataPath);
       } catch {
       }
       throw err;
@@ -50108,11 +50191,11 @@ async function startAdapterd(options) {
     } catch {
     }
     try {
-      fs8.unlinkSync(endpoint);
+      fs10.unlinkSync(endpoint);
     } catch {
     }
     try {
-      fs8.unlinkSync(metadataPath);
+      fs10.unlinkSync(metadataPath);
     } catch {
     }
     if (meshNode) {
@@ -50142,7 +50225,7 @@ function listen(server, endpoint) {
     server.once("listening", () => {
       server.off("error", onError);
       try {
-        fs8.chmodSync(endpoint, 384);
+        fs10.chmodSync(endpoint, 384);
       } catch {
       }
       resolve2();
@@ -50188,8 +50271,9 @@ function parseArgs(argv) {
 function str(value) {
   return typeof value === "string" ? value : void 0;
 }
-function log(message) {
-  process.stdout.write(`${message}
+function log(message, outcome) {
+  process.stdout.write(outcome ? `${message} ${outcome}
+` : `${message}
 `);
 }
 function fail(message) {
@@ -50293,7 +50377,7 @@ async function runSend(argv, flags) {
     fail(`Usage: xfer-adapterd send <target> <file> <summary> --kind <task|notification>`);
     return;
   }
-  if (!fs10.existsSync(file2)) {
+  if (!fs12.existsSync(file2)) {
     fail(`❌ handoff file not found: ${file2}`);
     return;
   }
@@ -50305,16 +50389,16 @@ async function runSend(argv, flags) {
   const dir = str(flags.dir) ?? XFER_DIR;
   const from = str(flags.from) ?? defaultAdapterName();
   const id = msgId();
-  const body = fs10.readFileSync(file2, "utf-8");
+  const body = fs12.readFileSync(file2, "utf-8");
   try {
-    await sendNotify(target2, {
+    const outcome = await sendNotify(target2, {
       type: "xfer-notify",
       msg_id: id,
       from,
       file: writeOutboundDoc(body, from, dir, kind, id),
       summary
     }, dir);
-    log(id);
+    log(id, outcome);
   } catch (err) {
     fail(`❌ send to "${target2}" failed: ${errorText2(err)}`);
   }
@@ -50326,12 +50410,12 @@ function writeOutboundDoc(body, from, dir, kind, id) {
   const stamp = senderStamp(from, dir);
   const document2 = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   const target2 = path12.join(os4.tmpdir(), `xfer-adapterd-${id}.md`);
-  fs10.writeFileSync(target2, document2, { encoding: "utf-8", mode: 384 });
+  fs12.writeFileSync(target2, document2, { encoding: "utf-8", mode: 384 });
   return target2;
 }
 function senderStamp(from, dir) {
   try {
-    const metadata = JSON.parse(fs10.readFileSync(metadataForName(from, dir), "utf-8"));
+    const metadata = JSON.parse(fs12.readFileSync(metadataForName(from, dir), "utf-8"));
     return metadata.cwd ? senderCwdStampFor(metadata.cwd, os4.hostname()) : null;
   } catch {
     return null;
@@ -50343,7 +50427,7 @@ async function runMeshSend(argv, flags) {
     fail(`Usage: xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification>`);
     return;
   }
-  if (!fs10.existsSync(file2)) {
+  if (!fs12.existsSync(file2)) {
     fail(`❌ handoff file not found: ${file2}`);
     return;
   }
@@ -50364,7 +50448,7 @@ async function runMeshSend(argv, flags) {
   const dir = str(flags.dir) ?? XFER_DIR;
   const id = msgId();
   const from = str(flags.from) ?? defaultAdapterName();
-  const body = fs10.readFileSync(file2, "utf-8");
+  const body = fs12.readFileSync(file2, "utf-8");
   const stamp = senderStamp(from, dir);
   const document2 = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   try {
@@ -50400,7 +50484,7 @@ function runInbox(sub, flags) {
     fail(`❌ ${errorText2(err)}`);
     return;
   }
-  if (!inboxFlag && name && !fs10.existsSync(endpointForName(name, dir))) {
+  if (!inboxFlag && name && !fs12.existsSync(endpointForName(name, dir))) {
     fail(`no daemon "${name}" — start one with \`xfer-adapterd up --name ${name}\``);
     return;
   }
@@ -50417,7 +50501,7 @@ function resolveInboxPath(dir, name) {
   if (name) return inboxPathForName(name, dir);
   let entries;
   try {
-    entries = fs10.readdirSync(dir);
+    entries = fs12.readdirSync(dir);
   } catch {
     throw new Error(`no adapter daemon found in ${dir} — start one with \`xfer-adapterd up\` or pass --name/--inbox`);
   }
@@ -50425,7 +50509,7 @@ function resolveInboxPath(dir, name) {
   for (const entry of entries) {
     if (!entry.endsWith(".json")) continue;
     try {
-      const value = JSON.parse(fs10.readFileSync(path12.join(dir, entry), "utf-8"));
+      const value = JSON.parse(fs12.readFileSync(path12.join(dir, entry), "utf-8"));
       if (value.kind === "adapterd" && typeof value.inbox === "string") found.push(value.inbox);
     } catch {
     }

@@ -62,8 +62,8 @@ function str(value: string | boolean | undefined): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function log(message: string): void {
-  process.stdout.write(`${message}\n`);
+function log(message: string, outcome?: string): void {
+  process.stdout.write(outcome ? `${message} ${outcome}\n` : `${message}\n`);
 }
 
 function fail(message: string): void {
@@ -186,14 +186,14 @@ async function runSend(argv: string[], flags: Flags): Promise<void> {
   const id = msgId();
   const body = fs.readFileSync(file, "utf-8");
   try {
-    await sendNotify(target, {
+    const outcome = await sendNotify(target, {
       type: "xfer-notify",
       msg_id: id,
       from,
       file: writeOutboundDoc(body, from, dir, kind, id),
       summary,
     }, dir);
-    log(id);
+    log(id, outcome);
   } catch (err) {
     fail(`❌ send to "${target}" failed: ${errorText(err)}`);
   }
