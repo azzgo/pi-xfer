@@ -1,8 +1,9 @@
 # Milestone 4 design — items 2–5 (scope decisions)
 
 > Design node, 2026-10-19. Items 0+1 are in `phase4-design-p0-p1.md` (ADR-0020). This file
-> records the go/no-go calls on the remaining four items. Four are closed;
-> and all four are now closed.
+> records the go/no-go calls on the remaining four items. All four are closed. Item 2's
+> implementation plan is `phase4-design-p2.md`, which corrects the cost estimate in its
+> section below.
 
 ## Item 2 — MCP as an outbound surface: **do, local stdio gateway only**
 
@@ -21,12 +22,17 @@ model that gets a typed tool instead of three shell incantations.
 Sizing it honestly: this is a **convenience feature, not a capability gap.** It should not
 share a milestone with items 0+1, which are "the things we say are lies".
 
-**Known cost, stated up front.** All agents behind one gateway share one Node name.
-`/xfer list` collapses from N rows to one, and a receiver sees `from: <gateway>`, not the
-agent. The mitigation is the mechanism already in the codebase: stamp the calling agent into
-the document with `stampDocument()`, exactly as `sender-cwd-stamp.ts` stamps the sender's
-cwd today. That keeps the Agent visible inside the Handoff even though the Node name is
-shared.
+**Known cost — and a correction.** The first cut of this section said every agent behind one
+gateway shares one Node name, that `/xfer list` collapses to one row, and that a receiver
+sees the gateway rather than the agent. That is wrong for stdio: the host spawns the server
+and owns its stdin/stdout, so there is one gateway process *per host session*, each with its
+own name. `/xfer list` does not collapse — a send-only gateway binds nothing, so it is not
+listed at all. What remains is two gateways configured with the same name, which is a config
+error. The cost that survives is real but different: **a send-only host is invisible in
+`/xfer list`**, because nothing binds a socket for it.
+
+The mitigation below therefore becomes an escape hatch for the shared-name case rather than
+a required part of the feature. It is kept because the failure it prevents is invisible.
 
 **Out of scope by decision: the public relay.** A relay for cloud or phone agents is
 client-role on the mesh (`sendMeshHandoff` — no join, no actor, already built for send-only
