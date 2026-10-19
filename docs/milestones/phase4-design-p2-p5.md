@@ -127,3 +127,29 @@ A coarser guard — "N consecutive agent↔agent messages with no human input", 
 Reason caps and Claude Code rate-limits — was considered and declined as well. It is a
 heuristic, not the guard, and shipping it would make item 4 look resolved while catching
 only the most clumsy loops.
+
+## Found while designing, not fixed
+
+Four defects surfaced during this round that belong to no item. They are recorded here
+because this is the only file in scope; they want a tracker, not a milestone doc, so whoever
+picks one up should move it out.
+
+**`syncXferToolAvailability` is a no-op** (`index.ts:66`). It computes `hasPeers`, reads
+`getActiveTools()` into a variable and never writes it back, so the promised gate — hide
+`xfer_to` when no peer exists — does nothing and the tool is always in the prompt. The hook
+point and the predicate are both already there; only the write is missing. Unnoticed because
+the repo has no `tsconfig.json` and `npm test` runs through a resolve hook, so the two unused
+locals are never checked.
+
+**Handoff documents in `os.tmpdir()` are never reaped.** Four write sites (`index.ts:107`,
+`mesh.ts:308`, `broker-main.ts:363`, `adapterd.src/main.ts:215`) and one `unlink`, at
+`index.ts:126`, on the failure path. On success nothing deletes the file — `deliverInbound`
+only names the path, and `gc.ts` reaps `.sock` and `.json` only. Every successful handoff
+leaves a file in the system temp directory for the life of the machine.
+
+**`handoff-kind.ts` repeats a paragraph** in its header comment: the two sentences about the
+tool stamping the `kind:` line appear twice in a row.
+
+**`msgId()` is neither monotonic nor sortable** (`utils.ts`). It embeds a base-36 timestamp
+but appends randomness after it, so string order does not match time order. Cheap to fix,
+but load-bearing only once handoffs carry causation — the same blocker as item 4.
