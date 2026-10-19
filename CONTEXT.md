@@ -15,8 +15,8 @@ A live process on a machine that can host a Node's actor, and the named group of
 _Avoid_: worker, envoy (the engine's own word for it — keep it in engine-facing code only), host
 
 **Delivery verdict**:
-What a listing says about one Node's ability to receive a Handoff, derived from the actor record joined with the runners in its pool. Distinct from **actor status** (`Running` / `Sleeping` / `Idle` / `Crashed` / `Pending`), which is what the engine says about the actor alone — the record can read `no_envoys` while its pool has a live runner, so a verdict is never a status.
-_Avoid_: health, presence (presence belongs to local peers), online/offline
+What a listing says about one Node's ability to receive a Handoff, derived from the actor record joined with the runners in its pool. Always about a Node, never about one Handoff — that other axis is the **Handoff outcome**. Distinct from **actor status** (`Running` / `Sleeping` / `Idle` / `Crashed` / `Pending`), which is what the engine says about the actor alone: the record can read `no_envoys` while its pool has a live runner, so a verdict is never a status.
+_Avoid_: health, presence (presence belongs to local peers), online/offline, outcome
 
 
 ## Adapter Daemon (non-pi Agent Hosts)
@@ -91,6 +91,10 @@ _Avoid_: telemetry, logs, tracing output
 **Handoff**:
 The document one node delivers to a target node. Carries a Kind, and the reverse message is itself a Handoff — never a "reply" or "receipt". In a web-picker submit, Picks and Records are its sections; both are markers at different axes (space vs time). A Handoff carries a message, not memory — state that must survive a session belongs to the Board.
 _Avoid_: prompt, message, report, reply, receipt, acknowledgement
+
+**Handoff outcome**:
+Where one Handoff came to rest, as far as the network can honestly tell — the sender's side of that one send. Never whether it was read: a Handoff that reached a session was handed to a run, not consumed.
+_Avoid_: receipt, acknowledgement, verdict (that is the Node axis), status
 
 **Notification**:
 A Handoff Kind that informs without asking for output. Silent by default: a receiver sends a reverse Handoff only when it lacks information, or when the document conflicts with fact.

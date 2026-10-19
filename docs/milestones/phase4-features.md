@@ -2,6 +2,10 @@
 
 > Brainstorm closed 2026-10-18, user-approved. Next node: **design**.
 >
+> **Items 0 + 1 are designed.** `phase4-design-p0-p1.md` (ADR-0020) collapses item 0 into
+> two prerequisites for item 1; the ordering assumed in note 1 below was derived, not given.
+> Items 2–5 remain undesigned.
+>
 > **What this file is.** A gap list with its evidence. **What this file is not.** A solution list.
 > Every item below states what is missing and what is known about the cost; none of them states how to
 > build it. The user asked explicitly that no feature preference be presumed here, because the design
