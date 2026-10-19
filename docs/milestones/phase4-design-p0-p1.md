@@ -218,8 +218,28 @@ No build product changes (`web-picker.user.js`, `mesh-runtime.cjs`, `broker.cjs`
 
 ## Verification
 
-- `npm test` green, including a new test that binds two servers on one endpoint path and
-  asserts the second refuses, and one that asserts `isRuntimeIdle()` is false while
-  `hasPendingMessages()` is true.
-- Per AGENTS.md, `commands.ts` / admin flows are unaffected, so the `verify` skill's
-  browser pass is not required here; the command smoke is unaffected too.
+Implemented in `8a334be`. `npm test` 539 pass, 0 fail (was 521 before this change).
+
+New tests: `client.test.ts` covers the ack merge — `delivered` only when the receiver
+says so, `unknown` for an absent or unrecognised field, a rejection when the connection
+dies first. `endpoint-claim.test.ts` covers the rule that would have caught the takeover:
+a live peer is refused and its files survive, a crash leftover is cleared. Three routing
+cases pin `isRuntimeIdle()` (idle + nothing queued → `followUp`; idle + queued → `steer`;
+busy → `steer`), and `server.test.ts`'s ack shape now asserts the new field.
+
+Manual smoke, 2026-10-19, local only (`--no-mesh`, no engine, `mesh.config.json` never
+read):
+
+| What | Result |
+|---|---|
+| `xfer_to` → a live `xfer-adapterd` on the same machine | `✅ delivered`, and the record is in the daemon's `inbox.jsonl` — the claim is real, not just a return value |
+| receiver acks 8 s late, client times out at 5 s | rejected `ack timeout` → the `unknown` branch ("do not resend"), not `not-delivered` |
+| second `xfer-adapterd up --name` on a live name | refused with the live peer's name, exit 1, the first daemon unaffected |
+| dead pid + unaccepted socket (crash leftover) | `nameIsLive` false → both files cleared → name reusable |
+
+The prompt-side wording checked itself: asked what it sent, the session answered with the
+tool's `delivered` **and** volunteered "delivered 只表示已交到目标会话，不代表它已读取",
+which is the clause the design put in the result text.
+
+Admin and `commands.ts` flows are untouched by this change, so the `verify` skill's browser
+channel did not apply.
