@@ -3,6 +3,10 @@
 # Experimental — see README.md. This `package.json` (and `node_modules/`) belongs
 # to the example, not to the pi-xfer extension: the extension itself ships no
 # runtime dependencies, and nothing here sets a precedent for adding one.
+#
+# Trimmed to start from: one Durable Object, two vars, three secrets. The two
+# optional blocks below (`routes`, `WORKER_PUBLIC_URL`) are the only things a
+# real mesh run adds on top — see README "Run it".
 name = "pi-xfer-pi-durable-cf"
 main = "src/worker.ts"
 compatibility_date = "2025-10-01"
@@ -11,7 +15,7 @@ compatibility_date = "2025-10-01"
 compatibility_flags = ["nodejs_compat"]
 
 durable_objects = { bindings = [
-  # The agent side. One DO instance per node name — see `selfName` in worker.ts.
+  # The agent side. One DO instance per node name — see `AgentDurableObjectEntry`.
   { name = "AGENT", class_name = "AgentDurableObjectEntry" },
 ] }
 
@@ -20,39 +24,30 @@ migrations = [
   { tag = "v1", new_sqlite_classes = ["AgentDurableObjectEntry"] },
 ]
 
-# TOML: every top-level key must come BEFORE the first [table] header. `[vars]` is
-# a table, so anything after it lands inside `env.vars` instead of the Worker's
-# own config — `routes` below silently became a variable, and the custom domain
-# quietly never existed. `npm run check` prints these bindings; read them.
+# Optional: the domain the ENGINE uses to reach this Worker. Delete this block to
+# stay on workers.dev — then the engine must be able to reach that, which a
+# mainland-China network cannot (README "Run it", step 3). TOML: every top-level
+# key must come BEFORE the first [table] header, or `routes` silently becomes a
+# var named `routes` and the domain never exists.
+# routes = [
+#   { pattern = "pi-durable.example.com", custom_domain = true },
+# ]
 
-# The engine reaches this Worker by its own domain, not workers.dev: an engine
-# on a mainland-China network cannot connect to *.workers.dev, and it is the
-# engine that starts the serverless runner (POST /api/rivet/start). A custom
-# domain needs the zone in this account; delete the whole `routes` block to stay
-# on workers.dev (and then WORKER_PUBLIC_URL points there instead).
-routes = [
-  { pattern = "pi-durable.azzgo.top", custom_domain = true },
-]
-
-# The mesh engine calls back into this Worker, so it must be public. This is the
-# deployment-shape change ADR 0013's serverless exception accepts: the engine
-# reaches the node, not the other way round, and the control plane is plain HTTP.
 [vars]
 # RivetKit's own env-var channel: parts of the wasm runtime read the engine
 # endpoint through this fallback (getRivetEndpoint / getRivetNamespace) instead
-# of the config object, so it must agree with MESH_ENDPOINT below. These are an
-# example deployment's hosts — use your own.
-RIVET_ENDPOINT = "https://rivet.azzgo.top"
+# of the config object, so it must agree with MESH_ENDPOINT below.
+RIVET_ENDPOINT = "https://rivet.example.com"
 RIVET_NAMESPACE = "default"
 NODE_NAME = "cf-node"
 # The serverless pool this node's actor is placed in. Rename it freely, but the
 # out-of-band runner-config in VERIFICATION.md step 1 must use the same name —
 # it is the one string that has to match on both sides.
 POOL_NAME = "cloudflare"
-# Must equal the domain in `routes` above (or the workers.dev host if you kept
-# it), with no trailing slash: the engine POSTs <this>/api/rivet. Set it per
-# environment.
-WORKER_PUBLIC_URL = "https://pi-durable.azzgo.top"
+# Optional. Unset, every URL is the request's own origin, so a first deploy works
+# with nothing configured; set it when the engine must call a specific host.
+# WORKER_PUBLIC_URL = "https://pi-durable.example.com"
+#
 # The pool's timing is NOT a var. It lives in `SERVERLESS_POOL_TIMING` in
 # `src/pool-config.ts` because the value is a contract between three writers (the
 # registry's `configurePool`, the Worker's own runner-config PUT, and the
@@ -63,6 +58,7 @@ WORKER_PUBLIC_URL = "https://pi-durable.azzgo.top"
 # refused outright unless the grace period is stated and smaller.
 #   request_lifespan   30000
 #   drain_grace_period   600
+#
 # MESH_ENDPOINT, MESH_NAMESPACE and MESH_TOKEN are secrets, not vars:
 #   npx wrangler secret put MESH_ENDPOINT
 #   npx wrangler secret put MESH_NAMESPACE     # optional

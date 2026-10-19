@@ -43,6 +43,11 @@ laptop (pi, mesh up)                 Cloudflare
       │                                 └────────────────────────────────────┘
 ```
 
+The Worker itself is a Hono app (`src/app.ts`) with the wasm registry mounted behind `all("*")`:
+three routes it owns, and one prefix it hands over. Both Cloudflare entry points — the Worker and the
+Durable Object class — run that same app, which is why the answer logic has exactly one
+implementation.
+
 Everything on the mesh only ever sees an `xfer-instance` actor, so `/xfer mesh list`,
 `/xfer mesh <name>`, `desc` and the adapter daemon all work with it unchanged. No new commands.
 
@@ -69,7 +74,8 @@ to the transport; the DO belongs to the agent.
    later is written to DO storage when it is learned, not reconstructed later.
 3. **Ack means accepted, not answered.** The queue message is acked as soon as it is recorded. If
    the DO then dies, the mesh will **not** redeliver — which is why "accepted but never answered" is
-   its own failure mode in `VERIFICATION.md` step 5.
+   its own failure mode in `VERIFICATION.md` step 5. A redelivery that *does* arrive is answered from
+   the DO's own record, with the id it produced the first time and no second reply.
 
 ## Addressing and pools
 
@@ -110,8 +116,8 @@ Two traps worth repeating here because they cost real time:
   `routes` block written after `[vars]` becomes an ordinary variable named `routes` and the custom
   domain silently never exists. `npm run check` prints the resolved vars; read them.
 - **The pool timing is one constant, in seconds** (`SERVERLESS_POOL_TIMING` in
-  `src/pool-config.ts`) shared by `configurePool`, the Worker's own runner-config PUT and the
-  out-of-band curl — three writers, one number system, no `_MS` anywhere.
+  `src/pool-config.ts`) shared by `configurePool` and the out-of-band curl — two writers, one number
+  system, no `_MS` anywhere. `runnerConfigBody()` prints the bootstrap JSON from the same constant.
 
 ## Troubleshooting
 

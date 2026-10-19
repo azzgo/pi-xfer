@@ -114,7 +114,7 @@ starts.
 
 ## 2. Deploy the Worker 🔴
 
-Before deploying, `npm run check` runs `wrangler deploy --dry-run`: it parses `wrangler.toml`,
+Before deploying, `npm run check` runs the typecheck and then `wrangler deploy --dry-run`: it parses `wrangler.toml`,
 resolves the Durable Object binding and vars, and builds the bundle locally — nothing is uploaded. A
 config typo surfaces there instead of halfway through the real deploy.
 
@@ -135,15 +135,16 @@ npx wrangler deploy
 `RIVET_ENDPOINT` / `RIVET_NAMESPACE` in `[vars]` are the same engine, published on RivetKit's own
 env-var channel — parts of the wasm runtime read that instead of the config object, so the two must
 agree. The pool's timing is deliberately **not** a var: it lives in `SERVERLESS_POOL_TIMING` in
-`src/pool-config.ts` so the in-Worker registration, `configurePool` and this step's curl cannot drift
-apart. Change it there and in step 1 together.
+`src/pool-config.ts` so `configurePool` and this step's curl cannot drift apart. Change it there and in
+step 1 together — `runnerConfigBody()` builds step 1's exact JSON from the same constant.
 
 **A custom domain, not `workers.dev`.** An engine on a mainland-China network cannot connect to
 `*.workers.dev` (the connection times out), and it is the engine that must reach this Worker. Put the
 Worker on a domain in your Cloudflare account and set:
 
-- `routes = [{ pattern = "<your-domain>", custom_domain = true }]` in `wrangler.toml`
-- `WORKER_PUBLIC_URL = "https://<your-domain>"` (no trailing slash)
+- `routes = [{ pattern = "<your-domain>", custom_domain = true }]` in `wrangler.toml` (uncomment it)
+- `WORKER_PUBLIC_URL = "https://<your-domain>"` (uncomment it; no trailing slash — unset, the Worker
+  uses the request's own origin, which a cold engine cannot predict)
 - the runner-config `url` from step 1 — `https://<your-domain>/api/rivet`
 
 All three are the same host. If a domain you expected is missing after a deploy, wrangler 4.0.0 does
@@ -155,7 +156,8 @@ Set `WORKER_PUBLIC_URL` to the URL Wrangler printed, then deploy once more so
 `serverless.publicEndpoint` matches reality. A mismatch shows up as the engine never reaching the
 node, which looks identical to "the node does not exist".
 
-Healthy check (no mesh involvement — note it prints `engine`):
+Healthy check (no mesh involvement — note it prints `engine`; `GET /` names the node and the mesh
+prefix, which is the fastest way to see what a deploy actually configured):
 
 ```bash
 curl -sS https://<your-domain>/health
@@ -250,7 +252,7 @@ incoming notification carrying the echo document.
 contains `In reply to: handoff <the id from step 4>`.
 
 **Fail — accepted but never answered.** The send reported success, `wrangler tail` shows no DO call.
-That is `forwardToAgent` losing the handoff, not the mesh: the actor acked the queue message before
+That is `forwardToAgent` (`src/mesh-registry.ts`) losing the handoff, not the mesh: the actor acked the queue message before
 the DO recorded it.
 
 **Fail — answered twice.** Two inbound lines for one probe. The DO's own dedupe should make this
@@ -290,14 +292,14 @@ see, not what you would expect.
 | Engine reports `serverless start payload too short` (empty body) | the pool's `url` points at the **engine**, so the engine POSTs `/start` to itself | `url` must be the Worker's `<WORKER_PUBLIC_URL>/api/rivet`, in *both* the runner-config and `configurePool` |
 | Engine reports a payload/protocol error on `/start` only | engine image ≠ rivetkit version (e.g. `engine:latest` with rivetkit `2.3.26`) | pin the engine image to `2.3.26` (checklist §0) |
 | Engine answers `endpoint_mismatch` when starting the runner | no `topology.datacenters[].public_url` (or it is not the hostname clients use) | mount the config file from §0 and restart the engine |
-| Worker answers 500 with an **empty** message | a config/protocol error inside `registry.handler` | `curl <WORKER_PUBLIC_URL>/api/rivet/health` (and `wrangler tail`) — the Worker now returns `err.message` in the 500 body precisely so this is readable |
+| Worker answers 500 | a config/protocol error inside the mesh registry, which `app.all("*")` passes straight through | `curl <WORKER_PUBLIC_URL>/api/rivet/health` (and `wrangler tail`) — the 500 body is the registry's own message |
 | First request after a deploy fails with a Zod/config error | registry built without `endpoint` (no `MESH_ENDPOINT` secret and no `RIVET_ENDPOINT` var) | set one of them; `configurePool` cannot register without it |
 | Engine returns 400 `drain_grace_period must be less than request_lifespan` | the pool body was written without a grace period (engine default 1800 s) or with one ≥ the lifespan. **This is the Worker's own registration, not your step-1 curl** — the step-1 body above is already legal | the timing lives in `SERVERLESS_POOL_TIMING` (`src/pool-config.ts`), seconds; keep `drainGracePeriod < requestLifespan` and re-deploy. The engine keeps the last good config, so this is repairable without a `DELETE` |
-| `wrangler tail` shows `in-Worker pool registration failed` on **every** invocation, and Cloudflare starts answering `Too many subrequests` | the registration retried a rejection: a 400 is not transient, so retrying only spends the invocation's subrequest budget (41 attempts did). It also starves the engine's actor wake-up scheduling while it lasts, so unrelated sends to this node time out | already fixed: the Worker attempts registration **at most once per isolate** and never retries. If you see it, you are running an older build — redeploy; then check the 400's message (row above) instead of retrying |
+| `wrangler tail` shows `serverless pool configuration attempt failed` repeatedly, and Cloudflare starts answering `Too many subrequests` | `configurePool` is retrying a rejection, and a 400 is not transient | the engine's last good pool record is kept, so fix the cause (the row above) and redeploy; the upsert is attempted by the registry once per isolate, not per request |
 | `mesh send` refuses: `no runner in pool "cloudflare"` | correct behaviour on a cold serverless pool — the engine starts runners only for pending deliveries | first send from a bare client (§4), or wait, then retry |
 | Actor is stuck: `/actors` shows an `error` no restart clears | the actor record's `error` is sticky — it is not cleared when a runner appears | destroy and recreate: `DELETE /actors/<id>?namespace=<ns>`, then `getOrCreate` again (§4 does it) |
 | Listing shows the node but the runner never starts | the actor exists but its pool has no live runner behind it | send the first handoff from a bare client (§4) — that is what starts the runner |
-| `wrangler tail` shows `/api/rivet/start` repeating with 503 | in-Worker/out-of-band pool registration still failing | read the tail's `in-Worker pool registration failed` line, then re-run step 1 |
+| `wrangler tail` shows `/api/rivet/start` repeating with 503 `Serverless pool is not configured` | `configurePool` in the registry has not written a pool yet — it only runs on a `/start`, and it needs `MESH_ENDPOINT` (or `RIVET_ENDPOINT`) to write anywhere | re-run step 1 (the out-of-band bootstrap a cold pool needs), then check that the Worker really has the endpoint secret: `curl <worker>/health` prints `engine` |
 
 ## What this does not prove
 

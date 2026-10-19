@@ -1,5 +1,5 @@
-import type { Env } from "./node-config.ts";
 import type { MeshHandoffMessage } from "./mesh-actor.ts";
+import type { Env } from "./node-config.ts";
 
 interface StoredHandoff {
   id: string;
@@ -13,24 +13,23 @@ interface StoredHandoff {
 export interface AgentStorage {
   get(key: string): Promise<unknown>;
   put(key: string, value: unknown): Promise<void>;
-  list(prefix: string): Promise<Map<string, unknown>>;
 }
 
-export interface AgentReply {
+export interface Answer {
   /** A new handoff id — never the original, which the sender already owns. */
   replyId: string;
-  inReplyTo: string;
   document: string;
+  /** False when this handoff had already been answered: the caller must not send a second reply. */
+  first: boolean;
 }
+
+export type Model = { DEEPSEEK_API_KEY?: string; DEEPSEEK_MODEL?: string };
 
 /**
  * The one function to replace: turn an incoming Handoff into a document. The echo is the default and
  * needs no credential; setting `DEEPSEEK_API_KEY` sends the same round trip through a model instead.
  */
-export async function answerHandoff(
-  message: MeshHandoffMessage,
-  model: Pick<Env, "DEEPSEEK_API_KEY" | "DEEPSEEK_MODEL">,
-): Promise<string> {
+export async function answerHandoff(message: MeshHandoffMessage, model: Model): Promise<string> {
   if (!model.DEEPSEEK_API_KEY) return echoDocument(message);
   try {
     return await deepSeekDocument(message, model.DEEPSEEK_API_KEY, model.DEEPSEEK_MODEL);
@@ -84,46 +83,38 @@ async function deepSeekDocument(
 }
 
 /**
- * The agent's memory: it survives cold starts, which is exactly what the serverless actor cannot
- * promise. `deliver` is injected, so a redelivered handoff is answered with the reply it produced the
- * first time and the sender never sees two answers to one handoff.
+ * A memory is what the serverless actor cannot promise: it is torn down between hands. `storage` is
+ * the Durable Object's, so a redelivered handoff is answered with the id it produced the first
+ * time and the sender never sees two answers to one handoff.
  */
-export class AgentDurableObject {
-  private readonly state: { storage: AgentStorage };
-  private readonly deliver: (target: string, reply: AgentReply) => Promise<void>;
-  private readonly model: Pick<Env, "DEEPSEEK_API_KEY" | "DEEPSEEK_MODEL">;
+export class AgentMemory {
+  private readonly storage: AgentStorage;
+  private readonly model: Model;
 
-  constructor(
-    state: { storage: AgentStorage },
-    deliver: (target: string, reply: AgentReply) => Promise<void>,
-    model: Pick<Env, "DEEPSEEK_API_KEY" | "DEEPSEEK_MODEL">,
-  ) {
-    this.state = state;
-    this.deliver = deliver;
-    this.model = model;
+  constructor(env: Env) {
+    this.storage = env.AGENT_STORAGE;
+    this.model = env;
   }
 
-  async receive(message: MeshHandoffMessage): Promise<AgentReply> {
-    const known = (await this.state.storage.get(key(message.id))) as StoredHandoff | undefined;
+  async answer(message: MeshHandoffMessage): Promise<Answer> {
+    const known = (await this.storage.get(key(message.id))) as StoredHandoff | undefined;
     if (known) {
       return {
         replyId: known.replyId,
-        inReplyTo: known.id,
         document: `# Already answered\n\nHandoff \`${known.id}\` was answered as \`${known.replyId}\` at ${known.receivedAt}.`,
+        first: false,
       };
     }
     const replyId = replyIdFor(message.id);
     const document = await answerHandoff(message, this.model);
-    await this.state.storage.put(key(message.id), {
+    await this.storage.put(key(message.id), {
       id: message.id,
       from: message.from,
       summary: message.summary,
       receivedAt: new Date().toISOString(),
       replyId,
     } satisfies StoredHandoff);
-    const reply: AgentReply = { replyId, inReplyTo: message.id, document };
-    await this.deliver(message.from, reply);
-    return reply;
+    return { replyId, document, first: true };
   }
 }
 

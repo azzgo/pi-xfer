@@ -5,12 +5,14 @@
   "type": "module",
   "description": "Example: a Pi Durable agent on Cloudflare (Worker + Durable Object) that joins the pi-xfer mesh as an ordinary node. Not part of the pi-xfer extension and not a dependency precedent for it.",
   "scripts": {
+    "test": "node --test *.test.ts",
+    "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "wrangler deploy --dry-run",
-    "typecheck": "tsc --noEmit"
+    "check": "npm run typecheck && wrangler deploy --dry-run"
   },
   "dependencies": {
+    "hono": "^4.13",
     "rivetkit": "2.3.26"
   },
   "devDependencies": {

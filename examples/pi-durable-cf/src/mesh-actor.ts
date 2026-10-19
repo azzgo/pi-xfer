@@ -41,8 +41,8 @@ function recordDelivery(state: XferInstanceState, id: string): void {
   state.delivered = [...(state.delivered ?? []).filter((seen) => seen !== id), id].slice(-DELIVERED_WINDOW_SIZE);
 }
 
-/** What the actor hands to the bridge once a message is accepted. */
-export type HandoffSink = (message: MeshHandoffMessage, selfKey: string) => void;
+/** What the actor hands to the bridge once a message is accepted. Here it is a request to the agent's Durable Object. */
+export type HandoffSink = (message: MeshHandoffMessage) => void;
 
 /**
  * This node's `xfer-instance` actor: the same state, queue and actions the extension's mesh engine
@@ -63,7 +63,7 @@ export function createXferInstance(sink: HandoffSink) {
       for await (const message of c.queue.iter()) {
         const { body } = message as { body: MeshHandoffMessage };
         if (alreadyDelivered(c.state, body.id)) continue;
-        sink(body, c.key[0] ?? "");
+        sink(body);
         recordDelivery(c.state, body.id);
       }
     },
