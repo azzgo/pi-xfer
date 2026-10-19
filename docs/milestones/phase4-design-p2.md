@@ -2,8 +2,8 @@
 
 > Design node follow-up, 2026-10-19. Scope settled in `phase4-design-p2-p5.md`; this is the
 > implementation plan that scope implies. Items 0+1 are in `phase4-design-p0-p1.md`
-> (ADR-0020). Mesh access is out of scope here and out of scope for verification — see
-> "Verification".
+> (ADR-0020). No test may reach a deployed engine; the end-to-end mesh smoke is a human
+> decision — see "Verification".
 
 ## The framing was wrong, and the correction changes the cost
 
@@ -34,18 +34,29 @@ binds no socket, keeps no inbox, joins no mesh and runs no agent loop — the sh
 `sendMeshHandoff`'s own docstring describes ("used by send-only hosts … which must not need
 a daemon or a registered node of their own").
 
-### v1 tool set: two tools, deliberately
+### v1 tool set: three tools
 
 | Tool | Backs |
 |---|---|
 | `xfer_send` | `xfer-adapterd send <target> <file> <summary> --kind <task\|notification>` |
+| `xfer_mesh_send` | `xfer-adapterd mesh send <target> <file> <summary> --kind <task\|notification>` |
 | `xfer_list` | `xfer-adapterd list` (**new subcommand**, see below) |
 
-`xfer_mesh_send` is **excluded from v1**. It would be one more argv, but exercising it means
-reaching the engine, and shipping a path we cannot verify is exactly what ADR-0020 argues
-against. It is added later, by whoever can test it against a local engine.
+The mesh tool is in scope, and the reason it is verifiable is worth stating precisely
+because an earlier draft of this plan got it wrong. The gateway never talks to the engine:
+it builds an argv and forks `xfer-adapterd`, so its mesh tool is tested exactly like its
+local tool — by asserting the argv, with no engine in the process. Everything below that
+layer (`sendMeshHandoff`, the fail-closed preflight, the `not-delivered | unknown | failed`
+triage) is already covered hermetically by `mesh.test.ts` through `fakeDeps`, and this change
+does not touch it. What genuinely needs a human yes is an *end-to-end* smoke against a real
+engine — that is a verification step, not a reason to withhold the tool. Excluding it would
+also have left a send-only host that can reach the local machine but not the mesh, which is
+the same half-solution as shipping send without list.
 
+`--no-preflight` is deliberately **not** exposed as a tool parameter: it is an escape hatch
+for a human debugging the engine, and a model should not reach for it.
 Receiving is out of scope: no inbox, no `xfer_inbox`, no `--on-handoff`. Delivery into a
+non-pi agent's context is item 5, which was declined.
 non-pi agent's context is item 5, which was declined.
 
 ### Discovery needs a new subcommand
@@ -91,9 +102,11 @@ no repo imports, and is covered by tests.
   xfer-adapterd list [--dir D] [--json]
 
   // mcp-gateway.mjs  (new, stdio MCP server, no repo imports)
-    tools: xfer_send { target, summary, document, kind }
-           xfer_list { }
+    tools: xfer_send       { target, summary, document, kind }
+           xfer_mesh_send { target, summary, document, kind }
+           xfer_list      { }
     argv:  xfer-adapterd send <target> <tmpfile> <summary> --kind <kind> --from <name> --dir <dir>
+           xfer-adapterd mesh send <target> <tmpfile> <summary> --kind <kind> --from <name> --dir <dir>
            xfer-adapterd list --json --dir <dir>
     flags: --name <n>  (required)   --dir <d>   --xfer-adapterd <path> (tests)
     stdout: JSON-RPC frames only — every diagnostic goes to stderr
@@ -135,8 +148,11 @@ in `commands.ts`.
    names avoid it; a hand-written `--name` collision is the user's to manage.
 4. **No receiving.** A host that adopts the gateway can still only *send*. Anything expecting
    inbound delivery will find nothing, and the skill must not imply otherwise.
-5. **Mesh send is absent in v1**, so a host that today uses `mesh send` from a shell keeps
-   needing that shell. Deliberate: an unverifiable path is not shipped.
+5. **The gateway hands a model a second path to the engine.** `xfer_mesh_send` is thin, and
+   the layer under it is already tested, so this is not a correctness risk — it is an
+   exposure one. The rule that keeps it contained: **no test may execute it against a real
+   config**, and `--no-preflight` is not exposed, so a model cannot disable the fail-closed
+   check. A gateway pointed at a mesh is exactly where the preflight earns its keep.
 6. **The `.mjs` is untyped.** No compile-time check on argument shapes; the tests carry that
    weight instead.
 
@@ -144,10 +160,13 @@ in `commands.ts`.
 
 - `npm test` green, including: a real stdio JSON-RPC handshake against `mcp-gateway.mjs`
   (`initialize`, `tools/list`, `tools/call`); stdout purity including the error path; and a
-  stub `xfer-adapterd` on `--xfer-adapterd` asserting the exact argv for `xfer_send`, so a
-  CLI flag change cannot silently diverge from the tool schema.
+  stub `xfer-adapterd` on `--xfer-adapterd` asserting the exact argv for **all three tools**,
+  so a CLI flag change cannot silently diverge from a tool schema. The mesh tool's test
+  asserts argv only — the stub never opens a socket, so the suite touches no engine.
 - Hermetic: every test points `--dir` at a fresh `os.tmpdir()`.
-- **No mesh.** Nothing in this plan needs the engine, and nothing in its verification may
-  touch it. A manual smoke (`initialize` + `tools/list` + one `xfer_send` against a real
-  local `xfer-adapterd`) is a decision for the human, per AGENTS.md's rule that even a read
-  against the deployed engine needs a yes.
+- **No engine during tests.** Nothing in the suite may execute `xfer_mesh_send` against a real
+  `mesh.config.json`, and every test points `--dir` at a fresh `os.tmpdir()`.
+- **The end-to-end smoke is a human decision**, per AGENTS.md's rule that even a read against
+  the deployed engine needs a yes. Proposed, not assumed: `initialize` + `tools/list`, one
+  `xfer_send` against a local `xfer-adapterd`, and — only with a separate yes — one
+  `xfer_mesh_send` against whatever engine the config names.
