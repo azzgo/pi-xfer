@@ -51,7 +51,7 @@
   ],
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --import './ts-resolve-hook.mjs' --test",
+    "test": "node --import './ts-resolve-hook.mjs' --test './*.test.ts'",
     "prepare": "husky"
   },
   "peerDependencies": {
