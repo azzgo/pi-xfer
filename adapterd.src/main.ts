@@ -19,6 +19,7 @@ import { sendNotify } from "../client.ts";
 import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
 import { loadMeshConfig, parseMeshConfig, resolveMeshConfig } from "../mesh-config.ts";
 import { stampHandoffKind, type HandoffKind } from "../handoff-kind.ts";
+import type { XferNotifyOutcome } from "../types.ts";
 import { senderCwdStampFor, stampDocument, type SenderCwdStamp } from "../sender-cwd-stamp.ts";
 import { listTargets } from "../targets.ts";
 import { endpointForName, isEntryPoint, metadataForName, msgId } from "../utils.ts";
@@ -72,6 +73,16 @@ function log(message: string, outcome?: string): void {
 function fail(message: string): void {
   process.stderr.write(`${message}\n`);
   process.exitCode = 1;
+}
+
+/**
+ * A diagnostic that is not a failure. A preflight `Mismatch` warning means the
+ * handoff *was* queued — the engine places it on the next send — so it must
+ * reach stderr without touching the exit code, or a caller that trusts the exit
+ * code reads a success as a failure.
+ */
+function warn(message: string): void {
+  process.stderr.write(`${message}\n`);
 }
 
 const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
@@ -200,7 +211,7 @@ async function runSend(argv: string[], flags: Flags): Promise<void> {
     }, dir);
     log(id, outcome);
   } catch (err) {
-    fail(`❌ send to "${target}" failed: ${errorText(err)}`);
+    fail(`❌ send to "${target}" failed: ${errorText(err)} ${failedSendOutcome(err)}`);
   }
 }
 
@@ -223,6 +234,32 @@ function readDocument(file: string): string | null {
 /** The declared kind, or null when the flag is missing or meaningless. */
 function readKind(value: string | undefined): HandoffKind | null {
   return value === "task" || value === "notification" ? value : null;
+}
+
+/**
+ * Which of ADR-0020's four values a *failed* send leaves behind.
+ *
+ * Only one failure is a definite negative: `sendNotify` rejects "peer not found"
+ * before it ever connects, so nothing was sent. Everything else — an ack
+ * timeout above all — may have arrived, and `unknown` is the value that says so
+ * without inviting a resend. A fifth value would destroy exactly that
+ * distinction, which is what the outcome axis exists to keep.
+ */
+export function failedSendOutcome(err: unknown): XferNotifyOutcome {
+  return /peer ".*" not found/.test(errorText(err)) ? "not-delivered" : "unknown";
+}
+
+/**
+ * The mesh side has already classified its own failure (`MeshSendError.kind`,
+ * from `classifyMeshSendFailure`), so this only names the value it implies.
+ * `failed` is the one input with no definite answer — the engine refused for a
+ * reason it did not classify, and the handoff may or may not have been queued —
+ * so it degrades to `unknown` rather than to a claim of non-delivery.
+ */
+export function meshFailureOutcome(err: unknown): XferNotifyOutcome {
+  const kind = (err as { kind?: unknown } | null)?.kind;
+  if (kind === "not-delivered") return "not-delivered";
+  return "unknown";
 }
 
 /**
@@ -291,10 +328,10 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
       undefined,
       { preflight: !flags["no-preflight"] },
     );
-    log(id);
-    if (preflight?.warning) fail(`⚠️ ${preflight.warning}`);
+    log(id, "queued");
+    if (preflight?.warning) warn(`⚠️ ${preflight.warning}`);
   } catch (err) {
-    fail(`❌ ${errorText(err)}`);
+    fail(`❌ ${errorText(err)} ${meshFailureOutcome(err)}`);
   }
 }
 

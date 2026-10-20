@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { defaultAdapterName, startAdapterd } from "./adapterd.src/daemon.js";
+import { failedSendOutcome, meshFailureOutcome } from "./adapterd.src/main.js";
 import { appendInbox, inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./adapterd.src/inbox.js";
 import { sendNotify } from "./client.js";
 import { encodeAgentName } from "./utils.js";
@@ -509,5 +510,65 @@ describe("xfer-adapterd CLI: list", () => {
     } finally {
       if (child.exitCode === null) child.kill("SIGKILL");
     }
+  });
+});
+
+describe("xfer-adapterd CLI: the outcome a failed send leaves behind", () => {
+  const bundle = path.join(import.meta.dirname, "xfer-adapterd.cjs");
+  const dirs: string[] = [];
+  after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
+  const freshDir = (): string => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-adapterd-outcome-")); dirs.push(d); return d; };
+
+  function runCli(args: string[], stdin?: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    const child = spawn(process.execPath, [bundle, ...args], { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout!.on("data", (c: Buffer) => { stdout += c; });
+    child.stderr!.on("data", (c: Buffer) => { stderr += c; });
+    child.stdin!.end(stdin ?? "");
+    return new Promise((resolve) => child.on("exit", (code) => resolve({ code, stdout, stderr })));
+  }
+
+  it("an absent peer is not-delivered", async () => {
+    const dir = freshDir();
+    const r = await runCli(["send", "ghost", "-", "s", "--kind", "task", "--dir", dir], "body");
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /not found not-delivered$/m);
+  });
+
+  it("an ack timeout is unknown, because the handoff may have arrived", async () => {
+    const dir = freshDir();
+    const sock = path.join(dir, "deaf.sock");
+    const server = net.createServer((socket) => { socket.on("data", () => { /* never acks */ }); });
+    await new Promise<void>((resolve) => server.listen(sock, resolve));
+    try {
+      const r = await runCli(["send", "deaf", "-", "s", "--kind", "task", "--dir", dir], "body");
+      assert.equal(r.code, 1);
+      assert.match(r.stderr, /ack timeout unknown$/m);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("a mesh send that is not configured leaves no outcome claim at all", async () => {
+    const dir = freshDir();
+    const r = await runCli(["mesh", "send", "phone", "-", "s", "--kind", "task", "--mesh-config", path.join(dir, "missing.json"), "--dir", dir], "body");
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /mesh is not configured/);
+    assert.doesNotMatch(r.stderr, /\b(queued|delivered|unknown|not-delivered)\b/, "a config error is not a delivery outcome");
+  });
+
+  it("classifies a local failure: only an absent peer is a definite negative", () => {
+    assert.equal(failedSendOutcome(new Error('peer "ghost" not found')), "not-delivered");
+    assert.equal(failedSendOutcome(new Error("ack timeout")), "unknown");
+    assert.equal(failedSendOutcome(new Error("connect timeout")), "unknown");
+    assert.equal(failedSendOutcome(new Error("ECONNRESET")), "unknown");
+  });
+
+  it("carries the mesh classifier's own kind, degrading its unclassified case to unknown", () => {
+    const withKind = (kind: string) => Object.assign(new Error("mesh refused"), { kind });
+    assert.equal(meshFailureOutcome(withKind("not-delivered")), "not-delivered");
+    assert.equal(meshFailureOutcome(withKind("unknown")), "unknown");
+    assert.equal(meshFailureOutcome(withKind("failed")), "unknown", "an unclassified refusal must not claim nothing was sent");
   });
 });

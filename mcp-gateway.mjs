@@ -172,6 +172,12 @@ const SUBCOMMAND = {
   xfer_list: ["list"],
 };
 
+/** ADR-0020's four values, and nothing else: a fifth would break the axis. */
+const OUTCOMES = ["queued", "delivered", "unknown", "not-delivered"];
+
+/** The no-resend sentence `index.ts` puts on `unknown`, so both surfaces say the same thing. */
+const UNKNOWN_ADVICE = "It may or may not have arrived; do not resend it. Check with the target before sending again.";
+
 /** The `<target>` operand of a send argv (`[cli, ...subcommand, target, ...]`), or "" for a listing. */
 function targetOf(tool, argv) {
   if (tool === "xfer_list") return "";
@@ -234,12 +240,29 @@ export function execAdapterd(argv) {
 function sendResult(tool, argv, run) {
   const text = run.stdout.trim();
   const target = targetOf(tool, argv);
-  if (run.code !== 0) {
-    const detail = run.stderr.trim() || text || `exit ${run.code}`;
-    return { isError: true, text, payload: { outcome: "not-sent", detail, target } };
-  }
+  if (run.code !== 0) return failureResult(text, run.stderr.trim(), target, run.code);
   const [handoffId = "", outcome = "unknown"] = text.split(/\s+/);
-  return { isError: false, text, payload: { handoff_id: handoffId, outcome, target } };
+  const grounded = OUTCOMES.includes(outcome) ? outcome : "unknown";
+  return { isError: false, text, payload: { handoff_id: handoffId, outcome: grounded, target } };
+}
+
+/**
+ * A failed send, expressed in ADR-0020's vocabulary rather than around it.
+ *
+ * The CLI names the outcome it left behind as the last word of its error line
+ * (`… not-delivered` / `… unknown`), because exit codes and prose cannot carry a
+ * four-valued answer on their own. When that word is missing — an older CLI, a
+ * crash, a usage error — the honest value is `unknown`, never a definite
+ * negative: the gateway did not watch the send, so it cannot claim nothing
+ * happened. `unknown` also carries the no-resend sentence, because a model that
+ * treats it as "try again" is the duplicate hazard the value exists to prevent.
+ */
+function failureResult(text, stderr, target, code) {
+  const detail = stderr || text || `exit ${code}`;
+  const named = OUTCOMES.find((outcome) => detail.endsWith(` ${outcome}`));
+  const outcome = named ?? "unknown";
+  const message = outcome === "unknown" ? `${detail} ${UNKNOWN_ADVICE}` : detail;
+  return { isError: true, text, payload: { outcome, detail: message, target } };
 }
 
 function listResult(run) {

@@ -78,6 +78,8 @@ function call(id: number, name: string, args: Record<string, unknown>) {
   return { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } };
 }
 
+const OUTCOME_VALUES = ["queued", "delivered", "unknown", "not-delivered"];
+
 function recordedArgv(log: string): string[][] {
   if (!fs.existsSync(log)) return [];
   return fs
@@ -200,17 +202,51 @@ describe("mcp-gateway: exact argv per tool", () => {
     assert.equal(fs.existsSync(argv?.[2] ?? ""), false, "the gateway cleans up after itself");
   });
 
-  it("a failing CLI is an error result, not a fake success", async () => {
+  it("an absent peer is the one definite negative: not-delivered", async () => {
     const dir = freshDir();
-    const stub = stubAdapterd(dir, { stderr: '❌ send to "peer" failed: peer "peer" not found\n', code: 1 });
+    const stub = stubAdapterd(dir, { stderr: '❌ send to "peer" failed: peer "peer" not found not-delivered\n', code: 1 });
     const result = await speak(["--name", "host-a", "--dir", dir, "--xfer-adapterd", stub.path], [
       call(2, "xfer_send", { target: "peer", summary: "s", document: "d", kind: "task" }),
     ]);
     const frame = result.frames[0];
     assert.equal(frame?.result.isError, true);
-    assert.equal(frame?.result.structuredContent.outcome, "not-sent");
+    assert.equal(frame?.result.structuredContent.outcome, "not-delivered");
     assert.equal(frame?.result.structuredContent.target, "peer");
     assert.match(frame?.result.structuredContent.detail, /not found/);
+  });
+
+  it("an ack timeout is unknown, and says not to resend", async () => {
+    const dir = freshDir();
+    const stub = stubAdapterd(dir, { stderr: '❌ send to "peer" failed: ack timeout unknown\n', code: 1 });
+    const result = await speak(["--name", "host-a", "--dir", dir, "--xfer-adapterd", stub.path], [
+      call(2, "xfer_send", { target: "peer", summary: "s", document: "d", kind: "task" }),
+    ]);
+    const content = result.frames[0]?.result.structuredContent;
+    assert.equal(result.frames[0]?.result.isError, true);
+    assert.equal(content.outcome, "unknown", "the handoff may have arrived — never a definite negative");
+    assert.match(content.detail, /do not resend/);
+  });
+
+  it("a failure with no named outcome degrades to unknown, never to a false negative", async () => {
+    const dir = freshDir();
+    const stub = stubAdapterd(dir, { stderr: "something went sideways\n", code: 1 });
+    const result = await speak(["--name", "host-a", "--dir", dir, "--xfer-adapterd", stub.path], [
+      call(2, "xfer_send", { target: "peer", summary: "s", document: "d", kind: "task" }),
+    ]);
+    const content = result.frames[0]?.result.structuredContent;
+    assert.equal(content.outcome, "unknown");
+    assert.match(content.detail, /do not resend/);
+  });
+
+  it("never reports an outcome outside ADR-0020's four values", async () => {
+    const dir = freshDir();
+    for (const [stdout, stderr, code] of [["out-1 delivered\n", "", 0], ["out-2 queued\n", "", 0], ["", "boom\n", 1], ["garbage\n", "", 0]]) {
+      const stub = stubAdapterd(freshDir(), { stdout, stderr, code });
+      const result = await speak(["--name", "host-a", "--dir", path.dirname(stub.log), "--xfer-adapterd", stub.path], [
+        call(2, "xfer_send", { target: "peer", summary: "s", document: "d", kind: "task" }),
+      ]);
+      assert.equal(OUTCOME_VALUES.includes(result.frames[0]?.result.structuredContent.outcome), true);
+    }
   });
 
   it("a CLI that cannot be spawned is reported as an error result", async () => {
@@ -220,6 +256,13 @@ describe("mcp-gateway: exact argv per tool", () => {
     ]);
     assert.equal(result.code, 0);
     assert.equal(result.frames[0]?.result.isError, true);
+  });
+
+  it("never invents a fifth outcome value anywhere in the source", () => {
+    for (const file of ["mcp-gateway.mjs", "adapterd.src/main.ts"]) {
+      const source = fs.readFileSync(path.join(import.meta.dirname, file), "utf-8");
+      assert.equal(/\bnot-sent\b/.test(source), false, `${file} must stay inside ADR-0020's four values`);
+    }
   });
 
   it("runs a script through this Node instead of requiring an executable bit", () => {
@@ -259,7 +302,7 @@ describe("mcp-gateway: stdout purity", () => {
     assert.equal(result.frames[3]?.error?.code, -32601);
     assert.equal(result.frames[4]?.error?.code, -32602);
     assert.equal(result.stderr.includes("noise on stderr"), true, "the CLI's diagnostics are relayed to stderr");
-    assert.equal(result.frames[1]?.result.structuredContent.detail, "noise on stderr", "and reach the model as the failure detail");
+    assert.match(result.frames[1]?.result.structuredContent.detail, /^noise on stderr/, "and reach the model as the failure detail");
   });
 
   it("turns an unparseable line into a parse-error frame, not a crash", async () => {
@@ -365,6 +408,18 @@ describe("mcp-gateway: mesh send end to end on loopback", () => {
       assert.equal(frame?.result.isError, false, `mesh send failed: ${frame?.result?.content?.[0]?.text ?? frame?.error?.message}`);
       assert.match(frame?.result.structuredContent.handoff_id ?? "", /^[0-9a-z]+-[0-9a-z]+$/);
       assert.equal(frame?.result.structuredContent.target, "phone");
+      assert.equal(frame?.result.structuredContent.outcome, "queued", "a mesh enqueue that was accepted is queued, never unknown");
+
+      const direct = spawn(process.execPath, [adapterd, "mesh", "send", "phone", "-", "loopback probe", "--kind", "notification", "--from", "loopback-sender", "--dir", dir], {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, XFER_MESH_CONFIG: configPath },
+      });
+      let directErr = "";
+      direct.stderr.on("data", (chunk) => { directErr += chunk.toString(); });
+      direct.stdin.end("kind: notification\nprobe");
+      const directCode = await new Promise<number | null>((resolve) => direct.on("exit", resolve));
+      assert.equal(directCode, 0, "a preflight warning is not a failure — the exit code stays 0");
+      assert.match(directErr, /queued|^$/m);
     } finally {
       engine.kill("SIGKILL");
       fs.closeSync(engineLog);

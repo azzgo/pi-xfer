@@ -77,10 +77,31 @@ never offers it.
 | `xfer_list` | `xfer-adapterd list --json --dir <dir>` |
 
 `xfer_send` / `xfer_mesh_send` take `{ target, summary, document, kind }` and
-return `{ handoff_id, outcome, target }`, where `outcome` is whatever the CLI
-honestly reported: `queued` / `delivered` / `unknown` / `not-delivered`
-(ADR-0020 — `unknown` never means "resend it"). A failing CLI is an
-`isError: true` result carrying the CLI's own message, never a fake success.
+return `{ handoff_id, outcome, target }`.
+
+`outcome` is always one of ADR-0020's **four** values — `queued`, `delivered`,
+`unknown`, `not-delivered` — and there is no fifth. A failing CLI is still an
+`isError: true` result, but its `outcome` stays inside that set:
+
+| Situation | `outcome` |
+|---|---|
+| local send acked | `delivered` |
+| mesh enqueue accepted | `queued` |
+| target has no socket (`peer "x" not found`) | `not-delivered` |
+| ack timeout, dropped connection, unclassified refusal | `unknown` |
+| CLI could not say (config error, missing binary, crash) | `unknown` |
+
+**`unknown` is never a definite negative, and never invites a resend.** An ack
+timeout means the handoff may well have arrived; reporting it as "not sent"
+would make a model resend, which is precisely the duplicate hazard the value
+exists to prevent. The `detail` field carries the CLI's own message plus an
+explicit do-not-resend sentence, so the guidance reaches the model with the
+verdict.
+
+A **preflight warning** (mesh `Mismatch`: the actor record reads idle while the
+target's pool does hold a live runner) is *not* a failure — the handoff was
+queued and the engine places it on the next send. It goes to stderr and leaves
+the exit code at 0.
 
 `xfer_list` takes `{}` and returns `{ targets: [{ name, sessionName, cwd,
 status }] }`. **Local only** — mesh nodes are listed by the xfer extension, not

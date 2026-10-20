@@ -49439,7 +49439,9 @@ var init_install = __esm({
 // adapterd.src/main.ts
 var main_exports = {};
 __export(main_exports, {
-  main: () => main
+  failedSendOutcome: () => failedSendOutcome,
+  main: () => main,
+  meshFailureOutcome: () => meshFailureOutcome
 });
 module.exports = __toCommonJS(main_exports);
 var fs13 = __toESM(require("node:fs"), 1);
@@ -50322,6 +50324,10 @@ function fail(message) {
 `);
   process.exitCode = 1;
 }
+function warn(message) {
+  process.stderr.write(`${message}
+`);
+}
 var USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
   xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
@@ -50443,7 +50449,7 @@ async function runSend(argv, flags) {
     }, dir);
     log(id, outcome);
   } catch (err) {
-    fail(`❌ send to "${target2}" failed: ${errorText2(err)}`);
+    fail(`❌ send to "${target2}" failed: ${errorText2(err)} ${failedSendOutcome(err)}`);
   }
 }
 function readDocument(file2) {
@@ -50456,6 +50462,14 @@ function readDocument(file2) {
 }
 function readKind(value) {
   return value === "task" || value === "notification" ? value : null;
+}
+function failedSendOutcome(err) {
+  return /peer ".*" not found/.test(errorText2(err)) ? "not-delivered" : "unknown";
+}
+function meshFailureOutcome(err) {
+  const kind = err?.kind;
+  if (kind === "not-delivered") return "not-delivered";
+  return "unknown";
 }
 function writeOutboundDoc(body, from, dir, kind, id) {
   const stamp = senderStamp(from, dir);
@@ -50507,10 +50521,10 @@ async function runMeshSend(argv, flags) {
       void 0,
       { preflight: !flags["no-preflight"] }
     );
-    log(id);
-    if (preflight?.warning) fail(`⚠️ ${preflight.warning}`);
+    log(id, "queued");
+    if (preflight?.warning) warn(`⚠️ ${preflight.warning}`);
   } catch (err) {
-    fail(`❌ ${errorText2(err)}`);
+    fail(`❌ ${errorText2(err)} ${meshFailureOutcome(err)}`);
   }
 }
 function splitSendArgs(argv) {
@@ -50607,5 +50621,7 @@ if (isEntryPoint(["xfer-adapterd.cjs", "main.ts"])) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  main
+  failedSendOutcome,
+  main,
+  meshFailureOutcome
 });
