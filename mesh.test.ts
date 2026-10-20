@@ -164,12 +164,12 @@ describe("mesh config", () => {
   it("refuses URL auth and hands back the migrated shape", () => {
     // The old form looks valid, so the message has to carry the whole fix.
     assert.throws(
-      () => parseMeshConfig({ endpoint: "http://default:sk_abc@engine.example.com:6420/", pool: "workstation" }),
+      () => parseMeshConfig({ endpoint: "http://default:sk_abc@engine.example.com:6420/", pool: "laptop" }),
       (err: any) =>
         /no longer supported/.test(err.message) &&
         /"endpoint": "http:\/\/engine\.example\.com:6420\/"/.test(err.message) &&
         /"namespace": "default"/.test(err.message) &&
-        /"pool": "workstation"/.test(err.message) &&
+        /"pool": "laptop"/.test(err.message) &&
         /\$MESH_TOKEN/.test(err.message) &&
         /!pass show mesh-token/.test(err.message),
     );
@@ -368,7 +368,7 @@ describe("mesh config schema", () => {
       endpoint: "http://localhost:6420",
       namespace: "default",
       token: "!echo the-real-token",
-      pool: "workstation",
+      pool: "laptop",
     });
     assert.equal("$schema" in config, false, "an editor hint must not become config state");
     assert.equal(config.endpoint, "http://localhost:6420");
@@ -405,7 +405,7 @@ describe("mesh config schema", () => {
       endpoint: "http://localhost:6420",
       namespace: "default",
       token: "sk_literal",
-      pool: "workstation",
+      pool: "laptop",
     });
     for (const key of Object.keys(config)) {
       assert.ok(

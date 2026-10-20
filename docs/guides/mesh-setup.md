@@ -147,7 +147,7 @@ completion and validation while you type. Add one line at the top:
   "endpoint": "http://engine.example.com:6420/",
   "namespace": "default",
   "token": "!pass show mesh-token",
-  "pool": "workstation"
+  "pool": "laptop"
 }
 ```
 
@@ -247,7 +247,7 @@ Given:
 ```json
 {
   "endpoint": "http://default:sk_xxx@engine.example.com:6420/",
-  "pool": "workstation"
+  "pool": "laptop"
 }
 ```
 
@@ -258,7 +258,7 @@ write:
   "endpoint": "http://engine.example.com:6420/",
   "namespace": "default",
   "token": "sk_xxx",
-  "pool": "workstation"
+  "pool": "laptop"
 }
 ```
 

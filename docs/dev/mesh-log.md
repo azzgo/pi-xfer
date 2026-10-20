@@ -15,9 +15,9 @@ Read it with `tail -n 50 ~/.pi/xfer/mesh.log` (or `less +G`). It is a file for
 humans and is never fed back into an agent's context.
 
 ```
-2026-10-14T07:09:39.991Z level=info msg="mesh up" node=bugfix endpoint=http://engine.example.com:6420 namespace=default pool=workstation nativeLogLevel=silent adopted=Sleeping
-2026-10-14T07:12:04.006Z level=info msg="mesh send" from=bugfix to=phone id=k3f9 bytes=4821
-2026-10-14T07:12:31.880Z level=warn msg="mesh misroute" id=k3f9 from=bugfix to=phone reached=bugfix
+2026-10-14T07:09:39.991Z level=info msg="mesh up" node=laptop endpoint=http://engine.example.com:6420 namespace=default pool=laptop nativeLogLevel=silent adopted=Sleeping
+2026-10-14T07:12:04.006Z level=info msg="mesh send" from=laptop to=phone id=k3f9 bytes=4821
+2026-10-14T07:12:31.880Z level=warn msg="mesh misroute" id=k3f9 from=laptop to=phone reached=laptop
 ```
 
 ## Two producers, one timeline
