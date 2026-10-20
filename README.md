@@ -39,6 +39,7 @@ Full walkthrough in [`docs/guides/quickstart.md`](docs/guides/quickstart.md) · 
 | **Handoff outcome** | Both `xfer_to` and `xfer_mesh_to` report where the handoff landed — `delivered` / `queued` / `unknown` / `not-delivered` — as far as each transport can honestly tell. Never "was it read": `unknown` is a real answer and is never a reason to resend (see `docs/adr/0020`) |
 | **Board** | Machine-local async collaboration cards (`/xfer board`); append-only entries, human-cleaned (see `docs/adr/0014`) |
 | **Web picker** | Tampermonkey userscript + local broker: pick page elements, record interaction spans, submit as handoff (see `docs/dev/web-picker.md`) |
+| **MCP gateway** | `mcp-gateway.mjs` — a stdio MCP server exposing `xfer_send` / `xfer_mesh_send` / `xfer_list` to any MCP host, by forking the adapter CLI. Binds no socket: send-only, so it is not listed in `/xfer list` (see `docs/guides/mcp-gateway.md`) |
 
 Install the userscript straight from the raw URL (the `.user.js` suffix triggers Tampermonkey's install prompt): <https://raw.githubusercontent.com/azzgo/pi-xfer/main/web-picker.user.js>
 
@@ -54,6 +55,7 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 - [Mesh setup](docs/guides/mesh-setup.md) — cross-machine transport with RivetKit
 - [Agent host setup](docs/guides/agent-host-setup.md) — wiring a non-pi bot (adapter daemon, Feishu notes)
 - [Pi Durable agent](docs/guides/pi-durable-agent.md) — a mesh node on Cloudflare that exists only while there is work
+- [MCP gateway](docs/guides/mcp-gateway.md) — typed xfer tools for an MCP host, over stdio
 
 **Development**
 
@@ -63,7 +65,7 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 
 ## Layout
 
-- `docs/guides/` — user guides ([quickstart](docs/guides/quickstart.md), [mesh setup](docs/guides/mesh-setup.md), [agent host setup](docs/guides/agent-host-setup.md), [pi durable agent](docs/guides/pi-durable-agent.md))
+- `docs/guides/` — user guides ([quickstart](docs/guides/quickstart.md), [mesh setup](docs/guides/mesh-setup.md), [agent host setup](docs/guides/agent-host-setup.md), [pi durable agent](docs/guides/pi-durable-agent.md), [MCP gateway](docs/guides/mcp-gateway.md))
 - `docs/adr/` — decision records (mesh transport, board scope, web-picker record philosophy)
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
 - `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product

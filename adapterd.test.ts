@@ -444,3 +444,70 @@ describe("adapterd CLI: inbox with an explicit --name", () => {
     assert.equal(r.stdout, "");
   });
 });
+
+describe("xfer-adapterd CLI: list", () => {
+  const bundle = path.join(import.meta.dirname, "xfer-adapterd.cjs");
+  const dirs: string[] = [];
+  after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
+  const freshDir = (): string => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-adapterd-list-")); dirs.push(d); return d; };
+
+  function runCli(args: string[], dir: string, stdin?: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    const child = spawn(process.execPath, [bundle, ...args, "--dir", dir], { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout!.on("data", (c: Buffer) => { stdout += c; });
+    child.stderr!.on("data", (c: Buffer) => { stderr += c; });
+    child.stdin!.end(stdin ?? "");
+    return new Promise((resolve) => child.on("exit", (code) => resolve({ code, stdout, stderr })));
+  }
+
+  it("lists the .sock siblings with their metadata, one JSON object per line", async () => {
+    const dir = freshDir();
+    fs.writeFileSync(path.join(dir, `${encodeAgentName("alpha")}.sock`), "");
+    fs.writeFileSync(path.join(dir, `${encodeAgentName("beta")}.sock`), "");
+    fs.writeFileSync(path.join(dir, `${encodeAgentName("beta")}.json`), JSON.stringify({ sessionName: "pi-varna", cwd: "/srv/beta", status: "idle" }));
+
+    const r = await runCli(["list", "--json"], dir);
+    assert.equal(r.code, 0, r.stderr);
+    const lines = r.stdout.trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(lines.map((line) => line.name), ["alpha", "beta"]);
+    assert.deepEqual(lines[1], { name: "beta", sessionName: "pi-varna", cwd: "/srv/beta", status: "idle" });
+    assert.equal(lines[0].cwd, null, "a metadata-less sibling still lists, with nulls");
+  });
+
+  it("prints a human line without --json", async () => {
+    const dir = freshDir();
+    fs.writeFileSync(path.join(dir, `${encodeAgentName("alpha")}.sock`), "");
+    const r = await runCli(["list"], dir);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, "alpha\n");
+  });
+
+  it("an empty or missing directory is an empty listing, never an error", async () => {
+    const dir = freshDir();
+    for (const flags of [["list"], ["list", "--json"]]) {
+      const r = await runCli(flags, dir);
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.stdout, "");
+    }
+    const missing = await runCli(["list", "--json"], path.join(dir, "never-created"));
+    assert.equal(missing.code, 0, missing.stderr);
+    assert.equal(missing.stdout, "");
+  });
+
+  it("send reads the document from stdin when the file is -", async () => {
+    const dir = freshDir();
+    const child = spawn(process.execPath, [bundle, "up", "--name", "agent-stdin", "--once", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    try {
+      await waitForSocket(endpointForName("agent-stdin", dir));
+      const sender = await runCli(["send", "agent-stdin", "-", "from stdin", "--kind", "task", "--from", "agent-sender"], dir, "stdin body");
+      assert.equal(sender.code, 0, sender.stderr);
+      assert.equal(await waitExit(child), 0, `stderr: ${stderr}`);
+      assert.equal(takeInbox(inboxPathForName("agent-stdin", dir))[0]?.document, "kind: task\nstdin body");
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
+  });
+});

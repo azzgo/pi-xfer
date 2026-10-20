@@ -42,6 +42,7 @@
     "xfer-adapterd.cjs",
     "xfer-adapterd.cjs.sha256",
     "web-picker.user.js",
+    "mcp-gateway.mjs",
     "CONTEXT.md",
     "README.md",
     "LICENSE",

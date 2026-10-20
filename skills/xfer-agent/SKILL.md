@@ -52,12 +52,39 @@ Sending without a kind fails rather than going quiet, but the silence is what
 you pay for a wrong one: an undeclared or mistaken `notification` never comes
 back. Never send a handoff whose only purpose is to acknowledge.
 - **Target search is LOCAL first.** `<target>` is another xfer node on this
-  machine — the `.sock` siblings in `~/.pi/xfer/` (their `.json` sibling holds
-  the human-readable `xferName`).
+  machine. Do not read `~/.pi/xfer/` by hand — ask the CLI:
+
+  ```sh
+  xfer-adapterd list          # one line per local peer
+  xfer-adapterd list --json   # one JSON object per line, with sessionName/cwd/status
+  ```
 - `send` connects straight to the target socket and waits for its ack. It does
   **not** need the daemon to be running — send-only hosts can skip `up`
   entirely.
 - Exit code is `0` on ack, `1` when the target is absent or fails.
+
+Handoffs built in memory need no temp file: pass `-` as the file and the
+document is read from stdin.
+
+```sh
+xfer-adapterd send <target> - "<summary>" --kind <k> < handoff.md
+```
+
+## Alternative: an MCP gateway instead of this skill
+
+If your host speaks MCP, there is a stdio server that exposes the same sends as
+typed tools — `xfer_send`, `xfer_mesh_send`, `xfer_list` — and needs no skill
+file and no launch command:
+
+```json
+{ "command": "node", "args": ["<pi-xfer>/mcp-gateway.mjs", "--name", "<your-name>"] }
+```
+
+Two things to know before choosing it: `--name` is required (a send-only
+gateway binds no socket, so a collision cannot be detected), and a host that
+adopts it is **invisible in `/xfer list`** until something binds a socket with
+`xfer-adapterd up`. It also cannot receive — there is no inbox behind it.
+Details: `docs/guides/mcp-gateway.md` in the pi-xfer repo.
 
 ## Cross-machine (mesh) sends
 

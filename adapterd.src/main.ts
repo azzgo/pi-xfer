@@ -4,6 +4,8 @@
  * Subcommands:
  *   up                 start the local listener + Inbox (optionally join the mesh)
  *   send               hand off to a local peer socket (daemon-independent)
+ *   mesh send          hand off to a mesh node without joining it
+ *   list               discover local peers (a send-only host reads no directory)
  *   inbox take|list    consume or peek at this daemon's Inbox
  *   install            write the xfer-agent skill into a host directory
  *
@@ -18,6 +20,7 @@ import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
 import { loadMeshConfig, parseMeshConfig, resolveMeshConfig } from "../mesh-config.ts";
 import { stampHandoffKind, type HandoffKind } from "../handoff-kind.ts";
 import { senderCwdStampFor, stampDocument, type SenderCwdStamp } from "../sender-cwd-stamp.ts";
+import { listTargets } from "../targets.ts";
 import { endpointForName, isEntryPoint, metadataForName, msgId } from "../utils.ts";
 import { defaultAdapterName, startAdapterd, type AdapterdHandle, type AdapterdMeshOptions } from "./daemon.ts";
 import { inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./inbox.ts";
@@ -74,8 +77,9 @@ function fail(message: string): void {
 const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
   xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
-  xfer-adapterd send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D]
-  xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P] [--no-preflight]
+  xfer-adapterd send <target> <file|-> <summary> --kind <task|notification> [--from N] [--dir D]
+  xfer-adapterd mesh send <target> <file|-> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P] [--no-preflight]
+  xfer-adapterd list [--dir D] [--json]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 
@@ -93,6 +97,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === "mesh" && sub === "send") {
     await runMeshSend(positionals.slice(2), flags);
+    return;
+  }
+  if (command === "list") {
+    runList(flags);
     return;
   }
   if (command === "inbox") {
@@ -169,11 +177,7 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
 async function runSend(argv: string[], flags: Flags): Promise<void> {
   const { target, file, summary } = splitSendArgs(argv);
   if (!target || !file || !summary) {
-    fail(`Usage: xfer-adapterd send <target> <file> <summary> --kind <task|notification>`);
-    return;
-  }
-  if (!fs.existsSync(file)) {
-    fail(`❌ handoff file not found: ${file}`);
+    fail(`Usage: xfer-adapterd send <target> <file|-> <summary> --kind <task|notification>`);
     return;
   }
   const kind = readKind(str(flags.kind));
@@ -181,10 +185,11 @@ async function runSend(argv: string[], flags: Flags): Promise<void> {
     fail(`❌ --kind must be "task" or "notification" — see the xfer-agent skill; a handoff that declares no kind reads as a notification and never comes back`);
     return;
   }
+  const body = readDocument(file);
+  if (body === null) return;
   const dir = str(flags.dir) ?? XFER_DIR;
   const from = str(flags.from) ?? defaultAdapterName();
   const id = msgId();
-  const body = fs.readFileSync(file, "utf-8");
   try {
     const outcome = await sendNotify(target, {
       type: "xfer-notify",
@@ -197,6 +202,22 @@ async function runSend(argv: string[], flags: Flags): Promise<void> {
   } catch (err) {
     fail(`❌ send to "${target}" failed: ${errorText(err)}`);
   }
+}
+
+/**
+ * The handoff document for a send: the file's contents, or stdin for `-`.
+ *
+ * `-` exists because a host that builds a handoff in memory (a gateway, a
+ * harness) otherwise has to write a temp file only for this CLI to read it
+ * back. Null means the read failed and the error is already on stderr.
+ */
+function readDocument(file: string): string | null {
+  if (file === "-") return fs.readFileSync(0, "utf-8");
+  if (!fs.existsSync(file)) {
+    fail(`❌ handoff file not found: ${file}`);
+    return null;
+  }
+  return fs.readFileSync(file, "utf-8");
 }
 
 /** The declared kind, or null when the flag is missing or meaningless. */
@@ -236,11 +257,7 @@ function senderStamp(from: string, dir: string): SenderCwdStamp | null {
 async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   const { target, file, summary } = splitSendArgs(argv);
   if (!target || !file || !summary) {
-    fail(`Usage: xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification>`);
-    return;
-  }
-  if (!fs.existsSync(file)) {
-    fail(`❌ handoff file not found: ${file}`);
+    fail(`Usage: xfer-adapterd mesh send <target> <file|-> <summary> --kind <task|notification>`);
     return;
   }
   const kind = readKind(str(flags.kind));
@@ -248,6 +265,8 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
     fail(`❌ --kind must be "task" or "notification" — see the xfer-agent skill; a handoff that declares no kind reads as a notification and never comes back`);
     return;
   }
+  const body = readDocument(file);
+  if (body === null) return;
   const { sendMeshHandoff } = await import("../mesh-engine.ts");
   const engine = str(flags.engine);
   let config;
@@ -262,7 +281,6 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   const dir = str(flags.dir) ?? XFER_DIR;
   const id = msgId();
   const from = str(flags.from) ?? defaultAdapterName();
-  const body = fs.readFileSync(file, "utf-8");
   const stamp = senderStamp(from, dir);
   const document = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   try {
@@ -283,6 +301,25 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
 function splitSendArgs(argv: string[]): { target?: string; file?: string; summary?: string } {
   const [target, file, ...rest] = argv;
   return { target, file, summary: rest.join(" ").trim() || undefined };
+}
+
+/**
+ * Local peer discovery. A send-only host — the MCP gateway, a script — binds no
+ * socket and cannot tell a peer from a stale `.json`, so it must not have to
+ * read `~/.pi/xfer` by hand. `--json` is one object per line: the same shape
+ * `inbox` prints, so a caller parses every listing this CLI makes the same way.
+ */
+function runList(flags: Flags): void {
+  const dir = str(flags.dir) ?? XFER_DIR;
+  const targets = listTargets(dir);
+  if (flags.json === true) {
+    for (const target of targets) log(JSON.stringify(target));
+    return;
+  }
+  for (const target of targets) {
+    const details = [target.sessionName, target.status, target.cwd].filter((value) => typeof value === "string" && value !== "");
+    log(details.length > 0 ? `${target.name}  ${details.join("  ")}` : target.name);
+  }
 }
 
 function runInbox(sub: string | undefined, flags: Flags): void {
