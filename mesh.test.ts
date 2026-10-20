@@ -167,7 +167,7 @@ describe("mesh config", () => {
       () => parseMeshConfig({ endpoint: "http://default:sk_abc@engine.example.com:6420/", pool: "workstation" }),
       (err: any) =>
         /no longer supported/.test(err.message) &&
-        /"endpoint": "http:\/\/192\.168\.101\.230:6420\/"/.test(err.message) &&
+        /"endpoint": "http:\/\/engine\.example\.com:6420\/"/.test(err.message) &&
         /"namespace": "default"/.test(err.message) &&
         /"pool": "workstation"/.test(err.message) &&
         /\$MESH_TOKEN/.test(err.message) &&
