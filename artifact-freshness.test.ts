@@ -11,8 +11,16 @@ import { buildAdapterd, buildAdminDaemon, buildBrokerDaemon, buildMeshRuntime, b
  * stale pair committed together after a source change (the P1-4 drift).
  */
 describe("committed artifact freshness", () => {
+  /**
+   * The scratch path carries the pid because these tests race themselves: two
+   * concurrent `npm test` runs share this directory, and esbuild's outfile
+   * write is not atomic — a fixed name let one run read the other's half-written
+   * bundle and fail with a bogus "stale" claim.
+   */
+  const scratch = (name: string): string =>
+    path.join(import.meta.dirname, `${name}.fresh.test.tmp-${process.pid}`);
   it("mesh-runtime.cjs rebuilds byte-identical from mesh-runtime.src/", async () => {
-    const rebuilt = path.join(import.meta.dirname, "mesh-runtime.cjs.fresh.test.tmp");
+    const rebuilt = scratch("mesh-runtime.cjs");
     try {
       await buildMeshRuntime(rebuilt);
       assert.equal(
@@ -26,7 +34,7 @@ describe("committed artifact freshness", () => {
     }
   });
   it("xfer-adapterd.cjs rebuilds byte-identical from adapterd.src/", async () => {
-    const rebuilt = path.join(import.meta.dirname, "xfer-adapterd.cjs.fresh.test.tmp");
+    const rebuilt = scratch("xfer-adapterd.cjs");
     try {
       await buildAdapterd(rebuilt);
       assert.equal(
@@ -40,7 +48,7 @@ describe("committed artifact freshness", () => {
     }
   });
   it("broker.cjs rebuilds byte-identical from broker-main.ts", async () => {
-    const rebuilt = path.join(import.meta.dirname, "broker.cjs.fresh.test.tmp");
+    const rebuilt = scratch("broker.cjs");
     try {
       await buildBrokerDaemon(rebuilt);
       assert.equal(
@@ -55,7 +63,7 @@ describe("committed artifact freshness", () => {
   });
 
   it("admin.cjs rebuilds byte-identical from admin-main.ts", async () => {
-    const rebuilt = path.join(import.meta.dirname, "admin.cjs.fresh.test.tmp");
+    const rebuilt = scratch("admin.cjs");
     try {
       await buildAdminDaemon(rebuilt);
       assert.equal(
@@ -70,7 +78,7 @@ describe("committed artifact freshness", () => {
   });
 
   it("web-picker.user.js rebuilds byte-identical from web-picker.src/", async () => {
-    const rebuilt = path.join(import.meta.dirname, "web-picker.user.js.fresh.test.tmp");
+    const rebuilt = scratch("web-picker.user.js");
     try {
       await buildWebPicker(rebuilt);
       assert.equal(
