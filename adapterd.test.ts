@@ -511,6 +511,24 @@ describe("xfer-adapterd CLI: list", () => {
       if (child.exitCode === null) child.kill("SIGKILL");
     }
   });
+
+  it("sends without --from as the literal sender \"unknown\", never a cwd-derived name", async () => {
+    const dir = freshDir();
+    const child = spawn(process.execPath, [bundle, "up", "--name", "agent-nofrom", "--once", "--dir", dir], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    try {
+      await waitForSocket(endpointForName("agent-nofrom", dir));
+      const doc = path.join(dir, "handoff.md");
+      fs.writeFileSync(doc, "body");
+      const sender = await runCli(["send", "agent-nofrom", doc, "s", "--kind", "task"], dir);
+      assert.equal(sender.code, 0, sender.stderr);
+      assert.equal(await waitExit(child), 0, `stderr: ${stderr}`);
+      assert.equal(takeInbox(inboxPathForName("agent-nofrom", dir))[0]?.from, "unknown");
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
+  });
 });
 
 describe("xfer-adapterd CLI: the outcome a failed send leaves behind", () => {

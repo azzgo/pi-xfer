@@ -50437,7 +50437,7 @@ async function runSend(argv, flags) {
   const body = readDocument(file2);
   if (body === null) return;
   const dir = str(flags.dir) ?? XFER_DIR;
-  const from = str(flags.from) ?? defaultAdapterName();
+  const from = str(flags.from) ?? "unknown";
   const id = msgId();
   try {
     const outcome = await sendNotify(target2, {
@@ -50510,7 +50510,7 @@ async function runMeshSend(argv, flags) {
   }
   const dir = str(flags.dir) ?? XFER_DIR;
   const id = msgId();
-  const from = str(flags.from) ?? defaultAdapterName();
+  const from = str(flags.from) ?? "unknown";
   const stamp = senderStamp(from, dir);
   const document2 = stampHandoffKind(stamp ? stampDocument(body, stamp) : body, kind);
   try {
