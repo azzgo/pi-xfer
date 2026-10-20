@@ -36,7 +36,12 @@ Read `document` (or the file at `file`) and act on it.
 Write the handoff as a markdown file, then send it:
 
 ```sh
-xfer-adapterd send <target> <file> <summary> --kind <task|notification>
+Write the handoff as a markdown file, then send it. `--from {{NAME}}` names you
+to the target — always pass it; omitting it makes the handoff arrive as from
+`unknown`, which the target cannot reply to:
+
+```sh
+xfer-adapterd send <target> <file> <summary> --kind <task|notification> --from {{NAME}}
 ```
 
 `--kind` is required, and it *is* the reply contract. The tool writes the
@@ -67,7 +72,7 @@ Handoffs built in memory need no temp file: pass `-` as the file and the
 document is read from stdin.
 
 ```sh
-xfer-adapterd send <target> - "<summary>" --kind <k> < handoff.md
+xfer-adapterd send <target> - "<summary>" --kind <k> --from {{NAME}} < handoff.md
 ```
 
 ## Alternative: an MCP gateway instead of this skill
@@ -92,7 +97,7 @@ Use the mesh **only when the user names a mesh actor** ("send to `phone` on the
 mesh", "the agent on my other machine"). Never fall back to the mesh silently.
 
 ```sh
-xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification>
+xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> --from {{NAME}}
 ```
 
 This needs `~/.pi/xfer/mesh.config.json` (or `--engine/--namespace/--token`).
