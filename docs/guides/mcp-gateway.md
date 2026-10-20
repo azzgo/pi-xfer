@@ -140,9 +140,12 @@ the host to read the directory by hand.
 - `xfer-adapterd list` and `send -` (stdin document) in `adapterd.test.ts`.
 
 The **loopback end-to-end mesh test** is present but skipped by default: it
-needs the pinned `rivet-engine` binary and fails to bind if an engine is already
-running on the default ports. Point `XFER_ENGINE_BINARY` at a `rivet-engine`
-binary to run it.
+needs the pinned `rivet-engine` binary, and a second engine must be given its
+own `guard` port and its own database or it half-works in a way that looks like
+a broken engine. `XFER_ENGINE_BINARY` opts in; the recipe for a coexisting
+engine is in `.agents/skills/verify/SKILL.md` (contributors) — note that
+`runner-configs` PUT is rejected by a 2.3.26 engine, so a loopback engine is
+currently good for reads and not for a real mesh enqueue.
 
 The gateway itself never touches an engine, so `mesh-guard.ts` is not loaded
 here — and it does not need to be. The mesh code path lives in the forked CLI,

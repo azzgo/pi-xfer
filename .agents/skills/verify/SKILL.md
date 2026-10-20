@@ -123,13 +123,108 @@ mesh panel, pick one of these instead of pointing at a real engine:
 | Approach | How |
 |---|---|
 | **Hermetic stub** (default) | `npm test` — `mesh-guard.test.ts` and the `mesh.test.ts` suites drive every verdict branch from stubbed `/actors` + `/envoys` responses. This is the coverage for the *logic*. |
-| **Local loopback engine** | Run a control plane on this machine and point a throwaway config at it: `{"endpoint": "http://127.0.0.1:6420"}`. Loopback is allowed by the guard and costs nobody anything. `XFER_MESH_CONFIG=/tmp/mesh.local.json` selects it for a test; for an interactive session, pass `--mesh-config` where the CLI accepts one or back up and swap the real config — and put it back. |
+| **Local loopback engine** | Run a control plane on this machine and point a throwaway config at it: `{"endpoint": "http://127.0.0.1:7920"}`. Loopback is allowed by the guard and costs nobody anything. `XFER_MESH_CONFIG=/tmp/mesh-local/mesh.json` selects it for a test; for an interactive session, pass `--mesh-config` where the CLI accepts one — never edit `~/.pi/xfer/mesh.config.json`. **Use a port the machine's own engine is not on, and see [Recipe: an engine that coexists with a running one](#recipe-an-engine-that-coexists-with-a-running-one)** — a naive second instance silently half-works. |
 | **Inspect the rendered HTML** | When no browser is available, `curl` the admin page and read the markup. Say plainly that this is not a screenshot and does not verify layout. |
 
 Standing up a loopback engine is Rivet's own self-host path — see
 [Rivet → self-host](https://rivet.dev/docs/deploy/self-host/control-plane/)
 and [Local development vs production](#local-development-vs-production) in the
-mesh guide.
+mesh guide. The recipe below is what actually worked here; the field is full of
+near-misses that look like "the engine is broken" and are not.
+
+#### Recipe: an engine that coexists with a running one
+
+A developer machine usually already has an engine on **6420** (api), **6421**
+(guard) and **6430** (metrics). A second instance must move **all three** and
+must not share the first one's database. Two knobs, both easy to miss:
+
+```jsonc
+// /tmp/mesh-local/engine.json
+{
+  "auth": {
+    "admin_token": "local-test",
+    "insecure_allow_unauthenticated": true
+  },
+  "api_peer": { "host": "127.0.0.1", "port": 7920 },
+  "guard":    { "host": "127.0.0.1", "port": 7921 },   // ← not derived from api_peer
+  "metrics":  { "host": "127.0.0.1", "port": 7930 }
+}
+```
+
+```bash
+BIN=~/.pi/xfer/cache/napi/<version>/engine-cli/node_modules/@rivetkit/engine-cli-<triple>/rivet-engine
+XDG_DATA_HOME=/tmp/mesh-local/xdg "$BIN" --config /tmp/mesh-local/engine.json start
+# then: {"endpoint": "http://127.0.0.1:7920", "namespace": "default", "token": "local-test"}
+```
+
+Why each line is there:
+
+- **`guard.port` is its own key.** `api_peer.port` moves only the REST plane. A
+  missing `guard` block leaves the guard on 6421, where it crashes with
+  `Address in use (os error 98)` roughly once a second, restarting forever. The
+  REST plane answers `/health` perfectly the whole time, so this failure does
+  **not** look like a startup failure — it looks like a working engine that
+  returns `internal_error` on everything real.
+- **`XDG_DATA_HOME` moves the database.** There is no config key for it:
+  `filesystem`, `db`, `db_path` are all rejected as unknown fields, and the path
+  is hardcoded to `<XDG_DATA_HOME>/rivet-engine/db`. Without the override a
+  second engine dies with `failed to open rocksdb … LOCK: Resource temporarily
+  unavailable` — a lock conflict, not corruption.
+- **`insecure_allow_unauthenticated` + `admin_token` must both be set.** The
+  token alone still makes `auth.insecure_allow_unauthenticated` mandatory, and
+  omitting the token fails deserialization with `missing field admin_token`.
+- **Add a *fresh* port, do not "pick another loopback IP".** `127.0.1.1` is
+  worth knowing about when a port is squatted, but a `guard` left on 6421 keeps
+  crashing regardless of which address `api_peer` binds. Moving the port is the
+  fix; moving the IP is not.
+
+Sanity check that the engine is genuinely isolated, before trusting anything
+built on it:
+
+```bash
+curl -s http://127.0.0.1:7920/health                                  # {"status":"ok"}
+grep -c "service crashed" /tmp/mesh-local/engine.log                  # must be 0
+curl -s -H 'Authorization: Bearer local-test' \
+  "http://127.0.0.1:7920/actors?namespace=default&name=xfer-instance"  # {"actors":[]}
+```
+
+`/actors` **requires the `name` query param** — without it the engine answers
+`500 internal_error` with `meta=null`, which reads as "the engine is broken"
+when it is only a missing parameter.
+
+#### Expect the guard to crash once at startup
+
+A fresh engine logs one
+`service crashed … verification_unavailable: … verification keys are
+temporarily unavailable` while its JWT key-ring is still initialising. It
+recovers by itself. **One** such line is normal; a repeating one is the port
+collision above.
+
+#### Known gap: `runner-configs` PUT on 2.3.26
+
+`mesh-engine.ts:ensureRunnerPool` sends
+`{"datacenters":{"default":{"normal":{}}}}`, and a 2.3.26 engine rejects it with
+`no variant of enum RunnerConfigKind found in flattened data`. That blocks
+`/xfer mesh setup` and any enqueue into a pool with no runner, so a loopback
+engine is currently good for **reads** — `/actors`, `/envoys`, `/health`,
+the listings and the preflight verdicts — and not yet for a real mesh enqueue.
+Do not conclude your change is broken when a loopback enqueue fails this way;
+check the engine version and this message first.
+
+#### Etiquette
+
+- Put the config, the database and the log under one throwaway directory, and
+  delete it when done. Never point an engine at `~/.local/share/rivet-engine/db`.
+- **Check what is already listening before you start anything**:
+  `ss -ltn | grep -E ':64[0-9][0-9]'`. An engine owned by another user cannot be
+  killed by you, and starting a second one against its database only produces a
+  lock error.
+- Kill only processes you started, by pattern anchored on *your* config path
+  (`pkill -f "rivet-engine --config /tmp/mesh-local"`). A bare
+  `pkill -f rivet-engine` reaches the machine owner's engine too.
+- Everything above is still governed by *Never verify against a live
+  deployment*: loopback is allowed and free, `~/.pi/xfer/mesh.config.json` is
+  not.
 
 ## Manual smoke checklist (release)
 
