@@ -162,10 +162,12 @@ in `commands.ts`.
 
 ## Verification
 
-- `npm test` green, including: a real stdio JSON-RPC handshake against `mcp-gateway.mjs`
-  (`initialize`, `tools/list`, `tools/call`); stdout purity including the error path; and a
-  stub `xfer-adapterd` on `--xfer-adapterd` asserting the exact argv for **all three tools**,
-  so a CLI flag change cannot silently diverge from a tool schema.
+- `npm test` green — 567 tests, 566 pass, 1 skipped, 0 fail. Includes a real stdio JSON-RPC
+  handshake against `mcp-gateway.mjs` (`initialize`, `tools/list`, `tools/call`); stdout purity
+  including the error path; a stub `xfer-adapterd` on `--xfer-adapterd` asserting the exact
+  argv for **all three tools**, so a CLI flag change cannot silently diverge from a tool
+  schema; and every outcome asserted to be inside ADR-0020's four values, with a test that
+  fails if a fifth appears.
 - **Hermetic, and the barrier is structural rather than a rule to remember.** `node --test`
   sets `NODE_TEST_CONTEXT`, the environment is inherited by every descendant, and
   `mesh-guard.ts` refuses any non-loopback endpoint from both outbound planes. So the rule is
@@ -177,7 +179,19 @@ in `commands.ts`.
   - **Forbidden:** the endpoint, tunnel or relay named in the real
     `~/.pi/xfer/mesh.config.json`, and anything that needs its token. Not because it is a
     test — because it is *someone's deployment*, and a stray enqueue leaves a mark on it.
+- **The gap against this plan.** The loopback end-to-end mesh test is written but
+  `t.skip`ped, opt-in via `XFER_ENGINE_BINARY`. It cannot run unattended on this machine: a
+  root-owned `rivet-engine` holds the default ports, so a second instance's guard service
+  cannot bind, and the deployment named in the real config is remote, so there is no local
+  engine to borrow. Everything below that layer (`sendMeshHandoff`, the fail-closed preflight,
+  the `not-delivered | unknown | failed` triage) stays covered by `mesh.test.ts` through
+  `fakeDeps`, and this change does not touch it. **Close it on a machine with the ports
+  free**, or accept it knowingly — do not read the skipped test as passing coverage.
 - Every test points `--dir` at a fresh `os.tmpdir()`.
-- **A smoke against the real engine is still a human decision**, per AGENTS.md — and now it
-  buys little that a loopback test does not, so it is only worth asking for once the loopback
-  path is green.
+- **A smoke against the real engine is still a human decision**, per AGENTS.md — and it buys
+  little that a loopback test does not, so it is only worth asking for once the loopback path
+  is green.
+- Manual smoke, local only, 2026-10-19: a real stdio handshake against a throwaway
+  `xfer-adapterd.cjs` — `initialize` ok, `xfer_list` returned the peer with metadata,
+  `xfer_send` returned `{handoff_id, outcome: "delivered"}`, and the peer's inbox showed the
+  right `from` and a correctly stamped `kind`.

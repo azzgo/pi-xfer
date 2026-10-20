@@ -46,6 +46,16 @@ an ambiguity into a real duplicate.
 - Local gains no preflight. Its Node axis is degenerate (the endpoint exists or it does
   not), and unlike mesh a false pass costs only a failed connect and a `unlink`.
 
+- **The `xfer-adapterd` failure line is a wire format, not prose.** `xfer-adapterd send` ends
+  its error line with one of the four values (`… ack timeout unknown`), and `mcp-gateway.mjs`
+  recovers the outcome from that trailing word; a value it cannot find degrades to `unknown`.
+  This is deliberate and test-pinned — an exit code plus a sentence cannot carry a four-valued
+  answer, which is how the gateway came to invent a fifth value on its first cut. It does mean
+  the CLI's error wording is load-bearing: **rewording it breaks the gateway's outcome mapping.**
+  The gateway coerces any unrecognised success token to `unknown` rather than trusting it, and a
+  test fails if a fifth value appears anywhere, so the failure mode is a permanently `unknown`
+  outcome, not a false success.
+
 - A public relay for remote MCP clients (cloud agents, phone hosts) is **deferred out of
   Milestone 4** by decision, not by omission: it is client-role on the mesh
   (`sendMeshHandoff`, no join, no actor) but needs authentication, because an unauthenticated
