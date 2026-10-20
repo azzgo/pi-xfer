@@ -180,13 +180,20 @@ in `commands.ts`.
     `~/.pi/xfer/mesh.config.json`, and anything that needs its token. Not because it is a
     test — because it is *someone's deployment*, and a stray enqueue leaves a mark on it.
 - **The gap against this plan.** The loopback end-to-end mesh test is written but
-  `t.skip`ped, opt-in via `XFER_ENGINE_BINARY`. It cannot run unattended on this machine: a
-  root-owned `rivet-engine` holds the default ports, so a second instance's guard service
-  cannot bind, and the deployment named in the real config is remote, so there is no local
-  engine to borrow. Everything below that layer (`sendMeshHandoff`, the fail-closed preflight,
-  the `not-delivered | unknown | failed` triage) stays covered by `mesh.test.ts` through
-  `fakeDeps`, and this change does not touch it. **Close it on a machine with the ports
-  free**, or accept it knowingly — do not read the skipped test as passing coverage.
+  `t.skip`ped, opt-in via `XFER_ENGINE_BINARY`. Two blockers, only one of which is still
+  standing:
+  - *Solved.* Coexisting with the machine's own engine **is** possible — `guard.port` is its
+    own key rather than derived from `api_peer.port`, and `XDG_DATA_HOME` moves the database
+    (there is no config key for it). The recipe, and the near-misses that look like a broken
+    engine instead, are in the verify skill.
+  - *Standing.* Engine 2.3.26 rejects `ensureRunnerPool`'s
+    `{"datacenters":{"default":{"normal":{}}}}` with `no variant of enum RunnerConfigKind`,
+    so a loopback engine serves reads but cannot host a node to send *to*. Until that is fixed
+    upstream, a real enqueue cannot be driven loopback. Do not read the skipped test as
+    passing coverage.
+  Everything below that layer (`sendMeshHandoff`, the fail-closed preflight, the
+  `not-delivered | unknown | failed` triage) stays covered by `mesh.test.ts` through `fakeDeps`,
+  and this change does not touch it.
 - Every test points `--dir` at a fresh `os.tmpdir()`.
 - **A smoke against the real engine is still a human decision**, per AGENTS.md — and it buys
   little that a loopback test does not, so it is only worth asking for once the loopback path

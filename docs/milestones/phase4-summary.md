@@ -230,13 +230,17 @@ One axis, one word was the collision ADR-0020 exists to resolve.
 ## Follow-ups / open
 
 1. **The gateway's loopback end-to-end mesh test is written but skipped.** It is
-   opt-in via `XFER_ENGINE_BINARY`. Environmental: a root-owned `rivet-engine`
-   holds the default ports on this machine and the real deployment is remote. This
-   is the one gap against the plan in `phase4-design-p2.md`, which should say so.
+   opt-in via `XFER_ENGINE_BINARY`. Running a second engine beside the machine's own
+   one turned out to be possible — `guard.port` is its own key and `XDG_DATA_HOME`
+   moves the database; the recipe is in the verify skill. What still blocks it is
+   that engine 2.3.26 rejects `ensureRunnerPool`'s datacenters payload with
+   `no variant of enum RunnerConfigKind`, so a loopback engine serves reads but
+   cannot host a node to send *to*. This is the one gap against the plan in
+   `phase4-design-p2.md`, which records the same two-part status.
 2. **The CLI's error text is now load-bearing.** The gateway reads the trailing
    word of the failure line to recover the outcome. Deliberate and test-pinned, but
    it belongs in ADR-0020's consequences so that anyone rewriting the CLI's error
-   wording knows they are touching a wire.
+   wording knows they are touching a wire. Now recorded there.
 3. **Four defects found while designing and deliberately not fixed** (closing
    section of `phase4-design-p2-p5.md`):
    - `syncXferToolAvailability` is a no-op (`index.ts`);
