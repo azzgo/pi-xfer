@@ -31774,33 +31774,29 @@ var init_dist2 = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/version.js
+// node_modules/@opentelemetry/api/dist/version.mjs
 var VERSION2;
 var init_version = __esm({
-  "node_modules/@opentelemetry/api/build/esm/version.js"() {
-    VERSION2 = "1.9.1";
+  "node_modules/@opentelemetry/api/dist/version.mjs"() {
+    VERSION2 = "1.10.0";
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/internal/semver.js
+// node_modules/@opentelemetry/api/dist/internal/semver.mjs
 function _makeCompatibilityCheck(ownVersion) {
   const acceptedVersions = /* @__PURE__ */ new Set([ownVersion]);
   const rejectedVersions = /* @__PURE__ */ new Set();
   const myVersionMatch = ownVersion.match(re);
-  if (!myVersionMatch) {
-    return () => false;
-  }
+  if (!myVersionMatch) return () => false;
   const ownVersionParsed = {
     major: +myVersionMatch[1],
     minor: +myVersionMatch[2],
     patch: +myVersionMatch[3],
     prerelease: myVersionMatch[4]
   };
-  if (ownVersionParsed.prerelease != null) {
-    return function isExactmatch(globalVersion) {
-      return globalVersion === ownVersion;
-    };
-  }
+  if (ownVersionParsed.prerelease != null) return function isExactmatch(globalVersion) {
+    return globalVersion === ownVersion;
+  };
   function _reject(v) {
     rejectedVersions.add(v);
     return false;
@@ -31810,62 +31806,54 @@ function _makeCompatibilityCheck(ownVersion) {
     return true;
   }
   return function isCompatible2(globalVersion) {
-    if (acceptedVersions.has(globalVersion)) {
-      return true;
-    }
-    if (rejectedVersions.has(globalVersion)) {
-      return false;
-    }
+    if (acceptedVersions.has(globalVersion)) return true;
+    if (rejectedVersions.has(globalVersion)) return false;
     const globalVersionMatch = globalVersion.match(re);
-    if (!globalVersionMatch) {
-      return _reject(globalVersion);
-    }
+    if (!globalVersionMatch) return _reject(globalVersion);
     const globalVersionParsed = {
       major: +globalVersionMatch[1],
       minor: +globalVersionMatch[2],
       patch: +globalVersionMatch[3],
       prerelease: globalVersionMatch[4]
     };
-    if (globalVersionParsed.prerelease != null) {
-      return _reject(globalVersion);
-    }
-    if (ownVersionParsed.major !== globalVersionParsed.major) {
-      return _reject(globalVersion);
-    }
+    if (globalVersionParsed.prerelease != null) return _reject(globalVersion);
+    if (ownVersionParsed.major !== globalVersionParsed.major) return _reject(globalVersion);
     if (ownVersionParsed.major === 0) {
-      if (ownVersionParsed.minor === globalVersionParsed.minor && ownVersionParsed.patch <= globalVersionParsed.patch) {
-        return _accept(globalVersion);
-      }
+      if (ownVersionParsed.minor === globalVersionParsed.minor && ownVersionParsed.patch <= globalVersionParsed.patch) return _accept(globalVersion);
       return _reject(globalVersion);
     }
-    if (ownVersionParsed.minor <= globalVersionParsed.minor) {
-      return _accept(globalVersion);
-    }
+    if (ownVersionParsed.minor <= globalVersionParsed.minor) return _accept(globalVersion);
     return _reject(globalVersion);
   };
 }
 var re, isCompatible;
 var init_semver = __esm({
-  "node_modules/@opentelemetry/api/build/esm/internal/semver.js"() {
+  "node_modules/@opentelemetry/api/dist/internal/semver.mjs"() {
     init_version();
     re = /^(\d+)\.(\d+)\.(\d+)(-(.+))?$/;
     isCompatible = _makeCompatibilityCheck(VERSION2);
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/internal/global-utils.js
+// node_modules/@opentelemetry/api/dist/internal/global-utils.mjs
+function _makeGlobalApi() {
+  return Object.defineProperty({}, "version", {
+    value: VERSION2,
+    enumerable: true,
+    writable: false,
+    configurable: false
+  });
+}
 function registerGlobal(type, instance, diag2, allowOverride = false) {
-  var _a3;
-  const api = _global[GLOBAL_OPENTELEMETRY_API_KEY] = (_a3 = _global[GLOBAL_OPENTELEMETRY_API_KEY]) !== null && _a3 !== void 0 ? _a3 : {
-    version: VERSION2
-  };
+  var _global$GLOBAL_OPENTE;
+  const api = _global[GLOBAL_OPENTELEMETRY_API_KEY] = (_global$GLOBAL_OPENTE = _global[GLOBAL_OPENTELEMETRY_API_KEY]) !== null && _global$GLOBAL_OPENTE !== void 0 ? _global$GLOBAL_OPENTE : _makeGlobalApi();
   if (!allowOverride && api[type]) {
-    const err = new Error(`@opentelemetry/api: Attempted duplicate registration of API: ${type}`);
+    const err = /* @__PURE__ */ new Error(`@opentelemetry/api: Attempted duplicate registration of API: ${type}`);
     diag2.error(err.stack || err.message);
     return false;
   }
-  if (api.version !== VERSION2) {
-    const err = new Error(`@opentelemetry/api: Registration of version v${api.version} for ${type} does not match previously registered API v${VERSION2}`);
+  if (api.version !== "1.10.0") {
+    const err = /* @__PURE__ */ new Error(`@opentelemetry/api: Registration of version v${api.version} for ${type} does not match previously registered API v${VERSION2}`);
     diag2.error(err.stack || err.message);
     return false;
   }
@@ -31874,23 +31862,22 @@ function registerGlobal(type, instance, diag2, allowOverride = false) {
   return true;
 }
 function getGlobal(type) {
-  var _a3, _b;
-  const globalVersion = (_a3 = _global[GLOBAL_OPENTELEMETRY_API_KEY]) === null || _a3 === void 0 ? void 0 : _a3.version;
-  if (!globalVersion || !isCompatible(globalVersion)) {
-    return;
+  const api = _global[GLOBAL_OPENTELEMETRY_API_KEY];
+  if (api == null) return;
+  if (api !== _compatibleGlobalApi) {
+    if (!api.version || !isCompatible(api.version)) return;
+    _compatibleGlobalApi = api;
   }
-  return (_b = _global[GLOBAL_OPENTELEMETRY_API_KEY]) === null || _b === void 0 ? void 0 : _b[type];
+  return api[type];
 }
 function unregisterGlobal(type, diag2) {
   diag2.debug(`@opentelemetry/api: Unregistering a global for ${type} v${VERSION2}.`);
   const api = _global[GLOBAL_OPENTELEMETRY_API_KEY];
-  if (api) {
-    delete api[type];
-  }
+  if (api) delete api[type];
 }
-var major, GLOBAL_OPENTELEMETRY_API_KEY, _global;
+var major, GLOBAL_OPENTELEMETRY_API_KEY, _global, _compatibleGlobalApi;
 var init_global_utils = __esm({
-  "node_modules/@opentelemetry/api/build/esm/internal/global-utils.js"() {
+  "node_modules/@opentelemetry/api/dist/internal/global-utils.mjs"() {
     init_version();
     init_semver();
     major = VERSION2.split(".")[0];
@@ -31899,17 +31886,15 @@ var init_global_utils = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/diag/ComponentLogger.js
+// node_modules/@opentelemetry/api/dist/diag/ComponentLogger.mjs
 function logProxy(funcName, namespace, args) {
   const logger5 = getGlobal("diag");
-  if (!logger5) {
-    return;
-  }
+  if (!logger5) return;
   return logger5[funcName](namespace, ...args);
 }
 var DiagComponentLogger;
 var init_ComponentLogger = __esm({
-  "node_modules/@opentelemetry/api/build/esm/diag/ComponentLogger.js"() {
+  "node_modules/@opentelemetry/api/dist/diag/ComponentLogger.mjs"() {
     init_global_utils();
     DiagComponentLogger = class {
       constructor(props) {
@@ -31934,99 +31919,71 @@ var init_ComponentLogger = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/diag/types.js
-var DiagLogLevel;
-var init_types = __esm({
-  "node_modules/@opentelemetry/api/build/esm/diag/types.js"() {
-    (function(DiagLogLevel2) {
-      DiagLogLevel2[DiagLogLevel2["NONE"] = 0] = "NONE";
-      DiagLogLevel2[DiagLogLevel2["ERROR"] = 30] = "ERROR";
-      DiagLogLevel2[DiagLogLevel2["WARN"] = 50] = "WARN";
-      DiagLogLevel2[DiagLogLevel2["INFO"] = 60] = "INFO";
-      DiagLogLevel2[DiagLogLevel2["DEBUG"] = 70] = "DEBUG";
-      DiagLogLevel2[DiagLogLevel2["VERBOSE"] = 80] = "VERBOSE";
-      DiagLogLevel2[DiagLogLevel2["ALL"] = 9999] = "ALL";
-    })(DiagLogLevel || (DiagLogLevel = {}));
-  }
-});
-
-// node_modules/@opentelemetry/api/build/esm/diag/internal/logLevelLogger.js
+// node_modules/@opentelemetry/api/dist/diag/internal/logLevelLogger.mjs
 function createLogLevelDiagLogger(maxLevel, logger5) {
-  if (maxLevel < DiagLogLevel.NONE) {
-    maxLevel = DiagLogLevel.NONE;
-  } else if (maxLevel > DiagLogLevel.ALL) {
-    maxLevel = DiagLogLevel.ALL;
-  }
+  if (maxLevel < 0) maxLevel = 0;
+  else if (maxLevel > 9999) maxLevel = 9999;
   logger5 = logger5 || {};
   function _filterFunc(funcName, theLevel) {
     const theFunc = logger5[funcName];
-    if (typeof theFunc === "function" && maxLevel >= theLevel) {
-      return theFunc.bind(logger5);
-    }
+    if (typeof theFunc === "function" && maxLevel >= theLevel) return theFunc.bind(logger5);
     return function() {
     };
   }
   return {
-    error: _filterFunc("error", DiagLogLevel.ERROR),
-    warn: _filterFunc("warn", DiagLogLevel.WARN),
-    info: _filterFunc("info", DiagLogLevel.INFO),
-    debug: _filterFunc("debug", DiagLogLevel.DEBUG),
-    verbose: _filterFunc("verbose", DiagLogLevel.VERBOSE)
+    error: _filterFunc("error", 30),
+    warn: _filterFunc("warn", 50),
+    info: _filterFunc("info", 60),
+    debug: _filterFunc("debug", 70),
+    verbose: _filterFunc("verbose", 80)
   };
 }
 var init_logLevelLogger = __esm({
-  "node_modules/@opentelemetry/api/build/esm/diag/internal/logLevelLogger.js"() {
-    init_types();
+  "node_modules/@opentelemetry/api/dist/diag/internal/logLevelLogger.mjs"() {
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/api/diag.js
+// node_modules/@opentelemetry/api/dist/api/diag.mjs
 var API_NAME, DiagAPI;
 var init_diag = __esm({
-  "node_modules/@opentelemetry/api/build/esm/api/diag.js"() {
+  "node_modules/@opentelemetry/api/dist/api/diag.mjs"() {
+    init_global_utils();
     init_ComponentLogger();
     init_logLevelLogger();
-    init_types();
-    init_global_utils();
     API_NAME = "diag";
-    DiagAPI = class _DiagAPI {
+    DiagAPI = class DiagAPI2 {
       /** Get the singleton instance of the DiagAPI API */
       static instance() {
-        if (!this._instance) {
-          this._instance = new _DiagAPI();
-        }
+        if (!this._instance) this._instance = new DiagAPI2();
         return this._instance;
       }
       /**
-       * Private internal constructor
-       * @private
-       */
+      * Private internal constructor
+      * @private
+      */
       constructor() {
         function _logProxy(funcName) {
           return function(...args) {
             const logger5 = getGlobal("diag");
-            if (!logger5)
-              return;
+            if (!logger5) return;
             return logger5[funcName](...args);
           };
         }
         const self2 = this;
-        const setLogger = (logger5, optionsOrLogLevel = { logLevel: DiagLogLevel.INFO }) => {
-          var _a3, _b, _c;
+        const setLogger = (logger5, optionsOrLogLevel = { logLevel: 60 }) => {
+          var _optionsOrLogLevel$lo;
           if (logger5 === self2) {
-            const err = new Error("Cannot use diag as the logger for itself. Please use a DiagLogger implementation like ConsoleDiagLogger or a custom implementation");
-            self2.error((_a3 = err.stack) !== null && _a3 !== void 0 ? _a3 : err.message);
+            var _err$stack;
+            const err = /* @__PURE__ */ new Error("Cannot use diag as the logger for itself. Please use a DiagLogger implementation like ConsoleDiagLogger or a custom implementation");
+            self2.error((_err$stack = err.stack) !== null && _err$stack !== void 0 ? _err$stack : err.message);
             return false;
           }
-          if (typeof optionsOrLogLevel === "number") {
-            optionsOrLogLevel = {
-              logLevel: optionsOrLogLevel
-            };
-          }
+          if (typeof optionsOrLogLevel === "number") optionsOrLogLevel = { logLevel: optionsOrLogLevel };
           const oldLogger = getGlobal("diag");
-          const newLogger = createLogLevelDiagLogger((_b = optionsOrLogLevel.logLevel) !== null && _b !== void 0 ? _b : DiagLogLevel.INFO, logger5);
+          const newLogger = createLogLevelDiagLogger((_optionsOrLogLevel$lo = optionsOrLogLevel.logLevel) !== null && _optionsOrLogLevel$lo !== void 0 ? _optionsOrLogLevel$lo : 60, logger5);
           if (oldLogger && !optionsOrLogLevel.suppressOverrideMessage) {
-            const stack = (_c = new Error().stack) !== null && _c !== void 0 ? _c : "<failed to generate stacktrace>";
+            var _Error$stack;
+            const stack = (_Error$stack = (/* @__PURE__ */ new Error()).stack) !== null && _Error$stack !== void 0 ? _Error$stack : "<failed to generate stacktrace>";
             oldLogger.warn(`Current logger will be overwritten from ${stack}`);
             newLogger.warn(`Current logger will overwrite one already registered from ${stack}`);
           }
@@ -32049,262 +32006,142 @@ var init_diag = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/baggage/internal/baggage-impl.js
+// node_modules/@opentelemetry/api/dist/baggage/internal/baggage-impl.mjs
 var BaggageImpl;
 var init_baggage_impl = __esm({
-  "node_modules/@opentelemetry/api/build/esm/baggage/internal/baggage-impl.js"() {
-    BaggageImpl = class _BaggageImpl {
+  "node_modules/@opentelemetry/api/dist/baggage/internal/baggage-impl.mjs"() {
+    BaggageImpl = class BaggageImpl2 {
       constructor(entries) {
         this._entries = entries ? new Map(entries) : /* @__PURE__ */ new Map();
       }
       getEntry(key) {
         const entry = this._entries.get(key);
-        if (!entry) {
-          return void 0;
-        }
+        if (!entry) return;
         return Object.assign({}, entry);
       }
       getAllEntries() {
         return Array.from(this._entries.entries());
       }
       setEntry(key, entry) {
-        const newBaggage = new _BaggageImpl(this._entries);
+        const newBaggage = new BaggageImpl2(this._entries);
         newBaggage._entries.set(key, entry);
         return newBaggage;
       }
       removeEntry(key) {
-        const newBaggage = new _BaggageImpl(this._entries);
+        const newBaggage = new BaggageImpl2(this._entries);
         newBaggage._entries.delete(key);
         return newBaggage;
       }
       removeEntries(...keys) {
-        const newBaggage = new _BaggageImpl(this._entries);
-        for (const key of keys) {
-          newBaggage._entries.delete(key);
-        }
+        const newBaggage = new BaggageImpl2(this._entries);
+        for (const key of keys) newBaggage._entries.delete(key);
         return newBaggage;
       }
       clear() {
-        return new _BaggageImpl();
+        return new BaggageImpl2();
       }
     };
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/baggage/utils.js
+// node_modules/@opentelemetry/api/dist/baggage/utils.mjs
 function createBaggage(entries = {}) {
   return new BaggageImpl(new Map(Object.entries(entries)));
 }
 var diag;
 var init_utils2 = __esm({
-  "node_modules/@opentelemetry/api/build/esm/baggage/utils.js"() {
+  "node_modules/@opentelemetry/api/dist/baggage/utils.mjs"() {
     init_diag();
     init_baggage_impl();
     diag = DiagAPI.instance();
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/context/context.js
+// node_modules/@opentelemetry/api/dist/context/context.mjs
 function createContextKey(description) {
   return Symbol.for(description);
 }
-var BaseContext, ROOT_CONTEXT;
+var ROOT_CONTEXT;
 var init_context = __esm({
-  "node_modules/@opentelemetry/api/build/esm/context/context.js"() {
-    BaseContext = class _BaseContext {
+  "node_modules/@opentelemetry/api/dist/context/context.mjs"() {
+    ROOT_CONTEXT = new class BaseContext {
       /**
-       * Construct a new context which inherits values from an optional parent context.
-       *
-       * @param parentContext a context from which to inherit values
-       */
+      * Construct a new context which inherits values from an optional parent context.
+      *
+      * @param parentContext a context from which to inherit values
+      */
       constructor(parentContext) {
         const self2 = this;
         self2._currentContext = parentContext ? new Map(parentContext) : /* @__PURE__ */ new Map();
         self2.getValue = (key) => self2._currentContext.get(key);
         self2.setValue = (key, value) => {
-          const context2 = new _BaseContext(self2._currentContext);
+          const context2 = new BaseContext(self2._currentContext);
           context2._currentContext.set(key, value);
           return context2;
         };
         self2.deleteValue = (key) => {
-          const context2 = new _BaseContext(self2._currentContext);
+          const context2 = new BaseContext(self2._currentContext);
           context2._currentContext.delete(key);
           return context2;
         };
       }
-    };
-    ROOT_CONTEXT = new BaseContext();
+    }();
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/propagation/TextMapPropagator.js
+// node_modules/@opentelemetry/api/dist/propagation/TextMapPropagator.mjs
 var defaultTextMapGetter, defaultTextMapSetter;
 var init_TextMapPropagator = __esm({
-  "node_modules/@opentelemetry/api/build/esm/propagation/TextMapPropagator.js"() {
+  "node_modules/@opentelemetry/api/dist/propagation/TextMapPropagator.mjs"() {
     defaultTextMapGetter = {
       get(carrier, key) {
-        if (carrier == null) {
-          return void 0;
-        }
+        if (carrier == null) return;
         return carrier[key];
       },
       keys(carrier) {
-        if (carrier == null) {
-          return [];
-        }
+        if (carrier == null) return [];
         return Object.keys(carrier);
       }
     };
-    defaultTextMapSetter = {
-      set(carrier, key, value) {
-        if (carrier == null) {
-          return;
-        }
-        carrier[key] = value;
-      }
-    };
+    defaultTextMapSetter = { set(carrier, key, value) {
+      if (carrier == null) return;
+      carrier[key] = value;
+    } };
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/context/NoopContextManager.js
-var NoopContextManager;
-var init_NoopContextManager = __esm({
-  "node_modules/@opentelemetry/api/build/esm/context/NoopContextManager.js"() {
-    init_context();
-    NoopContextManager = class {
-      active() {
-        return ROOT_CONTEXT;
-      }
-      with(_context, fn, thisArg, ...args) {
-        return fn.call(thisArg, ...args);
-      }
-      bind(_context, target2) {
-        return target2;
-      }
-      enable() {
-        return this;
-      }
-      disable() {
-        return this;
-      }
-    };
-  }
-});
-
-// node_modules/@opentelemetry/api/build/esm/api/context.js
-var API_NAME2, NOOP_CONTEXT_MANAGER, ContextAPI;
-var init_context2 = __esm({
-  "node_modules/@opentelemetry/api/build/esm/api/context.js"() {
-    init_NoopContextManager();
-    init_global_utils();
-    init_diag();
-    API_NAME2 = "context";
-    NOOP_CONTEXT_MANAGER = new NoopContextManager();
-    ContextAPI = class _ContextAPI {
-      /** Empty private constructor prevents end users from constructing a new instance of the API */
-      constructor() {
-      }
-      /** Get the singleton instance of the Context API */
-      static getInstance() {
-        if (!this._instance) {
-          this._instance = new _ContextAPI();
-        }
-        return this._instance;
-      }
-      /**
-       * Set the current context manager.
-       *
-       * @returns true if the context manager was successfully registered, else false
-       */
-      setGlobalContextManager(contextManager) {
-        return registerGlobal(API_NAME2, contextManager, DiagAPI.instance());
-      }
-      /**
-       * Get the currently active context
-       */
-      active() {
-        return this._getContextManager().active();
-      }
-      /**
-       * Execute a function with an active context
-       *
-       * @param context context to be active during function execution
-       * @param fn function to execute in a context
-       * @param thisArg optional receiver to be used for calling fn
-       * @param args optional arguments forwarded to fn
-       */
-      with(context2, fn, thisArg, ...args) {
-        return this._getContextManager().with(context2, fn, thisArg, ...args);
-      }
-      /**
-       * Bind a context to a target function or event emitter
-       *
-       * @param context context to bind to the event emitter or function. Defaults to the currently active context
-       * @param target function or event emitter to bind
-       */
-      bind(context2, target2) {
-        return this._getContextManager().bind(context2, target2);
-      }
-      _getContextManager() {
-        return getGlobal(API_NAME2) || NOOP_CONTEXT_MANAGER;
-      }
-      /** Disable and remove the global context manager */
-      disable() {
-        this._getContextManager().disable();
-        unregisterGlobal(API_NAME2, DiagAPI.instance());
-      }
-    };
-  }
-});
-
-// node_modules/@opentelemetry/api/build/esm/trace/trace_flags.js
-var TraceFlags;
-var init_trace_flags = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/trace_flags.js"() {
-    (function(TraceFlags2) {
-      TraceFlags2[TraceFlags2["NONE"] = 0] = "NONE";
-      TraceFlags2[TraceFlags2["SAMPLED"] = 1] = "SAMPLED";
-    })(TraceFlags || (TraceFlags = {}));
-  }
-});
-
-// node_modules/@opentelemetry/api/build/esm/trace/invalid-span-constants.js
+// node_modules/@opentelemetry/api/dist/trace/invalid-span-constants.mjs
 var INVALID_SPANID, INVALID_TRACEID, INVALID_SPAN_CONTEXT;
 var init_invalid_span_constants = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/invalid-span-constants.js"() {
-    init_trace_flags();
+  "node_modules/@opentelemetry/api/dist/trace/invalid-span-constants.mjs"() {
     INVALID_SPANID = "0000000000000000";
     INVALID_TRACEID = "00000000000000000000000000000000";
     INVALID_SPAN_CONTEXT = {
       traceId: INVALID_TRACEID,
       spanId: INVALID_SPANID,
-      traceFlags: TraceFlags.NONE
+      traceFlags: 0
     };
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace/NonRecordingSpan.js
+// node_modules/@opentelemetry/api/dist/trace/NonRecordingSpan.mjs
 var NonRecordingSpan;
 var init_NonRecordingSpan = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/NonRecordingSpan.js"() {
+  "node_modules/@opentelemetry/api/dist/trace/NonRecordingSpan.mjs"() {
     init_invalid_span_constants();
     NonRecordingSpan = class {
       constructor(spanContext = INVALID_SPAN_CONTEXT) {
         this._spanContext = spanContext;
       }
-      // Returns a SpanContext.
       spanContext() {
         return this._spanContext;
       }
-      // By default does nothing
       setAttribute(_key, _value) {
         return this;
       }
-      // By default does nothing
       setAttributes(_attributes) {
         return this;
       }
-      // By default does nothing
       addEvent(_name, _attributes) {
         return this;
       }
@@ -32314,73 +32151,35 @@ var init_NonRecordingSpan = __esm({
       addLinks(_links) {
         return this;
       }
-      // By default does nothing
       setStatus(_status) {
         return this;
       }
-      // By default does nothing
       updateName(_name) {
         return this;
       }
-      // By default does nothing
       end(_endTime) {
       }
-      // isRecording always returns false for NonRecordingSpan.
       isRecording() {
         return false;
       }
-      // By default does nothing
       recordException(_exception, _time) {
       }
     };
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace/context-utils.js
-function getSpan(context2) {
-  return context2.getValue(SPAN_KEY) || void 0;
-}
-function getActiveSpan() {
-  return getSpan(ContextAPI.getInstance().active());
-}
-function setSpan(context2, span) {
-  return context2.setValue(SPAN_KEY, span);
-}
-function deleteSpan(context2) {
-  return context2.deleteValue(SPAN_KEY);
-}
-function setSpanContext(context2, spanContext) {
-  return setSpan(context2, new NonRecordingSpan(spanContext));
-}
-function getSpanContext(context2) {
-  var _a3;
-  return (_a3 = getSpan(context2)) === null || _a3 === void 0 ? void 0 : _a3.spanContext();
-}
-var SPAN_KEY;
-var init_context_utils = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/context-utils.js"() {
-    init_context();
-    init_NonRecordingSpan();
-    init_context2();
-    SPAN_KEY = createContextKey("OpenTelemetry Context Key SPAN");
-  }
-});
-
-// node_modules/@opentelemetry/api/build/esm/trace/spancontext-utils.js
+// node_modules/@opentelemetry/api/dist/trace/spancontext-utils.mjs
 function isValidHex(id, length) {
-  if (typeof id !== "string" || id.length !== length)
-    return false;
+  if (typeof id !== "string" || id.length !== length) return false;
   let r = 0;
-  for (let i = 0; i < id.length; i += 4) {
-    r += (isHex[id.charCodeAt(i)] | 0) + (isHex[id.charCodeAt(i + 1)] | 0) + (isHex[id.charCodeAt(i + 2)] | 0) + (isHex[id.charCodeAt(i + 3)] | 0);
-  }
+  for (let i = 0; i < id.length; i += 4) r += (isHex[id.charCodeAt(i)] | 0) + (isHex[id.charCodeAt(i + 1)] | 0) + (isHex[id.charCodeAt(i + 2)] | 0) + (isHex[id.charCodeAt(i + 3)] | 0);
   return r === length;
 }
 function isValidTraceId(traceId) {
-  return isValidHex(traceId, 32) && traceId !== INVALID_TRACEID;
+  return isValidHex(traceId, 32) && traceId !== "00000000000000000000000000000000";
 }
 function isValidSpanId(spanId) {
-  return isValidHex(spanId, 16) && spanId !== INVALID_SPANID;
+  return isValidHex(spanId, 16) && spanId !== "0000000000000000";
 }
 function isSpanContextValid(spanContext) {
   return isValidTraceId(spanContext.traceId) && isValidSpanId(spanContext.spanId);
@@ -32390,8 +32189,7 @@ function wrapSpanContext(spanContext) {
 }
 var isHex;
 var init_spancontext_utils = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/spancontext-utils.js"() {
-    init_invalid_span_constants();
+  "node_modules/@opentelemetry/api/dist/trace/spancontext-utils.mjs"() {
     init_NonRecordingSpan();
     isHex = new Uint8Array([
       0,
@@ -32501,41 +32299,191 @@ var init_spancontext_utils = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace/NoopTracer.js
+// node_modules/@opentelemetry/api/dist/context/NoopContextManager.mjs
+var NoopContextManager;
+var init_NoopContextManager = __esm({
+  "node_modules/@opentelemetry/api/dist/context/NoopContextManager.mjs"() {
+    init_context();
+    NoopContextManager = class {
+      active() {
+        return ROOT_CONTEXT;
+      }
+      with(_context, fn, thisArg, ...args) {
+        return fn.call(thisArg, ...args);
+      }
+      bind(_context, target2) {
+        return target2;
+      }
+      enable() {
+        return this;
+      }
+      disable() {
+        return this;
+      }
+      /** @experimental This API is experimental and may change in minor releases without prior notice. */
+      attach(_context) {
+        return { dispose() {
+        } };
+      }
+    };
+  }
+});
+
+// node_modules/@opentelemetry/api/dist/api/context.mjs
+var API_NAME2, NOOP_CONTEXT_MANAGER, NOOP_TOKEN, ContextAPI;
+var init_context2 = __esm({
+  "node_modules/@opentelemetry/api/dist/api/context.mjs"() {
+    init_global_utils();
+    init_diag();
+    init_NoopContextManager();
+    API_NAME2 = "context";
+    NOOP_CONTEXT_MANAGER = new NoopContextManager();
+    NOOP_TOKEN = Object.freeze({ dispose: () => {
+    } });
+    ContextAPI = class ContextAPI2 {
+      /** Empty private constructor prevents end users from constructing a new instance of the API */
+      constructor() {
+        this._attachUnsupportedWarned = false;
+      }
+      /** Get the singleton instance of the Context API */
+      static getInstance() {
+        if (!this._instance) this._instance = new ContextAPI2();
+        return this._instance;
+      }
+      /**
+      * Set the current context manager.
+      *
+      * @returns true if the context manager was successfully registered, else false
+      */
+      setGlobalContextManager(contextManager) {
+        return registerGlobal(API_NAME2, contextManager, DiagAPI.instance());
+      }
+      /**
+      * Get the currently active context
+      */
+      active() {
+        return this._getContextManager().active();
+      }
+      /**
+      * Execute a function with an active context
+      *
+      * @param context context to be active during function execution
+      * @param fn function to execute in a context
+      * @param thisArg optional receiver to be used for calling fn
+      * @param args optional arguments forwarded to fn
+      */
+      with(context2, fn, thisArg, ...args) {
+        return this._getContextManager().with(context2, fn, thisArg, ...args);
+      }
+      /**
+      * Bind a context to a target function or event emitter
+      *
+      * @param context context to bind to the event emitter or function. Defaults to the currently active context
+      * @param target function or event emitter to bind
+      */
+      bind(context2, target2) {
+        return this._getContextManager().bind(context2, target2);
+      }
+      /**
+      * Imperatively sets `context` as active, returning a {@link ContextManagementToken} whose
+      * {@link ContextManagementToken.dispose} restores the previous context.
+      *
+      * This is a delicate, low-level API - prefer {@link with}/{@link bind}, which
+      * restore context automatically. Use `attach` only to bridge callback
+      * boundaries that `with` cannot wrap. Call `token.dispose()` when the
+      * operation is done.
+      *
+      * **Caveat for async functions:** If called inside an async function before
+      * the first `await`, the context change may leak into the caller's context
+      * and remain active there. Prefer {@link with} for async code.
+      *
+      * Support is best-effort and varies by the active ContextManager (see
+      * {@link ContextManager.attach}); if it does not implement `attach`, this logs
+      * a warning and returns a no-op token.
+      *
+      * @param context The Context to attach
+      * @returns A {@link ContextManagementToken} whose dispose() restores the previous Context
+      * @since 1.10.0
+      * @experimental This API is experimental and may change in minor releases without prior notice.
+      */
+      attach(context2) {
+        const contextManager = this._getContextManager();
+        if (contextManager.attach) return contextManager.attach(context2);
+        if (!this._attachUnsupportedWarned) {
+          this._attachUnsupportedWarned = true;
+          DiagAPI.instance().warn("The current ContextManager does not implement attach(). The context will not be attached. Use a ContextManager that supports attach() (e.g. AsyncLocalStorageContextManager) or use with()/bind() instead.");
+        }
+        return NOOP_TOKEN;
+      }
+      _getContextManager() {
+        return getGlobal(API_NAME2) || NOOP_CONTEXT_MANAGER;
+      }
+      /** Disable and remove the global context manager */
+      disable() {
+        this._getContextManager().disable();
+        unregisterGlobal(API_NAME2, DiagAPI.instance());
+      }
+    };
+  }
+});
+
+// node_modules/@opentelemetry/api/dist/trace/context-utils.mjs
+function getSpan(context2) {
+  return context2.getValue(SPAN_KEY) || void 0;
+}
+function getActiveSpan() {
+  return getSpan(ContextAPI.getInstance().active());
+}
+function setSpan(context2, span) {
+  return context2.setValue(SPAN_KEY, span);
+}
+function deleteSpan(context2) {
+  return context2.deleteValue(SPAN_KEY);
+}
+function setSpanContext(context2, spanContext) {
+  return setSpan(context2, new NonRecordingSpan(spanContext));
+}
+function getSpanContext(context2) {
+  var _getSpan;
+  return (_getSpan = getSpan(context2)) === null || _getSpan === void 0 ? void 0 : _getSpan.spanContext();
+}
+var SPAN_KEY;
+var init_context_utils = __esm({
+  "node_modules/@opentelemetry/api/dist/trace/context-utils.mjs"() {
+    init_context();
+    init_context2();
+    init_NonRecordingSpan();
+    SPAN_KEY = createContextKey("OpenTelemetry Context Key SPAN");
+  }
+});
+
+// node_modules/@opentelemetry/api/dist/trace/NoopTracer.mjs
 function isSpanContext(spanContext) {
   return spanContext !== null && typeof spanContext === "object" && "spanId" in spanContext && typeof spanContext["spanId"] === "string" && "traceId" in spanContext && typeof spanContext["traceId"] === "string" && "traceFlags" in spanContext && typeof spanContext["traceFlags"] === "number";
 }
 var contextApi, NoopTracer;
 var init_NoopTracer = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/NoopTracer.js"() {
+  "node_modules/@opentelemetry/api/dist/trace/NoopTracer.mjs"() {
     init_context2();
-    init_context_utils();
     init_NonRecordingSpan();
+    init_context_utils();
     init_spancontext_utils();
     contextApi = ContextAPI.getInstance();
     NoopTracer = class {
-      // startSpan starts a noop span.
       startSpan(name, options, context2 = contextApi.active()) {
-        const root = Boolean(options === null || options === void 0 ? void 0 : options.root);
-        if (root) {
-          return new NonRecordingSpan();
-        }
+        if (Boolean(options === null || options === void 0 ? void 0 : options.root)) return new NonRecordingSpan();
         const parentFromContext = context2 && getSpanContext(context2);
-        if (isSpanContext(parentFromContext) && isSpanContextValid(parentFromContext)) {
-          return new NonRecordingSpan(parentFromContext);
-        } else {
-          return new NonRecordingSpan();
-        }
+        if (isSpanContext(parentFromContext) && isSpanContextValid(parentFromContext)) return new NonRecordingSpan(parentFromContext);
+        else return new NonRecordingSpan();
       }
       startActiveSpan(name, arg2, arg3, arg4) {
+        var _ctx;
         let opts;
         let ctx;
         let fn;
-        if (arguments.length < 2) {
-          return;
-        } else if (arguments.length === 2) {
-          fn = arg2;
-        } else if (arguments.length === 3) {
+        if (arguments.length < 2) return;
+        else if (arguments.length === 2) fn = arg2;
+        else if (arguments.length === 3) {
           opts = arg2;
           fn = arg3;
         } else {
@@ -32543,7 +32491,7 @@ var init_NoopTracer = __esm({
           ctx = arg3;
           fn = arg4;
         }
-        const parentContext = ctx !== null && ctx !== void 0 ? ctx : contextApi.active();
+        const parentContext = (_ctx = ctx) !== null && _ctx !== void 0 ? _ctx : contextApi.active();
         const span = this.startSpan(name, opts, parentContext);
         const contextWithSpanSet = setSpan(parentContext, span);
         return contextApi.with(contextWithSpanSet, fn, void 0, span);
@@ -32552,10 +32500,10 @@ var init_NoopTracer = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace/ProxyTracer.js
+// node_modules/@opentelemetry/api/dist/trace/ProxyTracer.mjs
 var NOOP_TRACER, ProxyTracer;
 var init_ProxyTracer = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/ProxyTracer.js"() {
+  "node_modules/@opentelemetry/api/dist/trace/ProxyTracer.mjs"() {
     init_NoopTracer();
     NOOP_TRACER = new NoopTracer();
     ProxyTracer = class {
@@ -32573,17 +32521,13 @@ var init_ProxyTracer = __esm({
         return Reflect.apply(tracer.startActiveSpan, tracer, arguments);
       }
       /**
-       * Try to get a tracer from the proxy tracer provider.
-       * If the proxy tracer provider has no delegate, return a noop tracer.
-       */
+      * Try to get a tracer from the proxy tracer provider.
+      * If the proxy tracer provider has no delegate, return a noop tracer.
+      */
       _getTracer() {
-        if (this._delegate) {
-          return this._delegate;
-        }
+        if (this._delegate) return this._delegate;
         const tracer = this._provider.getDelegateTracer(this.name, this.version, this.options);
-        if (!tracer) {
-          return NOOP_TRACER;
-        }
+        if (!tracer) return NOOP_TRACER;
         this._delegate = tracer;
         return this._delegate;
       }
@@ -32591,91 +32535,48 @@ var init_ProxyTracer = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace/NoopTracerProvider.js
-var NoopTracerProvider;
-var init_NoopTracerProvider = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/NoopTracerProvider.js"() {
-    init_NoopTracer();
-    NoopTracerProvider = class {
-      getTracer(_name, _version, _options) {
-        return new NoopTracer();
-      }
-    };
-  }
-});
-
-// node_modules/@opentelemetry/api/build/esm/trace/ProxyTracerProvider.js
-var NOOP_TRACER_PROVIDER, ProxyTracerProvider;
-var init_ProxyTracerProvider = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/ProxyTracerProvider.js"() {
-    init_ProxyTracer();
-    init_NoopTracerProvider();
-    NOOP_TRACER_PROVIDER = new NoopTracerProvider();
-    ProxyTracerProvider = class {
-      /**
-       * Get a {@link ProxyTracer}
-       */
-      getTracer(name, version2, options) {
-        var _a3;
-        return (_a3 = this.getDelegateTracer(name, version2, options)) !== null && _a3 !== void 0 ? _a3 : new ProxyTracer(this, name, version2, options);
-      }
-      getDelegate() {
-        var _a3;
-        return (_a3 = this._delegate) !== null && _a3 !== void 0 ? _a3 : NOOP_TRACER_PROVIDER;
-      }
-      /**
-       * Set the delegate tracer provider
-       */
-      setDelegate(delegate) {
-        this._delegate = delegate;
-      }
-      getDelegateTracer(name, version2, options) {
-        var _a3;
-        return (_a3 = this._delegate) === null || _a3 === void 0 ? void 0 : _a3.getTracer(name, version2, options);
-      }
-    };
-  }
-});
-
-// node_modules/@opentelemetry/api/build/esm/trace/internal/tracestate-validators.js
+// node_modules/@opentelemetry/api/dist/trace/internal/tracestate-validators.mjs
 function validateKey(key) {
   return VALID_KEY_REGEX.test(key);
 }
 function validateValue(value) {
   return VALID_VALUE_BASE_REGEX.test(value) && !INVALID_VALUE_COMMA_EQUAL_REGEX.test(value);
 }
-var VALID_KEY_CHAR_RANGE, VALID_KEY, VALID_VENDOR_KEY, VALID_KEY_REGEX, VALID_VALUE_BASE_REGEX, INVALID_VALUE_COMMA_EQUAL_REGEX;
+var VALID_KEY_CHAR_RANGE, VALID_KEY_REGEX, VALID_VALUE_BASE_REGEX, INVALID_VALUE_COMMA_EQUAL_REGEX;
 var init_tracestate_validators = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/internal/tracestate-validators.js"() {
+  "node_modules/@opentelemetry/api/dist/trace/internal/tracestate-validators.mjs"() {
     VALID_KEY_CHAR_RANGE = "[_0-9a-z-*/]";
-    VALID_KEY = `[a-z]${VALID_KEY_CHAR_RANGE}{0,255}`;
-    VALID_VENDOR_KEY = `[a-z0-9]${VALID_KEY_CHAR_RANGE}{0,240}@[a-z]${VALID_KEY_CHAR_RANGE}{0,13}`;
-    VALID_KEY_REGEX = new RegExp(`^(?:${VALID_KEY}|${VALID_VENDOR_KEY})$`);
+    VALID_KEY_REGEX = new RegExp(`^(?:${`[a-z]${VALID_KEY_CHAR_RANGE}{0,255}`}|${`[a-z0-9]${VALID_KEY_CHAR_RANGE}{0,240}@[a-z]${VALID_KEY_CHAR_RANGE}{0,13}`})$`);
     VALID_VALUE_BASE_REGEX = /^[ -~]{0,255}[!-~]$/;
     INVALID_VALUE_COMMA_EQUAL_REGEX = /,|=/;
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace/internal/tracestate-impl.js
+// node_modules/@opentelemetry/api/dist/trace/internal/tracestate-impl.mjs
 var MAX_TRACE_STATE_ITEMS, MAX_TRACE_STATE_LEN, LIST_MEMBERS_SEPARATOR, LIST_MEMBER_KEY_VALUE_SPLITTER, TraceStateImpl;
 var init_tracestate_impl = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/internal/tracestate-impl.js"() {
+  "node_modules/@opentelemetry/api/dist/trace/internal/tracestate-impl.mjs"() {
     init_tracestate_validators();
     MAX_TRACE_STATE_ITEMS = 32;
     MAX_TRACE_STATE_LEN = 512;
     LIST_MEMBERS_SEPARATOR = ",";
     LIST_MEMBER_KEY_VALUE_SPLITTER = "=";
-    TraceStateImpl = class _TraceStateImpl {
+    TraceStateImpl = class TraceStateImpl2 {
       constructor(rawTraceState) {
         this._internalState = /* @__PURE__ */ new Map();
-        if (rawTraceState)
-          this._parse(rawTraceState);
+        if (rawTraceState) this._parse(rawTraceState);
       }
       set(key, value) {
-        const traceState = this._clone();
-        if (traceState._internalState.has(key)) {
-          traceState._internalState.delete(key);
+        const currValue = this._internalState.get(key);
+        let newLength = this.serialize().length;
+        if (typeof currValue === "string") newLength += value.length - currValue.length;
+        else {
+          if (this._internalState.size >= MAX_TRACE_STATE_ITEMS) return this;
+          newLength += key.length + value.length + (this._internalState.size > 0 ? 2 : 1);
         }
+        if (newLength > MAX_TRACE_STATE_LEN) return this;
+        const traceState = this._clone();
+        if (traceState._internalState.has(key)) traceState._internalState.delete(key);
         traceState._internalState.set(key, value);
         return traceState;
       }
@@ -32694,31 +32595,24 @@ var init_tracestate_impl = __esm({
         }, []).join(LIST_MEMBERS_SEPARATOR);
       }
       _parse(rawTraceState) {
-        if (rawTraceState.length > MAX_TRACE_STATE_LEN)
-          return;
+        if (rawTraceState.length > MAX_TRACE_STATE_LEN) return;
         this._internalState = rawTraceState.split(LIST_MEMBERS_SEPARATOR).reduceRight((agg, part) => {
           const listMember = part.trim();
           const i = listMember.indexOf(LIST_MEMBER_KEY_VALUE_SPLITTER);
           if (i !== -1) {
             const key = listMember.slice(0, i);
             const value = listMember.slice(i + 1, part.length);
-            if (validateKey(key) && validateValue(value)) {
-              agg.set(key, value);
-            } else {
-            }
+            if (validateKey(key) && validateValue(value)) agg.set(key, value);
           }
           return agg;
         }, /* @__PURE__ */ new Map());
-        if (this._internalState.size > MAX_TRACE_STATE_ITEMS) {
-          this._internalState = new Map(Array.from(this._internalState.entries()).reverse().slice(0, MAX_TRACE_STATE_ITEMS));
-        }
+        if (this._internalState.size > MAX_TRACE_STATE_ITEMS) this._internalState = new Map(Array.from(this._internalState.entries()).reverse().slice(0, MAX_TRACE_STATE_ITEMS));
       }
-      // @ts-expect-error TS6133 Accessed in tests only.
       _keys() {
         return Array.from(this._internalState.keys()).reverse();
       }
       _clone() {
-        const traceState = new _TraceStateImpl();
+        const traceState = new TraceStateImpl2();
         traceState._internalState = new Map(this._internalState);
         return traceState;
       }
@@ -32726,29 +32620,75 @@ var init_tracestate_impl = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace/internal/utils.js
+// node_modules/@opentelemetry/api/dist/trace/internal/utils.mjs
 function createTraceState(rawTraceState) {
   return new TraceStateImpl(rawTraceState);
 }
 var init_utils3 = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace/internal/utils.js"() {
+  "node_modules/@opentelemetry/api/dist/trace/internal/utils.mjs"() {
     init_tracestate_impl();
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/context-api.js
+// node_modules/@opentelemetry/api/dist/trace/NoopTracerProvider.mjs
+var NoopTracerProvider;
+var init_NoopTracerProvider = __esm({
+  "node_modules/@opentelemetry/api/dist/trace/NoopTracerProvider.mjs"() {
+    init_NoopTracer();
+    NoopTracerProvider = class {
+      getTracer(_name, _version, _options) {
+        return new NoopTracer();
+      }
+    };
+  }
+});
+
+// node_modules/@opentelemetry/api/dist/trace/ProxyTracerProvider.mjs
+var NOOP_TRACER_PROVIDER, ProxyTracerProvider;
+var init_ProxyTracerProvider = __esm({
+  "node_modules/@opentelemetry/api/dist/trace/ProxyTracerProvider.mjs"() {
+    init_ProxyTracer();
+    init_NoopTracerProvider();
+    NOOP_TRACER_PROVIDER = new NoopTracerProvider();
+    ProxyTracerProvider = class {
+      /**
+      * Get a {@link ProxyTracer}
+      */
+      getTracer(name, version2, options) {
+        var _this$getDelegateTrac;
+        return (_this$getDelegateTrac = this.getDelegateTracer(name, version2, options)) !== null && _this$getDelegateTrac !== void 0 ? _this$getDelegateTrac : new ProxyTracer(this, name, version2, options);
+      }
+      getDelegate() {
+        var _this$_delegate;
+        return (_this$_delegate = this._delegate) !== null && _this$_delegate !== void 0 ? _this$_delegate : NOOP_TRACER_PROVIDER;
+      }
+      /**
+      * Set the delegate tracer provider
+      */
+      setDelegate(delegate) {
+        this._delegate = delegate;
+      }
+      getDelegateTracer(name, version2, options) {
+        var _this$_delegate2;
+        return (_this$_delegate2 = this._delegate) === null || _this$_delegate2 === void 0 ? void 0 : _this$_delegate2.getTracer(name, version2, options);
+      }
+    };
+  }
+});
+
+// node_modules/@opentelemetry/api/dist/context-api.mjs
 var context;
 var init_context_api = __esm({
-  "node_modules/@opentelemetry/api/build/esm/context-api.js"() {
+  "node_modules/@opentelemetry/api/dist/context-api.mjs"() {
     init_context2();
     context = ContextAPI.getInstance();
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/propagation/NoopTextMapPropagator.js
+// node_modules/@opentelemetry/api/dist/propagation/NoopTextMapPropagator.mjs
 var NoopTextMapPropagator;
 var init_NoopTextMapPropagator = __esm({
-  "node_modules/@opentelemetry/api/build/esm/propagation/NoopTextMapPropagator.js"() {
+  "node_modules/@opentelemetry/api/dist/propagation/NoopTextMapPropagator.mjs"() {
     NoopTextMapPropagator = class {
       /** Noop inject function does nothing */
       inject(_context, _carrier) {
@@ -32764,7 +32704,7 @@ var init_NoopTextMapPropagator = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/baggage/context-helpers.js
+// node_modules/@opentelemetry/api/dist/baggage/context-helpers.mjs
 function getBaggage(context2) {
   return context2.getValue(BAGGAGE_KEY) || void 0;
 }
@@ -32779,26 +32719,26 @@ function deleteBaggage(context2) {
 }
 var BAGGAGE_KEY;
 var init_context_helpers = __esm({
-  "node_modules/@opentelemetry/api/build/esm/baggage/context-helpers.js"() {
-    init_context2();
+  "node_modules/@opentelemetry/api/dist/baggage/context-helpers.mjs"() {
     init_context();
+    init_context2();
     BAGGAGE_KEY = createContextKey("OpenTelemetry Baggage Key");
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/api/propagation.js
+// node_modules/@opentelemetry/api/dist/api/propagation.mjs
 var API_NAME3, NOOP_TEXT_MAP_PROPAGATOR, PropagationAPI;
 var init_propagation = __esm({
-  "node_modules/@opentelemetry/api/build/esm/api/propagation.js"() {
+  "node_modules/@opentelemetry/api/dist/api/propagation.mjs"() {
     init_global_utils();
-    init_NoopTextMapPropagator();
-    init_TextMapPropagator();
-    init_context_helpers();
-    init_utils2();
     init_diag();
+    init_utils2();
+    init_TextMapPropagator();
+    init_NoopTextMapPropagator();
+    init_context_helpers();
     API_NAME3 = "propagation";
     NOOP_TEXT_MAP_PROPAGATOR = new NoopTextMapPropagator();
-    PropagationAPI = class _PropagationAPI {
+    PropagationAPI = class PropagationAPI2 {
       /** Empty private constructor prevents end users from constructing a new instance of the API */
       constructor() {
         this.createBaggage = createBaggage;
@@ -32809,42 +32749,40 @@ var init_propagation = __esm({
       }
       /** Get the singleton instance of the Propagator API */
       static getInstance() {
-        if (!this._instance) {
-          this._instance = new _PropagationAPI();
-        }
+        if (!this._instance) this._instance = new PropagationAPI2();
         return this._instance;
       }
       /**
-       * Set the current propagator.
-       *
-       * @returns true if the propagator was successfully registered, else false
-       */
+      * Set the current propagator.
+      *
+      * @returns true if the propagator was successfully registered, else false
+      */
       setGlobalPropagator(propagator) {
         return registerGlobal(API_NAME3, propagator, DiagAPI.instance());
       }
       /**
-       * Inject context into a carrier to be propagated inter-process
-       *
-       * @param context Context carrying tracing data to inject
-       * @param carrier carrier to inject context into
-       * @param setter Function used to set values on the carrier
-       */
+      * Inject context into a carrier to be propagated inter-process
+      *
+      * @param context Context carrying tracing data to inject
+      * @param carrier carrier to inject context into
+      * @param setter Function used to set values on the carrier
+      */
       inject(context2, carrier, setter = defaultTextMapSetter) {
         return this._getGlobalPropagator().inject(context2, carrier, setter);
       }
       /**
-       * Extract context from a carrier
-       *
-       * @param context Context which the newly created context will inherit from
-       * @param carrier Carrier to extract context from
-       * @param getter Function used to extract keys from a carrier
-       */
+      * Extract context from a carrier
+      *
+      * @param context Context which the newly created context will inherit from
+      * @param carrier Carrier to extract context from
+      * @param getter Function used to extract keys from a carrier
+      */
       extract(context2, carrier, getter = defaultTextMapGetter) {
         return this._getGlobalPropagator().extract(context2, carrier, getter);
       }
       /**
-       * Return a list of all fields which may be used by the propagator.
-       */
+      * Return a list of all fields which may be used by the propagator.
+      */
       fields() {
         return this._getGlobalPropagator().fields();
       }
@@ -32859,26 +32797,26 @@ var init_propagation = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/propagation-api.js
+// node_modules/@opentelemetry/api/dist/propagation-api.mjs
 var propagation;
 var init_propagation_api = __esm({
-  "node_modules/@opentelemetry/api/build/esm/propagation-api.js"() {
+  "node_modules/@opentelemetry/api/dist/propagation-api.mjs"() {
     init_propagation();
     propagation = PropagationAPI.getInstance();
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/api/trace.js
+// node_modules/@opentelemetry/api/dist/api/trace.mjs
 var API_NAME4, TraceAPI;
 var init_trace = __esm({
-  "node_modules/@opentelemetry/api/build/esm/api/trace.js"() {
+  "node_modules/@opentelemetry/api/dist/api/trace.mjs"() {
     init_global_utils();
-    init_ProxyTracerProvider();
-    init_spancontext_utils();
-    init_context_utils();
     init_diag();
+    init_context_utils();
+    init_spancontext_utils();
+    init_ProxyTracerProvider();
     API_NAME4 = "trace";
-    TraceAPI = class _TraceAPI {
+    TraceAPI = class TraceAPI2 {
       /** Empty private constructor prevents end users from constructing a new instance of the API */
       constructor() {
         this._proxyTracerProvider = new ProxyTracerProvider();
@@ -32893,32 +32831,28 @@ var init_trace = __esm({
       }
       /** Get the singleton instance of the Trace API */
       static getInstance() {
-        if (!this._instance) {
-          this._instance = new _TraceAPI();
-        }
+        if (!this._instance) this._instance = new TraceAPI2();
         return this._instance;
       }
       /**
-       * Set the current global tracer.
-       *
-       * @returns true if the tracer provider was successfully registered, else false
-       */
+      * Set the current global tracer.
+      *
+      * @returns true if the tracer provider was successfully registered, else false
+      */
       setGlobalTracerProvider(provider) {
         const success2 = registerGlobal(API_NAME4, this._proxyTracerProvider, DiagAPI.instance());
-        if (success2) {
-          this._proxyTracerProvider.setDelegate(provider);
-        }
+        if (success2) this._proxyTracerProvider.setDelegate(provider);
         return success2;
       }
       /**
-       * Returns the global tracer provider.
-       */
+      * Returns the global tracer provider.
+      */
       getTracerProvider() {
         return getGlobal(API_NAME4) || this._proxyTracerProvider;
       }
       /**
-       * Returns a tracer from the global tracer provider.
-       */
+      * Returns a tracer from the global tracer provider.
+      */
       getTracer(name, version2) {
         return this.getTracerProvider().getTracer(name, version2);
       }
@@ -32931,20 +32865,20 @@ var init_trace = __esm({
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/trace-api.js
+// node_modules/@opentelemetry/api/dist/trace-api.mjs
 var trace;
 var init_trace_api = __esm({
-  "node_modules/@opentelemetry/api/build/esm/trace-api.js"() {
+  "node_modules/@opentelemetry/api/dist/trace-api.mjs"() {
     init_trace();
     trace = TraceAPI.getInstance();
   }
 });
 
-// node_modules/@opentelemetry/api/build/esm/index.js
-var init_esm = __esm({
-  "node_modules/@opentelemetry/api/build/esm/index.js"() {
-    init_utils3();
+// node_modules/@opentelemetry/api/dist/index.mjs
+var init_dist3 = __esm({
+  "node_modules/@opentelemetry/api/dist/index.mjs"() {
     init_spancontext_utils();
+    init_utils3();
     init_context_api();
     init_propagation_api();
     init_trace_api();
@@ -35993,7 +35927,7 @@ var init_chunk_LEXBAJ2Q = __esm({
     init_dist();
     init_dist();
     init_v4();
-    init_esm();
+    init_dist3();
     import_invariant3 = __toESM(require_invariant(), 1);
     init_v4();
     import_invariant4 = __toESM(require_invariant(), 1);

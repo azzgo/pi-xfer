@@ -86,7 +86,12 @@ function ensureRivetkitDeps() {
     .match(/RIVETKIT_VERSION = "([^"]+)"/)?.[1];
   if (!versionPin) throw new Error('cannot read RIVETKIT_VERSION from mesh-native.ts');
 
-  const pins = { rivetkit: versionPin, zod: '4.6.5', 'p-retry': '6.2.1', 'cbor-x': '1.6.7' };
+  // Every rivetkit transitive that reaches the bundle must be pinned: a
+  // floating one (^1.1.0 on @opentelemetry/api) resolves to a newer version at
+  // build time than the one the committed bundle was made with, and the
+  // freshness guard then fails on CI with a "stale" claim no local rebuild
+  // reproduces. Pin what the bundle actually contains.
+  const pins = { rivetkit: versionPin, zod: '4.6.5', 'p-retry': '6.2.1', 'cbor-x': '1.6.7', '@opentelemetry/api': '1.10.0' };
   const pkgVersion = (name) => {
     const pkg = join(here, `node_modules/${name}/package.json`);
     return existsSync(pkg) ? JSON.parse(readFileSync(pkg, 'utf8')).version : null;
