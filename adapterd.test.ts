@@ -412,7 +412,7 @@ describe("xfer-adapterd CLI smoke", () => {
     const dir = freshDir();
     const child = spawn(
       process.execPath,
-      [bundle, "mesh", "down", "--name", "doubao", "--dir", dir, "--mesh-config", path.join(dir, "missing.json")],
+      [bundle, "mesh", "down", "--name", "agent-remote", "--dir", dir, "--mesh-config", path.join(dir, "missing.json")],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     let stderr = "";

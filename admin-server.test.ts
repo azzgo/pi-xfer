@@ -361,7 +361,7 @@ describe("admin mesh control — presence grouping", () => {
     fs.writeFileSync(path.join(h.xferDir, "laptop.json"), JSON.stringify({ pid: process.pid, sessionName: "s3" }), "utf-8");
     fs.writeFileSync(path.join(h.xferDir, "laptop.sock"), "", "utf-8");
     const stub = stubEngine([
-      { name: "doubao", actorId: "a1", status: "Idle", pool: "host-b" },
+      { name: "tablet", actorId: "a1", status: "Idle", pool: "host-b" },
       { name: "phone", actorId: "a2", status: "Running", pool: "host-c" },
       { name: "quiet", actorId: "a3", status: "Sleeping" },
     ]);
