@@ -50340,7 +50340,7 @@ var USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
   xfer-adapterd mesh down [--name N] [--dir D] [--mesh-config P]
   xfer-adapterd list [--dir D] [--json]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
-  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
+  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--mesh]`;
 async function main(argv = process.argv.slice(2)) {
   const { positionals, flags } = parseArgs(argv);
   const [command, sub] = positionals;
@@ -50667,7 +50667,7 @@ function runInstall(flags, install) {
   }
   const name = str(flags.name) ?? defaultAdapterName();
   const bundle = process.argv[1] ? path13.resolve(process.argv[1]) : "xfer-adapterd.cjs";
-  const meshFlag = flags["no-mesh"] === true ? "" : " --mesh";
+  const meshFlag = flags.mesh === true ? " --mesh" : "";
   const launchCommand = `node "${bundle}" up --name "${name}"${meshFlag}`;
   try {
     const result = install({ host, into, name, launchCommand });

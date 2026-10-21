@@ -34,7 +34,9 @@ The installer writes:
 ## 3. Launch
 
 Read `.xfer-agent.json` and run its `launchCommand` in the background. The
-daemon owns this agent's socket and inbox at `~/.pi/xfer/`.
+daemon owns this agent's socket and inbox at `~/.pi/xfer/`. The generated
+command is **local-only** unless the install was asked for `--mesh`; joining the
+mesh is an explicit opt-in, because it registers this host on a shared engine.
 
 ## 4. Verify
 

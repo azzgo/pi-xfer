@@ -84,14 +84,14 @@ describe("xfer-agent installer", () => {
     const config = JSON.parse(fs.readFileSync(path.join(into, ".xfer-agent.json"), "utf-8"));
     assert.equal(config.host, "generic");
     assert.equal(config.name, "agent-cli");
-    assert.match(config.launchCommand, /xfer-adapterd\.cjs" up --name "agent-cli" --mesh$/);
+    assert.match(config.launchCommand, /xfer-adapterd\.cjs" up --name "agent-cli"$/);
     assert.ok(fs.existsSync(path.join(into, "SKILL.md")));
     assert.ok(fs.readFileSync(path.join(into, "SKILL.md"), "utf-8").includes(config.launchCommand));
   });
 });
 
 describe("adapterd install CLI: mesh flag", () => {
-  it("includes --mesh by default and honours --no-mesh", async () => {
+  it("is local-only by default and joins the mesh only when asked", async () => {
     const bundle = path.join(import.meta.dirname, "xfer-adapterd.cjs");
     const run = async (...args: string[]): Promise<{ code: number | null; stdout: string }> => {
       const into = freshDir();
@@ -103,12 +103,14 @@ describe("adapterd install CLI: mesh flag", () => {
       const config = JSON.parse(fs.readFileSync(path.join(into, ".xfer-agent.json"), "utf-8")) as { launchCommand: string };
       return { code: code ?? 1, stdout: config.launchCommand };
     };
-    const withMesh = await run();
-    assert.equal(withMesh.code, 0);
-    assert.match(withMesh.stdout, / up --name "agent-cli" --mesh$/);
-    const withoutMesh = await run("--no-mesh");
+    // The default is local-only: most hosts never need to be reachable
+    // across machines, and joining the mesh registers them on a shared engine.
+    const withoutMesh = await run();
     assert.equal(withoutMesh.code, 0);
     assert.match(withoutMesh.stdout, / up --name "agent-cli"$/);
     assert.doesNotMatch(withoutMesh.stdout, /--mesh/);
+    const withMesh = await run("--mesh");
+    assert.equal(withMesh.code, 0);
+    assert.match(withMesh.stdout, / up --name "agent-cli" --mesh$/);
   });
 });

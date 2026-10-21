@@ -94,7 +94,7 @@ const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
   xfer-adapterd mesh down [--name N] [--dir D] [--mesh-config P]
   xfer-adapterd list [--dir D] [--json]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
-  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
+  xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--mesh]`;
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { positionals, flags } = parseArgs(argv);
@@ -514,9 +514,11 @@ function runInstall(flags: Flags, install: typeof import("./install.ts").install
   }
   const name = str(flags.name) ?? defaultAdapterName();
   const bundle = process.argv[1] ? path.resolve(process.argv[1]) : "xfer-adapterd.cjs";
-  // Install exists to onboard non-pi hosts onto the network, so the generated
-  // command joins the mesh by default; --no-mesh is the explicit local-only opt-out.
-  const meshFlag = flags["no-mesh"] === true ? "" : " --mesh";
+  // The mesh is opt-in, and the opt-in is explicit. A host that only needs to
+  // talk to peers on this machine gets a local socket and nothing else: joining
+  // the mesh registers the host on a shared engine, and most hosts never need
+  // to be reachable across machines. `--mesh` is the way to ask for that.
+  const meshFlag = flags.mesh === true ? " --mesh" : "";
   const launchCommand = `node "${bundle}" up --name "${name}"${meshFlag}`;
   try {
     const result = install({ host, into, name, launchCommand });

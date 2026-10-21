@@ -89,10 +89,10 @@ scripts/xfer inbox take --name <my-node-name>   # consume — read the docs
 Sending needs nothing resident. **Receiving needs a daemon that outlives any one agent session** — start it once under launchd or tmux and leave it:
 
 ```sh
-scripts/xfer up --name <my-node-name> --mesh --on-handoff ~/xfer/wake.sh
+scripts/xfer up --name <my-node-name> --on-handoff ~/xfer/wake.sh
 ```
 
-- `--mesh` is required to join the mesh; **without it `up` only opens a local socket**. Success ends in `[mesh]` — no `[mesh]` means the mesh half failed.
+- **Local-only by default.** `up` opens a Unix socket on this machine and nothing else; `--mesh` is the explicit opt-in for being reachable across machines. Success with `--mesh` ends in `[mesh]` — no `[mesh]` means the mesh half failed.
 - `--once` means **exit after the first handoff**, not "start and exit". Do not use it as a startup probe — with no traffic it hangs forever.
 - `--check` starts the daemon, prints what came up, and exits — the **one-shot probe**. Use it when you want to know "would this work?" without leaving a process behind.
 - It must be supervised (`KeepAlive`, or `while true; do …; sleep 5; done`). **5s restart backoff** covers the engine's heartbeat window for same-name takeover; a status-aware `up()` adopts its own crashed/sleeping actor rather than refusing.

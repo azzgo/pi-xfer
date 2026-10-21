@@ -37,7 +37,9 @@ xfer-adapterd install --host generic --into /path/to/your-bot --name grok
 ```
 
 This copies the generic agent-host skill (SKILL.md + helper scripts) into the
-bot's directory so the bot knows how to send and take handoffs.
+bot's directory so the bot knows how to send and take handoffs. The generated
+launch command is **local-only** — a Unix socket on this machine. Add `--mesh` to
+the install if the bot also needs to be reachable across machines.
 
 ## 2. Configure the mesh (only if the bot joins the cluster)
 

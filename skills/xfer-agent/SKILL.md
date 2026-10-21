@@ -14,9 +14,10 @@ flags yourself):
 ```
 
 Start it in the background at the beginning of a session. It owns the local
-socket and the inbox. The command joins the mesh (`--mesh`) by default —
-without it the daemon only has a local Unix socket and cannot reach mesh
-peers; only drop `--mesh` when mesh is intentionally not configured.
+socket and the inbox. By default it is **local-only** — a Unix socket on this
+machine, and nothing else. Joining the mesh is opt-in, because it registers
+this host on a shared engine and most hosts never need to be reachable across
+machines.
 
 **Two ways to start it, and the difference matters.** `up` alone is a
 **resident daemon**: it never returns. `--check` starts it, prints what came
@@ -115,20 +116,24 @@ xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> --f
 This needs `~/.pi/xfer/mesh.config.json` (or `--engine/--namespace/--token`).
 Without it the command fails loudly — do not try to guess an endpoint.
 
+**Sending to a mesh node needs no daemon at all** — `mesh send` enqueues with a
+throwaway client. Joining the mesh (the daemon's `--mesh`) is only about being
+*reachable* from other machines.
+
 ## Leaving the mesh
 
 A mesh actor outlives the daemon that made it. If your daemon dies, the engine
 still lists your name, and the next `up` is refused with *"already Running
 elsewhere"* — a failure that reads like another machine stole the name. Destroy
 the actor to release it:
-
 ```sh
 xfer-adapterd mesh down --name {{NAME}}
 ```
 
 This only removes the **mesh** half: the local socket and the inbox are
 untouched, so local peers keep working. Run it when you are done with the mesh
-or when a stale actor is blocking your name.
+or when a stale actor is blocking your name. A host that never joined the mesh
+has nothing to destroy — the command says so and stops.
 
 ## Rename this agent
 
