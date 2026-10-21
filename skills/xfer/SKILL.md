@@ -115,7 +115,7 @@ This only removes the **mesh** half: the local socket and the inbox are untouche
 - **Redact secrets** from handoff documents — they land as files on another machine.
 - A mesh node whose actor sits in a `pool` with no runner-config **looks online but receives nothing**. If a node in `peers` never picks anything up, suspect the pool, not the message.
 - Handoffs are point-to-point by name. There is no broadcast.
-- **Give every command a timeout.** The shell tool has no default deadline, so a command that never exits blocks the turn indefinitely. Pass `timeout: 1800` (30 minutes) on anything long, `timeout: 60` on a quick probe. This is a backstop, not a plan: a command that only exits on a timeout is a bug in the command.
+- **Give a shell command a `timeout`.** The bash tool has no default deadline, so a command that never exits blocks the turn indefinitely. Pass `timeout: 1800` (30 minutes) on anything long, `timeout: 60` on a quick probe. This is a backstop, not a plan: a command that only exits on a timeout is a bug in the command. (Only bash has this parameter — the file tools finish or fail on their own.)
 - **Never run a resident daemon in the foreground of a tool call.** `up` without `--check` never returns. Use `--check` to probe, and leave the real daemon to launchd or tmux.
 
 ## Facts worth keeping straight

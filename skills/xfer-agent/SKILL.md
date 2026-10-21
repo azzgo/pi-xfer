@@ -28,8 +28,8 @@ xfer-adapterd up --name {{NAME}} --check   # probe: starts, reports, exits
 ```
 
 Never run the resident form in the foreground of a command that is supposed
-to finish: it blocks forever, and with no timeout on the command that block
-has no end. Background it, or supervise it.
+to finish: it blocks forever, and a shell with no timeout on the command has
+no end. Background it, or supervise it.
 
 ## Read your inbox
 
