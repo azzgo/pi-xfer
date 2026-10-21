@@ -21,8 +21,26 @@ const DESCRIBE_TIMEOUT_MS = 5_000;
 /** Action name on the xfer-instance actor; kept here so callers share the wire name. */
 export const GET_DESCRIPTION_ACTION = "getDescription";
 
-/** Returns the stored description, or undefined when it cannot be read. */
+/**
+ * Returns the stored description, or undefined when it cannot be read.
+ *
+ * One describer per config path per process, memoised here rather than by the
+ * caller: the broker built a fresh one per `targets.list` call, so a mesh that
+ * cannot be reached logged the same "descriptions unavailable" line on every
+ * request — 12 MB of identical lines in `broker.log`. The connection is the
+ * expensive part, so one per config path is both cheaper and quieter.
+ */
+const describers = new Map<string, TargetDescriber>();
+
 export function createMeshDescriber(configPath: string): TargetDescriber {
+  const cached = describers.get(configPath);
+  if (cached) return cached;
+  const describer = buildDescriber(configPath);
+  describers.set(configPath, describer);
+  return describer;
+}
+
+function buildDescriber(configPath: string): TargetDescriber {
   let pending: Promise<MeshClient | null> | null = null;
   const client = (): Promise<MeshClient | null> => (pending ??= connect(configPath));
 

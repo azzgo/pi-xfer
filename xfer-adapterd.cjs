@@ -48966,6 +48966,7 @@ __export(mesh_engine_exports, {
   createRivetEngine: () => createRivetEngine,
   deriveActorStatus: () => deriveActorStatus,
   deriveMeshNodeState: () => deriveMeshNodeState,
+  destroyMeshNode: () => destroyMeshNode,
   ensureRunnerPool: () => ensureRunnerPool,
   findMeshNode: () => findMeshNode,
   isDuplicateMeshHandoff: () => isDuplicateMeshHandoff,
@@ -49172,6 +49173,9 @@ async function ensureRunnerPool(config3) {
 }
 function listMeshNodes(config3) {
   return fetchMeshNodes(config3);
+}
+async function destroyMeshNode(config3, actorId) {
+  await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
 }
 function meshPoolName(pool) {
   return pool || "default";
@@ -50330,15 +50334,20 @@ function warn(message) {
 }
 var USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
-  xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
+  xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--check] [--dir D] [--mesh ...]
   xfer-adapterd send <target> <file|-> <summary> --kind <task|notification> [--from N] [--dir D]
   xfer-adapterd mesh send <target> <file|-> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P] [--no-preflight]
+  xfer-adapterd mesh down [--name N] [--dir D] [--mesh-config P]
   xfer-adapterd list [--dir D] [--json]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
 async function main(argv = process.argv.slice(2)) {
   const { positionals, flags } = parseArgs(argv);
   const [command, sub] = positionals;
+  if (flags.help === true || flags.h === true) {
+    log(USAGE);
+    return;
+  }
   if (command === "up") {
     await runUp(positionals.slice(1), flags);
     return;
@@ -50349,6 +50358,10 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (command === "mesh" && sub === "send") {
     await runMeshSend(positionals.slice(2), flags);
+    return;
+  }
+  if (command === "mesh" && sub === "down") {
+    await runMeshDown(flags);
     return;
   }
   if (command === "list") {
@@ -50421,6 +50434,10 @@ async function runUp(argv, flags) {
   log(`🟢 xfer-adapterd up as "${handle.name}" — ${handle.endpoint}${handle.meshOnline ? " [mesh]" : ""}`);
   log(`   inbox: ${handle.inboxPath}${onHandoff ? `
    on-handoff: ${onHandoff}` : ""}`);
+  if (flags.check === true) {
+    await handle.close();
+    process.exit(0);
+  }
   if (armed) shutdown();
 }
 async function runSend(argv, flags) {
@@ -50526,6 +50543,55 @@ async function runMeshSend(argv, flags) {
   } catch (err) {
     fail(`❌ ${errorText2(err)} ${meshFailureOutcome(err)}`);
   }
+}
+async function runMeshDown(flags) {
+  const dir = str(flags.dir) ?? XFER_DIR;
+  const name = str(flags.name) ?? soleAdapterName(dir);
+  if (name === null) {
+    fail(`❌ no adapter daemon found in ${dir} — pass --name <node> or start one with \`xfer-adapterd up\``);
+    return;
+  }
+  const engine = str(flags.engine);
+  let config3;
+  try {
+    config3 = engine ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) }) : await resolveMeshConfig(loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH));
+  } catch (err) {
+    fail(`❌ mesh is not configured — ${errorText2(err)}`);
+    return;
+  }
+  const { destroyMeshNode: destroyMeshNode2, listMeshNodes: listMeshNodes2 } = await Promise.resolve().then(() => (init_mesh_engine(), mesh_engine_exports));
+  try {
+    const nodes = await listMeshNodes2(config3);
+    const node2 = nodes.find((candidate) => candidate.name === name);
+    if (!node2) {
+      log(`no mesh node named "${name}" on the engine — nothing to destroy`);
+      return;
+    }
+    await destroyMeshNode2(config3, node2.actorId);
+    log(`🛑 mesh node "${name}" destroyed (actor ${node2.actorId})`);
+  } catch (err) {
+    fail(`❌ mesh down for "${name}" failed: ${errorText2(err)}`);
+  }
+}
+function soleAdapterName(dir) {
+  let entries;
+  try {
+    entries = fs13.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const found = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    try {
+      const value = JSON.parse(fs13.readFileSync(path13.join(dir, entry), "utf-8"));
+      if (value.kind === "adapterd" && typeof value.xferName === "string") found.push(value.xferName);
+    } catch {
+    }
+  }
+  if (found.length === 0) return null;
+  if (found.length > 1) return null;
+  return found[0];
 }
 function splitSendArgs(argv) {
   const [target2, file2, ...rest] = argv;

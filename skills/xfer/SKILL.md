@@ -94,8 +94,19 @@ scripts/xfer up --name <my-node-name> --mesh --on-handoff ~/xfer/wake.sh
 
 - `--mesh` is required to join the mesh; **without it `up` only opens a local socket**. Success ends in `[mesh]` — no `[mesh]` means the mesh half failed.
 - `--once` means **exit after the first handoff**, not "start and exit". Do not use it as a startup probe — with no traffic it hangs forever.
+- `--check` starts the daemon, prints what came up, and exits — the **one-shot probe**. Use it when you want to know "would this work?" without leaving a process behind.
 - It must be supervised (`KeepAlive`, or `while true; do …; sleep 5; done`). **5s restart backoff** covers the engine's heartbeat window for same-name takeover; a status-aware `up()` adopts its own crashed/sleeping actor rather than refusing.
 - **Do not start a resident daemon from an agent session** — backgrounded processes do not survive the session. That one belongs to the human.
+
+## Leaving the mesh
+
+A mesh actor outlives the process that made it. If your daemon dies, the engine still lists your name, and the next `up` is refused with *"already Running elsewhere"* — a failure that reads like another machine stole the name. Destroy the actor to release it:
+
+```sh
+scripts/xfer mesh down --name <my-node-name>
+```
+
+This only removes the **mesh** half: the local socket and the inbox are untouched, so local peers keep working. It is the same destroy the admin page's "mesh down" button performs.
 
 ## Guardrails
 
@@ -104,6 +115,8 @@ scripts/xfer up --name <my-node-name> --mesh --on-handoff ~/xfer/wake.sh
 - **Redact secrets** from handoff documents — they land as files on another machine.
 - A mesh node whose actor sits in a `pool` with no runner-config **looks online but receives nothing**. If a node in `peers` never picks anything up, suspect the pool, not the message.
 - Handoffs are point-to-point by name. There is no broadcast.
+- **Give every command a timeout.** The shell tool has no default deadline, so a command that never exits blocks the turn indefinitely. Pass `timeout: 1800` (30 minutes) on anything long, `timeout: 60` on a quick probe. This is a backstop, not a plan: a command that only exits on a timeout is a bug in the command.
+- **Never run a resident daemon in the foreground of a tool call.** `up` without `--check` never returns. Use `--check` to probe, and leave the real daemon to launchd or tmux.
 
 ## Facts worth keeping straight
 
@@ -112,6 +125,9 @@ scripts/xfer up --name <my-node-name> --mesh --on-handoff ~/xfer/wake.sh
 | `up` default transport | local Unix socket only — `--mesh` is opt-in |
 | `--mesh=true` | not recognised; use the bare flag |
 | `--once` | exits after the *first* handoff |
+| `--check` | starts, reports, exits — the one-shot probe; `up` alone never returns |
+| `--help` | prints usage and exits; it never starts a daemon |
+| `mesh down` | destroys the mesh actor only; the local socket and inbox stay |
 | `inbox` model | take-to-read, no retention |
 | `mesh send` | enqueues without joining; needs only `mesh.config.json` |
 | `.sha256` files in pi-xfer | hash only, **no filename** — plain `sha256sum -c <file>` fails |

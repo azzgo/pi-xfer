@@ -785,7 +785,15 @@ function deserializeMeshKey(serialized) {
 // mesh-describer.ts
 var DESCRIBE_TIMEOUT_MS = 5e3;
 var GET_DESCRIPTION_ACTION = "getDescription";
+var describers = /* @__PURE__ */ new Map();
 function createMeshDescriber(configPath) {
+  const cached = describers.get(configPath);
+  if (cached) return cached;
+  const describer = buildDescriber(configPath);
+  describers.set(configPath, describer);
+  return describer;
+}
+function buildDescriber(configPath) {
   let pending = null;
   const client = () => pending ??= connect(configPath);
   return async (name) => {

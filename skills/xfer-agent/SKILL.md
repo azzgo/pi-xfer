@@ -18,6 +18,18 @@ socket and the inbox. The command joins the mesh (`--mesh`) by default —
 without it the daemon only has a local Unix socket and cannot reach mesh
 peers; only drop `--mesh` when mesh is intentionally not configured.
 
+**Two ways to start it, and the difference matters.** `up` alone is a
+**resident daemon**: it never returns. `--check` starts it, prints what came
+up, and exits — use that when you only want to know "would this work?".
+
+```sh
+xfer-adapterd up --name {{NAME}} --check   # probe: starts, reports, exits
+```
+
+Never run the resident form in the foreground of a command that is supposed
+to finish: it blocks forever, and with no timeout on the command that block
+has no end. Background it, or supervise it.
+
 ## Read your inbox
 
 The inbox is **take-to-read**: `take` atomically consumes the pending records and
@@ -102,6 +114,21 @@ xfer-adapterd mesh send <target> <file> <summary> --kind <task|notification> --f
 
 This needs `~/.pi/xfer/mesh.config.json` (or `--engine/--namespace/--token`).
 Without it the command fails loudly — do not try to guess an endpoint.
+
+## Leaving the mesh
+
+A mesh actor outlives the daemon that made it. If your daemon dies, the engine
+still lists your name, and the next `up` is refused with *"already Running
+elsewhere"* — a failure that reads like another machine stole the name. Destroy
+the actor to release it:
+
+```sh
+xfer-adapterd mesh down --name {{NAME}}
+```
+
+This only removes the **mesh** half: the local socket and the inbox are
+untouched, so local peers keep working. Run it when you are done with the mesh
+or when a stale actor is blocking your name.
 
 ## Rename this agent
 

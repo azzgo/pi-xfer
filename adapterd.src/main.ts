@@ -5,6 +5,7 @@
  *   up                 start the local listener + Inbox (optionally join the mesh)
  *   send               hand off to a local peer socket (daemon-independent)
  *   mesh send          hand off to a mesh node without joining it
+ *   mesh down          destroy this daemon's mesh actor and go offline
  *   list               discover local peers (a send-only host reads no directory)
  *   inbox take|list    consume or peek at this daemon's Inbox
  *   install            write the xfer-agent skill into a host directory
@@ -87,9 +88,10 @@ function warn(message: string): void {
 
 const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 
-  xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--dir D] [--mesh ...]
+  xfer-adapterd up [--name N] [--on-handoff CMD] [--once] [--check] [--dir D] [--mesh ...]
   xfer-adapterd send <target> <file|-> <summary> --kind <task|notification> [--from N] [--dir D]
   xfer-adapterd mesh send <target> <file|-> <summary> --kind <task|notification> [--from N] [--dir D] [--mesh-config P] [--no-preflight]
+  xfer-adapterd mesh down [--name N] [--dir D] [--mesh-config P]
   xfer-adapterd list [--dir D] [--json]
   xfer-adapterd inbox take|list [--name N] [--dir D] [--inbox P]
   xfer-adapterd install --host <cursor|generic> --into <dir> [--name N] [--no-mesh]`;
@@ -97,6 +99,15 @@ const USAGE = `xfer-adapterd — adapt a non-pi Agent Host to the xfer network
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { positionals, flags } = parseArgs(argv);
   const [command, sub] = positionals;
+
+  // `--help` anywhere means "print usage and stop". A host agent probing the
+  // CLI must never accidentally start a resident daemon: `up --help` used to
+  // ignore the flag, bind a socket, and hang forever — the probe became a
+  // five-hour block with no output.
+  if (flags.help === true || flags.h === true) {
+    log(USAGE);
+    return;
+  }
 
   if (command === "up") {
     await runUp(positionals.slice(1), flags);
@@ -108,6 +119,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command === "mesh" && sub === "send") {
     await runMeshSend(positionals.slice(2), flags);
+    return;
+  }
+  if (command === "mesh" && sub === "down") {
+    await runMeshDown(flags);
     return;
   }
   if (command === "list") {
@@ -182,6 +197,13 @@ async function runUp(argv: string[], flags: Flags): Promise<void> {
 
   log(`🟢 xfer-adapterd up as "${handle.name}" — ${handle.endpoint}${handle.meshOnline ? " [mesh]" : ""}`);
   log(`   inbox: ${handle.inboxPath}${onHandoff ? `\n   on-handoff: ${onHandoff}` : ""}`);
+  // `--check` reports what came up, then leaves: the one-shot probe for a
+  // host that wants to know "would this daemon work?" without a resident
+  // process. `up` without it is a daemon and never returns on its own.
+  if (flags.check === true) {
+    await handle.close();
+    process.exit(0);
+  }
   if (armed) shutdown();
 }
 
@@ -333,6 +355,75 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   } catch (err) {
     fail(`❌ ${errorText(err)} ${meshFailureOutcome(err)}`);
   }
+}
+
+/**
+ * Destroy this daemon's mesh actor, releasing its name on the engine.
+ *
+ * A host whose daemon died leaves its actor behind: the engine still lists the
+ * name, and the next `up` is refused with "already Running elsewhere" — a
+ * failure that looks like another machine stole the name. `mesh down` is the
+ * way a host releases it without an admin page.
+ *
+ * The local socket and inbox are untouched: this is the mesh half of going
+ * offline, and the daemon keeps serving local peers.
+ */
+async function runMeshDown(flags: Flags): Promise<void> {
+  const dir = str(flags.dir) ?? XFER_DIR;
+  const name = str(flags.name) ?? soleAdapterName(dir);
+  if (name === null) {
+    fail(`❌ no adapter daemon found in ${dir} — pass --name <node> or start one with \`xfer-adapterd up\``);
+    return;
+  }
+  const engine = str(flags.engine);
+  let config;
+  try {
+    config = engine
+      ? parseMeshConfig({ endpoint: engine, namespace: str(flags.namespace), token: str(flags.token), pool: str(flags.pool) })
+      : await resolveMeshConfig(loadMeshConfig(str(flags["mesh-config"]) ?? MESH_CONFIG_PATH));
+  } catch (err) {
+    fail(`❌ mesh is not configured — ${errorText(err)}`);
+    return;
+  }
+  const { destroyMeshNode, listMeshNodes } = await import("../mesh-engine.ts");
+  try {
+    const nodes = await listMeshNodes(config);
+    const node = nodes.find((candidate) => candidate.name === name);
+    if (!node) {
+      log(`no mesh node named "${name}" on the engine — nothing to destroy`);
+      return;
+    }
+    await destroyMeshNode(config, node.actorId);
+    log(`🛑 mesh node "${name}" destroyed (actor ${node.actorId})`);
+  } catch (err) {
+    fail(`❌ mesh down for "${name}" failed: ${errorText(err)}`);
+  }
+}
+
+/**
+ * The only adapter daemon name in `dir`, or null when there is not exactly one.
+ *
+ * The same adoption rule the inbox uses: `--name` wins, otherwise the single
+ * daemon in the directory is meant. Ambiguity is an error, never a guess.
+ */
+function soleAdapterName(dir: string): string | null {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const found: string[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    try {
+      const value = JSON.parse(fs.readFileSync(path.join(dir, entry), "utf-8")) as Record<string, unknown>;
+      if (value.kind === "adapterd" && typeof value.xferName === "string") found.push(value.xferName);
+    } catch { /* not ours */ }
+  }
+  if (found.length === 0) return null;
+  if (found.length > 1) return null;
+  return found[0]!;
 }
 
 function splitSendArgs(argv: string[]): { target?: string; file?: string; summary?: string } {

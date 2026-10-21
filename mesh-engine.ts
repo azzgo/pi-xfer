@@ -397,6 +397,18 @@ export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
 }
 
 /**
+ * Destroy one mesh node's actor — the engine-side half of going offline.
+ *
+ * The adapter daemon has no resident process to shut down, so without this a
+ * host that joined the mesh and then died leaves its actor behind: the name
+ * stays taken on the engine and the next `up` is refused with "already Running
+ * elsewhere". Destroying the actor is the only way to release the name.
+ */
+export async function destroyMeshNode(config: MeshConfig, actorId: string): Promise<void> {
+  await engineApi(config, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
+}
+
+/**
  * One node's verdict, from two engine facts rather than one: what the actor
  * record says about the actor, and whether its pool holds a live runner. The
  * record alone cannot be trusted for "can this node receive a handoff" — a

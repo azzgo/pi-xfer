@@ -21,6 +21,7 @@ import {
   applyDescriptionAction,
   classifyMeshSendFailure,
   createRivetEngine,
+  destroyMeshNode,
   deriveActorStatus,
   deriveMeshNodeState,
   ensureRunnerPool,
@@ -748,6 +749,38 @@ describe("mesh node listing", () => {
       assert.deepEqual(await engine.listNodes(), await listMeshNodes(config));
       assert.deepEqual(await engine.listNodes(), [{ name: "laptop", actorId: "a1", status: "Sleeping", pool: "host-a" }]);
     } finally { stub.restore(); }
+  });
+});
+
+describe("mesh node destruction", () => {
+  const config = { endpoint: "http://localhost:6420" };
+
+  /**
+   * Destroying the actor is the only way to release a name on the engine. A
+   * host whose daemon died leaves its actor behind, and the next `up` is then
+   * refused with "already Running elsewhere" — a failure that reads like
+   * another machine stole the name.
+   */
+  it("DELETEs the actor by id", async () => {
+    const original = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = new URL(String(input));
+      calls.push(`${init?.method ?? "GET"} ${url.pathname}`);
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await destroyMeshNode(config, "actor-7");
+      assert.deepEqual(calls, ["DELETE /actors/actor-7"]);
+    } finally { globalThis.fetch = original; }
+  });
+
+  it("fails loudly when the engine refuses the destroy", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("nope", { status: 409 })) as typeof fetch;
+    try {
+      await assert.rejects(() => destroyMeshNode(config, "actor-7"), /409/);
+    } finally { globalThis.fetch = original; }
   });
 });
 

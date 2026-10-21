@@ -408,6 +408,77 @@ describe("xfer-adapterd CLI smoke", () => {
     assert.match(stderr, /mesh is not configured/);
   });
 
+  it("mesh down without a config errors clearly", async () => {
+    const dir = freshDir();
+    const child = spawn(
+      process.execPath,
+      [bundle, "mesh", "down", "--name", "doubao", "--dir", dir, "--mesh-config", path.join(dir, "missing.json")],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    assert.equal(await waitExit(child), 1);
+    assert.match(stderr, /mesh is not configured/);
+  });
+
+  it("mesh down says so when no adapter daemon owns that directory", async () => {
+    const dir = freshDir();
+    const child = spawn(
+      process.execPath,
+      [bundle, "mesh", "down", "--dir", dir],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    assert.equal(await waitExit(child), 1);
+    assert.match(stderr, /no adapter daemon found/);
+  });
+describe("xfer-adapterd CLI: probing never leaves a daemon behind", () => {
+  const bundle = path.join(import.meta.dirname, "xfer-adapterd.cjs");
+
+  /**
+   * `up --help` used to ignore the flag, bind a socket, and block forever — a
+   * host agent probing the CLI hung for five hours with no output. The probe
+   * must print usage and leave.
+   */
+  it("--help prints usage and exits without binding a socket", async () => {
+    const dir = freshDir();
+    const child = spawn(
+      process.execPath,
+      [bundle, "up", "--help", "--name", "agent-help", "--dir", dir],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    assert.equal(await waitExit(child), 0);
+    assert.match(stdout, /xfer-adapterd — adapt a non-pi Agent Host/);
+    assert.ok(!fs.existsSync(endpointForName("agent-help", dir)), "--help must not bind a socket");
+  });
+
+  it("--help works with no subcommand at all", async () => {
+    const child = spawn(process.execPath, [bundle, "--help"], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    assert.equal(await waitExit(child), 0);
+    assert.match(stdout, /xfer-adapterd — adapt a non-pi Agent Host/);
+  });
+
+  it("up --check reports what came up, then leaves nothing running", async () => {
+    const dir = freshDir();
+    const child = spawn(
+      process.execPath,
+      [bundle, "up", "--name", "agent-check", "--check", "--dir", dir],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    assert.equal(await waitExit(child), 0);
+    assert.match(stdout, /xfer-adapterd up as "agent-check"/);
+    assert.ok(!fs.existsSync(endpointForName("agent-check", dir)), "--check must not leave a socket");
+    assert.ok(!fs.existsSync(metadataForName("agent-check", dir)), "--check must not leave metadata");
+  });
+});
+
 });
 
 describe("adapterd CLI: inbox with an explicit --name", () => {
