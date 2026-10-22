@@ -54,7 +54,7 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 - [Quickstart](docs/guides/quickstart.md) — your first handoff in five minutes
 - [Mesh setup](docs/guides/mesh-setup.md) — cross-machine transport with RivetKit
 - [Agent host setup](docs/guides/agent-host-setup.md) — wiring a non-pi bot (adapter daemon, Feishu notes)
-- [Pi Durable agent](docs/guides/pi-durable-agent.md) — a mesh node on Cloudflare that exists only while there is work
+- [Serverless Cloudflare node](docs/guides/cf-serverless-node.md) — a mesh node on Cloudflare that exists only while there is work
 - [MCP gateway](docs/guides/mcp-gateway.md) — typed xfer tools for an MCP host, over stdio
 
 **Development**
@@ -65,7 +65,7 @@ pi-xfer covers **heavy-context handoff**: structured documents, cross-machine tr
 
 ## Layout
 
-- `docs/guides/` — user guides ([quickstart](docs/guides/quickstart.md), [mesh setup](docs/guides/mesh-setup.md), [agent host setup](docs/guides/agent-host-setup.md), [pi durable agent](docs/guides/pi-durable-agent.md), [MCP gateway](docs/guides/mcp-gateway.md))
+- `docs/guides/` — user guides ([quickstart](docs/guides/quickstart.md), [mesh setup](docs/guides/mesh-setup.md), [agent host setup](docs/guides/agent-host-setup.md), [serverless Cloudflare node](docs/guides/cf-serverless-node.md), [MCP gateway](docs/guides/mcp-gateway.md))
 - `docs/adr/` — decision records (mesh transport, board scope, web-picker record philosophy)
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
 - `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product

@@ -59,7 +59,7 @@ function harness(overrides: Partial<Env> = {}, mesh = async () => new Response("
   };
 }
 
-describe("pi-durable-cf example: the Worker's routes", () => {
+describe("cf-serverless-node example: the Worker's routes", () => {
   it("answers /health without touching the mesh engine", async () => {
     const h = harness();
     const response = await h.request("/health");

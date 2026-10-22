@@ -1,13 +1,18 @@
-# A Pi Durable agent on Cloudflare, joined to the mesh
+# A serverless Cloudflare node, joined to the mesh
 
 > **Experimental, not a supported feature.** No SLA, no network test in CI, no promise across
 > rivetkit majors. This `package.json` and its `node_modules/` belong to the example — the
 > **pi-xfer extension itself ships no runtime dependencies**, and nothing here sets a precedent for
 > adding one. If the example breaks on a future rivetkit, the extension is unaffected.
 
-A **Pi Durable agent**: it runs on Cloudflare, it is reachable as an ordinary mesh node, it answers
+A **serverless mesh node**: it runs on Cloudflare, it is reachable as an ordinary mesh node, it answers
 when there is work, and it costs nothing while idle. The Worker and its `xfer-instance` actor are how
 it joins the mesh — the transport, not the point.
+
+**The agent behind it is a stub.** Inside the Durable Object, `answerHandoff()` echoes the handoff —
+or makes one model call if `DEEPSEEK_API_KEY` is set. No agent framework runs here: this example
+proves the *transport* (a node that exists only while there is work), and the agent half is the seam
+you replace in your own repository.
 
 Read this file to run it. Read `VERIFICATION.md` before you point it at a real engine.
 
@@ -84,12 +89,12 @@ platform that takes a `fetch` handler works this way; this example is the smalle
    tested.
 
 `answerHandoff()` in `src/agent-do.ts` is the one function to replace. Without a `DEEPSEEK_API_KEY`
-it echoes; that is not a stub — it is how the mesh path gets proven before any credential exists.
+it echoes — that echo is how the mesh path gets proven before any credential exists.
 
 ## Run it locally, with no account
 
 ```bash
-cd examples/pi-durable-cf
+cd examples/cf-serverless-node
 npm install
 npm test                     # 18 tests, hermetic: no workerd, no engine, no network
 npx wrangler dev             # local workerd

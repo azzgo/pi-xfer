@@ -572,7 +572,7 @@ actor state) was **not** implemented, and ADR 0019 records that no successor is 
    cannot tell *which* process answered (§6.7). `/xfer list` will happily show a stolen name once.
 3. **"Did the target read it"** — local ack means `deliver()` returned (`server.ts:35-40`); mesh ack
    means the queue accepted, and the dedupe window is recorded right after `onHandoff` returns, before
-   the agent has done anything (`mesh-engine.ts:248-249`; `docs/guides/pi-durable-agent.md:70-72`);
+   the agent has done anything (`mesh-engine.ts:248-249`; `docs/guides/cf-serverless-node.md:81-83`);
    `xfer_to` / `xfer_mesh_to` return the constant `status: "sent"` (`index.ts:194`, `index.ts:191`).
    Carried forward from `notes-reason-network-wake.md` §8.3/§9.2 — still true.
 4. **"Is the capability note current / whose is it"** — the description belongs to an actor key, and
@@ -648,7 +648,7 @@ deployment was touched, and `XFER_ALLOW_REMOTE` was not set.
 - **Engine listing semantics.** The claim that an actor in another *pool* still appears in this
   host's `/actors` listing comes from the comment at `mesh-engine.ts:265-266` ("`get`/list stay
   un-pooled") and from `mesh-engine.ts:475-483`, which sends no pool filter — not from an engine
-  observation in this session. `docs/guides/pi-durable-agent.md:85-86` qualifies this for serverless pools specifically (a serverless pool "holds no runner of its
+  observation in this session. `docs/guides/cf-serverless-node.md:102-103` qualifies this for serverless pools specifically (a serverless pool "holds no runner of its
   own"), which is a different axis (pool kind, not list membership).
 - The previous note's §9.8 question ("can a `getDescription` probe distinguish a foreign actor from
   an offline one") **remains unverified**: what a foreign `xfer-instance` actor returns from

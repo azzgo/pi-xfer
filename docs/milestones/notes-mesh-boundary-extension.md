@@ -69,3 +69,13 @@ from: pi-xfer_t82p(notification,无需回信)
 - Not yet checked: RivetKit serverless-worker support in the pinned rivetkit version, and
   whether `client.getOrCreate` / queueSend can reach a serverless-pool actor without a
   `poolName`. Both belong to the design node if this item is picked up.
+
+## 后续结果(2026-10-22)
+
+- **传输那半已实现**:CF Worker 以 rivetkit 的 wasm runtime 托管 `xfer-instance`,桥接 Durable Object,
+  闭环在真实部署上人工验证过(程序写在 `examples/cf-serverless-node/VERIFICATION.md`;2026-10-18 建为
+  `examples/pi-durable-cf`,2026-10-22 改名)。第 3 条的「最小验证路径」达成了它自己的目标 ——
+  证明的是「CF 是网络里的普通节点」。
+- **Pi Durable 那半没有实现**:DO 里跑的是一个存根 agent(`answerHandoff()`:无 key 时 echo,有 key 时
+  一次 DeepSeek 调用),不依赖任何 Pi Durable harness。因此示例与指南页改名,以免名字承诺代码里没有的
+  agent 框架;agent 那一半留在 `POST /agent/answer` 这条缝上,由读者自己的仓库去填。

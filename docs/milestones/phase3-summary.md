@@ -24,8 +24,8 @@
 
 ### Cloudflare serverless 节点(P1-E)
 
-- **`examples/pi-durable-cf`** — CF Worker(wasm registry)托管 `xfer-instance` actor,桥接 Durable Object 里的 Pi Durable agent;echo 先行(无 key 可验),DeepSeek 留接缝。闭环在真实部署三次完整验证(发送 → 引擎 → Worker → DO → 原路回信,回信落本地会话)。
-- **`docs/guides/pi-durable-agent.md`** — 地图式文档页:两层持久化、serverless actor 纪律、排障速查、边界(好目的地/坏源头;止步 round trip)。
+- **`examples/cf-serverless-node`** — CF Worker(wasm registry)托管 `xfer-instance` actor,桥接 Durable Object 里的一个存根 agent;echo 先行(无 key 可验),DeepSeek 留接缝。闭环在真实部署三次完整验证(发送 → 引擎 → Worker → DO → 原路回信,回信落本地会话)。**不包含 Pi Durable harness** —— agent 那一半是接缝,不是实现(2026-10-22 由 `examples/pi-durable-cf` 改名)。
+- **`docs/guides/cf-serverless-node.md`** — 地图式文档页:两层持久化、serverless actor 纪律、排障速查、边界(好目的地/坏源头;止步 round trip)。
 - **十条实测发现全部折回文档** — 引擎钉 `2.3.26`、topology `public_url`、自有域名(workers.dev 部分网络不可达)、`request_lifespan`/`drain_grace_period`、configurePool URL 语义、actor sticky error、池卡死用 PUT 踢池等。
 
 ### 插入项:配置安全与可用性

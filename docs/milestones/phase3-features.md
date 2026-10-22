@@ -199,7 +199,7 @@ to the reader's own agent repository, so the example stops at the round trip.
 
 **Explicitly experimental, not a supported feature.** No SLA, no network test in CI, and no promise
 across rivetkit majors. **Where the banner goes:** the docs page and code comments, but **not** the
-README — what will churn is Pi Durable's interface and package names, while the capability itself is
+README — what will churn is rivetkit's serverless interface, while the capability itself is
 stable, so the README states support plainly. The example may carry its own npm dependencies (it is
 not the extension); say so explicitly so it is never read as precedent.
 
@@ -217,6 +217,18 @@ not the extension); say so explicitly so it is never read as precedent.
 - **Verification is the one live-deployment exception** (recorded in `AGENTS.md`): a Durable Object
   has no local stand-in, so the closed loop is proven by a manual, written-down procedure kept out of
   `npm test` and out of every script.
+
+**Shipped (2026-10-18).** `examples/cf-serverless-node/` — a Worker hosting the `xfer-instance`
+actor in rivetkit's wasm runtime, bridged to a Durable Object that runs a stub agent
+(`answerHandoff()`: a fixed echo, or one DeepSeek call when a key is set). The closed loop was
+verified by hand on a real deployment, procedure in `VERIFICATION.md`.
+
+What did **not** ship is the Pi Durable half of the Opportunity above: no Pi Durable harness runs
+inside the Durable Object, and nothing depends on one. The example is the transport; the agent
+behind `POST /agent/answer` is the seam a reader fills in. The directory was renamed from
+`examples/pi-durable-cf/` to `examples/cf-serverless-node/` on 2026-10-22, so the name does not
+promise an agent framework the example does not contain — the guide moved with it to
+`docs/guides/cf-serverless-node.md`.
 
 ## Out of scope for this milestone
 

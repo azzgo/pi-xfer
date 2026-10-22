@@ -123,7 +123,7 @@ the first `[table]` header: a `routes` block written after `[vars]` becomes an o
 named `routes` and the custom domain is never created — with no warning at all.
 
 ```bash
-cd examples/pi-durable-cf
+cd examples/cf-serverless-node
 npm install
 npm run check                             # local config + build check, no upload
 npx wrangler secret put MESH_ENDPOINT     # https://<engine-host>
@@ -193,7 +193,7 @@ design, no override). The client below creates the actor if it does not exist an
 handoff; the actor's arrival is what makes the engine start the runner.
 
 ```bash
-cd examples/pi-durable-cf          # for rivetkit 2.3.26 on disk
+cd examples/cf-serverless-node      # for rivetkit 2.3.26 on disk
 cat > /tmp/cf-probe.md <<'EOF'
 # Round-trip probe
 

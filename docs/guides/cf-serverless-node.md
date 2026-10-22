@@ -1,15 +1,15 @@
-# Pi Durable agent — a mesh node that costs nothing while idle
+# A serverless Cloudflare node — a mesh node that costs nothing while idle
 
 > **Experimental, not a supported feature.** No SLA, no network test in CI, no promise across
-> rivetkit majors. It is an **example** (`examples/pi-durable-cf/`), not part of the pi-xfer
+> rivetkit majors. It is an **example** (`examples/cf-serverless-node/`), not part of the pi-xfer
 > extension — and its npm dependencies belong to that directory, not to the extension, which ships
 > none. If it breaks on a future rivetkit, pi-xfer is unaffected.
 
 The mesh has always been a set of machines that stay on. This is the first kind that does not: a
-**Pi Durable agent** on Cloudflare, reachable as an ordinary mesh node. It wakes when there is work,
+**serverless node** on Cloudflare, reachable as an ordinary mesh node. It wakes when there is work,
 answers, and otherwise does not exist — and therefore costs nothing to keep.
 
-The Worker and its `xfer-instance` actor are how that agent joins the mesh. They are the transport,
+The Worker and its `xfer-instance` actor are how that node joins the mesh. They are the transport,
 not the point.
 
 Two things worth knowing before you commit to it:
@@ -51,7 +51,18 @@ implementation.
 Everything on the mesh only ever sees an `xfer-instance` actor, so `/xfer mesh list`,
 `/xfer mesh <name>`, `desc` and the adapter daemon all work with it unchanged. No new commands.
 
-Start with `examples/pi-durable-cf/README.md`; this page is the map, that directory is the manual.
+Start with `examples/cf-serverless-node/README.md`; this page is the map, that directory is the manual.
+
+## What the agent is (and is not)
+
+The Durable Object holds one function: `answerHandoff()`. With no `DEEPSEEK_API_KEY` it echoes the
+handoff; with one it makes a single model call. That is the whole agent — no Pi Durable harness, no
+session, no tools, no turn loop.
+
+So what the example proves is the **transport**: a node that exists only while there is work,
+addressed like any other, answering back into the sender's queue. The agent half is a seam. Replace
+`answerHandoff()` in `src/agent-do.ts`, or put a real agent runtime behind `POST /agent/answer`, and
+nothing on the mesh side — the actor, the pool, the reply path — has to move.
 
 ## Two persistence layers, never blurred
 
@@ -94,7 +105,7 @@ Nothing else. The pool decides *where* the actor is placed.
 ## Deploying it
 
 The full procedure is
-[`examples/pi-durable-cf/VERIFICATION.md`](../../examples/pi-durable-cf/VERIFICATION.md) — seven
+[`examples/cf-serverless-node/VERIFICATION.md`](../../examples/cf-serverless-node/VERIFICATION.md) — seven
 steps, and the only place in this repository whose verification touches a live deployment (a
 Durable Object has no local stand-in). **It is a human decision every time; nothing in it runs from
 CI, a test, or a script here.**
@@ -122,7 +133,7 @@ Two traps worth repeating here because they cost real time:
 ## Troubleshooting
 
 Six of the most common rows from
-[the full table](../../examples/pi-durable-cf/VERIFICATION.md#when-it-does-not-work); every one was
+[the full table](../../examples/cf-serverless-node/VERIFICATION.md#when-it-does-not-work); every one was
 hit for real.
 
 | Signal | Cause | Fix |
@@ -139,8 +150,9 @@ hit for real.
 - **Nothing here is about your agent's behaviour.** The example answers with a fixed echo (or a
   DeepSeek call, if you configure a key) so the transport can be proven before any credential
   exists. What the agent actually does — read a repo, update a ticket, summarise — belongs in your
-  own agent repository, driven from `answerHandoff()`.
-- **The example may carry npm dependencies; the extension may not.** `examples/pi-durable-cf/` has
+  own agent repository, driven from `answerHandoff()`; see
+  [What the agent is](#what-the-agent-is-and-is-not).
+- **The example may carry npm dependencies; the extension may not.** `examples/cf-serverless-node/` has
   its own `package.json` and `node_modules`. Nothing there sets a precedent for pi-xfer, and
   rivetkit stays out of the extension's dependency list.
 - **Documented scope stops at the round trip:** send in, answer, arrive back, verified by hand. Cron

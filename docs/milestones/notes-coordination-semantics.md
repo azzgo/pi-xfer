@@ -294,7 +294,7 @@ this as intended: "latency floor of one human round-trip per hop",
 
 `server.ts:40-47` delivers every `xfer-notify` with a string `msg_id`. There is no recent-id set,
 no file check, no comparison. `grep isDuplicateMeshHandoff` shows it is mesh-only (plus the
-Cloudflare example, `examples/pi-durable-cf/src/mesh-actor.ts:44-61,84`). A sender retrying a local
+Cloudflare example, `examples/cf-serverless-node/src/mesh-actor.ts:44-61,84`). A sender retrying a local
 `xfer_to` under the same `msg_id` **will** be delivered twice; nothing in the local path can tell.
 `XferState` (`state.ts:8-20`) keeps identity/status only — no message bookkeeping.
 
@@ -401,7 +401,7 @@ Two adjacent facts about *declaring* the kind, worth recording separately:
 - **Behaviour under real concurrency for the Board single `pending` slot** — no test covers two
   overlapping `/xfer board write` calls; the overwrite is read off the code.
 - **Cross-machine `/tmp` id collision** and its practical rate — bounded by §2 only.
-- **The `examples/pi-durable-cf` actor's dedupe** was read but not exercised (per `AGENTS.md` it has
+- **The `examples/cf-serverless-node` actor's dedupe** was read but not exercised (per `AGENTS.md` it has
   no local stand-in).
 - Nothing was run: no `npm test`, no engine, no admin page, no tmux smoke.
 

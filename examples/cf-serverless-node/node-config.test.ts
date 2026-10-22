@@ -10,7 +10,7 @@ const base = {
 };
 const config = (env: Partial<Env> = {}) => nodeConfig({ ...base, ...env } as Env);
 
-describe("pi-durable-cf example: what this node is configured as", () => {
+describe("cf-serverless-node example: what this node is configured as", () => {
   it("names the node cf-node and joins the cloudflare pool unless told otherwise", () => {
     assert.equal(config().nodeName, DEFAULT_NODE_NAME);
     assert.equal(config().pool, DEFAULT_POOL_NAME);
@@ -52,7 +52,7 @@ describe("pi-durable-cf example: what this node is configured as", () => {
   });
 });
 
-describe("pi-durable-cf example: the pool record", () => {
+describe("cf-serverless-node example: the pool record", () => {
   const registration = poolRegistration(config());
 
   it("carries a grace period strictly below the lifespan, both in seconds", () => {

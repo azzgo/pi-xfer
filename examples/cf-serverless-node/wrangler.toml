@@ -7,7 +7,7 @@
 # Trimmed to start from: one Durable Object, two vars, three secrets. The two
 # optional blocks below (`routes`, `WORKER_PUBLIC_URL`) are the only things a
 # real mesh run adds on top — see README "Run it".
-name = "pi-xfer-pi-durable-cf"
+name = "pi-xfer-cf-serverless-node"
 main = "src/worker.ts"
 compatibility_date = "2025-10-01"
 # nodejs_compat is required: rivetkit's logger (pino) reaches for Node builtins
@@ -30,7 +30,7 @@ migrations = [
 # key must come BEFORE the first [table] header, or `routes` silently becomes a
 # var named `routes` and the domain never exists.
 # routes = [
-#   { pattern = "pi-durable.example.com", custom_domain = true },
+#   { pattern = "cf-node.example.com", custom_domain = true },
 # ]
 
 [vars]
@@ -46,7 +46,7 @@ NODE_NAME = "cf-node"
 POOL_NAME = "cloudflare"
 # Optional. Unset, every URL is the request's own origin, so a first deploy works
 # with nothing configured; set it when the engine must call a specific host.
-# WORKER_PUBLIC_URL = "https://pi-durable.example.com"
+# WORKER_PUBLIC_URL = "https://cf-node.example.com"
 #
 # The pool's timing is NOT a var. It lives in `SERVERLESS_POOL_TIMING` in
 # `src/pool-config.ts` because the value is a contract between three writers (the

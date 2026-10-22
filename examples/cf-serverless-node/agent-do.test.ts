@@ -21,7 +21,7 @@ async function withFetch<T>(replacement: typeof fetch, body: () => Promise<T>): 
   }
 }
 
-describe("pi-durable-cf example: what the agent answers", () => {
+describe("cf-serverless-node example: what the agent answers", () => {
   it("echoes without any credential, naming the handoff it answers", async () => {
     const document = await answerHandoff(handoff, {} satisfies Model);
     assert.match(document, /In reply to.*mvbsq4ja-5dnpgd/);

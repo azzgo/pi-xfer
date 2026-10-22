@@ -1,9 +1,9 @@
 {
-  "name": "pi-xfer-pi-durable-cf-example",
+  "name": "pi-xfer-cf-serverless-node-example",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Example: a Pi Durable agent on Cloudflare (Worker + Durable Object) that joins the pi-xfer mesh as an ordinary node. Not part of the pi-xfer extension and not a dependency precedent for it.",
+  "description": "Example: a serverless Cloudflare node (Worker + Durable Object) that joins the pi-xfer mesh as an ordinary node, with a stub agent behind it. Not part of the pi-xfer extension and not a dependency precedent for it.",
   "scripts": {
     "test": "node --test *.test.ts",
     "typecheck": "tsc --noEmit",
