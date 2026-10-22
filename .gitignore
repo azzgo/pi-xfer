@@ -1,5 +1,6 @@
 node_modules/
 .pi/*
+.pig/*
 !.pi/mcp.json
 **/.pi/track/
 *.tgz
