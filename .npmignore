@@ -1,0 +1,25 @@
+# The npm tarball ships the extension, not the repository's documentation.
+#
+# `docs/` is a repository asset: the guides, the ADRs and the milestone notes
+# live in git and on the website. The published package carries the extension
+# itself — the code, the committed build products, the skills and the context
+# file — and nothing a reader would have to keep in sync with a release.
+#
+# Two switches, and both are needed: `docs/` is listed in `.npmignore` here,
+# and it is *not* listed in the `files` array of package.json. A `files` entry
+# wins over an ignore rule — npm never excludes what `files` asked for — so
+# dropping the `files` entry is what actually keeps the docs out of the
+# tarball; this file states the intent and catches the case where `files` is
+# broadened later.
+#
+# The rules below mirror the root `.gitignore`: an `.npmignore` replaces it as
+# npm's fallback, so anything ignored there has to be ignored here too.
+node_modules/
+.pi/*
+!.pi/mcp.json
+**/.pi/track/
+*.tgz
+npm-debug.log*
+.DS_Store
+.husky/_
+docs/

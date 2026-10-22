@@ -46,7 +46,6 @@
     "CONTEXT.md",
     "README.md",
     "LICENSE",
-    "docs/",
     "skills/"
   ],
   "scripts": {
