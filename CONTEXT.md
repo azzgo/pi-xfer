@@ -19,6 +19,12 @@ What a listing says about one Node's ability to receive a Handoff, derived from 
 _Avoid_: health, presence (presence belongs to local peers), online/offline, outcome
 
 
+## SSH Link (peer-to-peer cross-machine transport)
+
+**Link**:
+The local endpoint of an ssh-forwarded remote Node — a `.sock` in the top-level xfer dir plus a `.json` marked `via: "ssh"`. Not a Peer: it borrows the local discovery scan but its lifecycle belongs to `up`/`down` and the spawning pi process. Listed as a thin entry (no cwd/model — remote metadata cannot be read).
+_Avoid_: tunnel (the ssh process is the tunnel; the Link is its endpoint), forwarded peer, remote peer
+
 ## Adapter Daemon (non-pi Agent Hosts)
 
 **Agent Host**:

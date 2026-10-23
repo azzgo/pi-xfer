@@ -178,7 +178,8 @@ function readPeerMetadata(xferName, xferDir = XFER_DIR) {
       ...typeof value.model === "string" ? { model: value.model } : {},
       ...typeof value.status === "string" ? { status: value.status } : {},
       ...typeof value.pid === "number" ? { pid: value.pid } : {},
-      ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {}
+      ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {},
+      ...value.via === "ssh" ? { via: "ssh", host: typeof value.host === "string" ? value.host : "" } : {}
     };
   } catch {
     return {};

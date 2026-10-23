@@ -16,6 +16,7 @@ import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTa
 import { loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
+import { listLinks, planSshUp, sshDown, sshUp, type LinkInfo, type SshLinkOptions, type SshUpPlan, type SshUpResult } from "./ssh-link.ts";
 
 /** Options for `registerXferCommand`. */
 export interface XferCommandOptions {
@@ -33,6 +34,21 @@ export interface XferCommandOptions {
   meshConfigPath?: string;
   /** Mesh transport node; when absent the `/xfer mesh` command group is unavailable. */
   mesh?: MeshNode;
+  /** Override for ssh-link operations (tests stub this instead of spawning real ssh). */
+  sshLink?: SshLinkOperations;
+}
+
+/** What `/xfer ssh` needs from the link layer — tests stub this instead of spawning real ssh. */
+export interface SshLinkOperations {
+  list(): LinkInfo[];
+  up(host: string): Promise<SshUpResult>;
+  down(host: string | undefined): LinkInfo[];
+  plan(host: string): Promise<SshUpPlan>;
+}
+
+/** Decode a Link's socket-file stem back into its remote node name. */
+function decodeLinkName(stem: string): string {
+  try { return decodeURIComponent(stem); } catch { return stem; }
 }
 
 /** Listener summary shared by `/xfer list` and `/xfer status`. */
@@ -76,6 +92,15 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
   const brokerXferDir = options.brokerXferDir ?? XFER_DIR;
   const xferDir = options.xferDir ?? XFER_DIR;
   const meshConfigPath = options.meshConfigPath ?? MESH_CONFIG_PATH;
+  const sshOps: SshLinkOperations = options.sshLink ?? (() => {
+    const sshOpts = (): SshLinkOptions => ({ xferDir, myName: controller.state.identity?.name ?? "" });
+    return {
+      list: () => listLinks(sshOpts()),
+      up: (host) => sshUp(host, sshOpts()),
+      down: (host) => sshDown(host, sshOpts()),
+      plan: (host) => planSshUp(host, sshOpts()),
+    };
+  })();
   const board = registerBoard(pi, { boardDir: options.boardDir, getAuthor: () => controller.state.identity?.name ?? "unknown" });
 
   pi.registerCommand("xfer", {
@@ -116,6 +141,19 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         return items.length > 0 ? items : null;
       }
 
+      // `/xfer ssh <TAB>` completes the ssh subcommand group.
+      if (prefix.startsWith("ssh ") || prefix === "ssh") {
+        if (prefix === "ssh") {
+          return [{ value: "ssh", label: "ssh", description: "SSH Link transport (ADR-0021): up / down / list" }];
+        }
+        const subPrefix = prefix.slice("ssh ".length).replace(/^\s+/, "");
+        const items: AutocompleteItem[] = [
+          { value: "ssh up", label: "up", description: "Open a bidirectional Link: /xfer ssh up <user@host>" },
+          { value: "ssh list", label: "list", description: "List active ssh Links" },
+          { value: "ssh down", label: "down", description: "Tear down Links: /xfer ssh down [host]" },
+        ].filter(i => i.label.startsWith(subPrefix));
+        return items.length > 0 ? items : null;
+ }
       const peers = listPeers(controller.state.identity?.name ?? "", xferDir);
       // `/xfer mesh <TAB>` completes the mesh subcommand group.
       if (prefix.startsWith("mesh ") || prefix === "mesh") {
@@ -170,6 +208,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
           "   /xfer mesh [<status|up|down|list|setup|name> <request>] — mesh transport\n" +
+          "   /xfer ssh up <user@host> | list | down [host] — ssh Link to one remote machine\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
           "   /xfer doctor             — self-check the install and print fix hints\n" +
 
@@ -183,12 +222,84 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       // ── list ──
       if (cmd === "list") {
         const peers = listPeers(state.identity?.name ?? "", xferDir);
-        let text = peers.length
-          ? `📡 Peers:\n\n${peers.map(peer => `  ${peer.xferName}\n    ${peerDescription(peer)}`).join("\n\n")}`
+        const links = sshOps.list().map(l => ({ ...l, name: decodeLinkName(l.name) }));
+        const linkNames = new Set(links.map(l => l.name));
+        const peerLines = peers
+          .filter(peer => !linkNames.has(peer.xferName) || peer.via !== "ssh")
+          .map(peer => `  ${peer.xferName}\n    ${peerDescription(peer)}`);
+        const linkLines = links
+          .filter(l => !peers.some(p => p.xferName === l.name && p.via === "ssh"))
+          .map(l => `  ${l.name}\n    remote node via ssh ${l.host} (Link, pid ${l.pid})`);
+        const shown = [...peerLines, ...linkLines];
+        let text = shown.length
+          ? `📡 Peers:\n\n${shown.join("\n\n")}`
           : "📡 No peers found";
         text += listenerSection(controller);
 
         ctx.ui.notify(text, "info");
+        return;
+      }
+
+      // ── /xfer ssh up <user@host> | list | down [host] — ssh Link transport (ADR-0021) ──
+      if (cmd === "ssh") {
+        const sub = parts[1];
+        if (!sub || sub === "help") {
+          ctx.ui.notify(
+            "🔗 /xfer ssh                — this help\n" +
+            "   /xfer ssh up <user@host>  — open a bidirectional Link (snapshot of the remote's nodes; rerun to refresh)\n" +
+            "   /xfer ssh list           — active Links\n" +
+            "   /xfer ssh down [host]    — tear down Links (all when no host given)\n" +
+            "\nLife follows this pi process: exit tears the tunnel down. Name collisions are refused, never renamed.",
+            "info",
+          );
+          return;
+        }
+        if (sub === "list") {
+          const links = sshOps.list();
+          ctx.ui.notify(
+            links.length
+              ? `🔗 ssh Links:\n${links.map(l => `  ${decodeLinkName(l.name)} — via ${l.host} (pid ${l.pid})`).join("\n")}`
+              : "🔗 No ssh Links — /xfer ssh up <user@host>",
+            "info",
+          );
+          return;
+        }
+        if (sub === "up") {
+          const host = parts[2];
+          if (!host || parts.length > 3) {
+            ctx.ui.notify("Usage: /xfer ssh up <user@host>", "error");
+            return;
+          }
+          if (!state.identity) {
+            ctx.ui.notify("❌ Xfer is not initialised", "error");
+            return;
+          }
+          try {
+            const result = await sshOps.up(host);
+            const rebuiltNote = result.rebuilt.length > 0 ? ` (rebuilt: ${result.rebuilt.join(", ")})` : "";
+            const names = result.forwardNames.length > 0 ? `\nremote nodes: ${result.forwardNames.join(", ")}` : "\nno remote nodes found at probe time — rerun /xfer ssh up after they start";
+            ctx.ui.notify(`🟢 Link to ${host} up (pid ${result.pid})${rebuiltNote}\nthis pi is reachable there as "${state.identity.name}"${names}`, "info");
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+        if (sub === "down") {
+          const host = parts[2];
+          if (parts.length > 3) {
+            ctx.ui.notify("Usage: /xfer ssh down [host]", "error");
+            return;
+          }
+          const torn = sshOps.down(host);
+          ctx.ui.notify(
+            torn.length
+              ? `🛑 Tore down ${torn.length} Link(s): ${torn.map(l => `${decodeLinkName(l.name)} (${l.host})`).join(", ")}`
+              : host ? `⭕ No Link to ${host}` : "⭕ No ssh Links",
+            "info",
+          );
+          return;
+        }
+        ctx.ui.notify("Usage: /xfer ssh <up <user@host>|list|down [host]>", "error");
         return;
       }
 
@@ -621,7 +732,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         const lines = report.zombies.map((z) => {
           const pid = z.pid !== undefined ? `pid ${z.pid}` : "no metadata";
-          return `  ${z.name} — ${z.reason} (${pid})`;
+          const linkHint = z.reason === "dead-link" && z.linkHost ? `\n    ↳ ssh Link to ${z.linkHost} died — rerun /xfer ssh up ${z.linkHost} to rebuild, or /xfer ssh down ${z.linkHost} to drop it` : "";
+          return `  ${z.name} — ${z.reason} (${pid})${linkHint}`;
         });
         ctx.ui.notify(
           `🧹 Removed ${report.zombies.length} zombie(s):\n${lines.join("\n")}\n` +

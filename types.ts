@@ -11,6 +11,9 @@ export interface PeerInfo {
   pid?: number;
   startedAt?: number;
   description?: string;
+  /** SSH Link marker (ADR-0021): present only on a Link's `.json`, never on a Peer's. */
+  via?: "ssh";
+  host?: string;
 }
 
 /** `xfer-notify` frame sent over the peer socket (one-way handoff). */

@@ -303,7 +303,8 @@ function readPeerMetadata(xferName, xferDir = XFER_DIR) {
       ...typeof value.model === "string" ? { model: value.model } : {},
       ...typeof value.status === "string" ? { status: value.status } : {},
       ...typeof value.pid === "number" ? { pid: value.pid } : {},
-      ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {}
+      ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {},
+      ...value.via === "ssh" ? { via: "ssh", host: typeof value.host === "string" ? value.host : "" } : {}
     };
   } catch {
     return {};
@@ -2210,11 +2211,22 @@ async function planGc(xferDir) {
     const jsonPath = path8.join(xferDir, `${stem}.json`);
     const sockPath = path8.join(xferDir, `${stem}.sock`);
     let pid;
+    let linkHost;
     try {
       const raw = JSON.parse(fs7.readFileSync(jsonPath, "utf-8"));
-      const candidate = raw?.pid;
+      const rec = raw;
+      const candidate = rec?.pid;
       if (typeof candidate === "number") pid = candidate;
+      if (rec?.via === "ssh" && typeof rec.host === "string") linkHost = rec.host;
     } catch {
+    }
+    if (linkHost !== void 0) {
+      if (pid !== void 0 && !processAlive(pid)) {
+        zombies.push({ name: stem, sockPath, jsonPath, pid, reason: "dead-link", linkHost });
+      } else {
+        alive.push(stem);
+      }
+      continue;
     }
     if (pid === void 0) {
       if (fs7.existsSync(sockPath) && !await socketHasListener(sockPath)) {

@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 
-export type GcReason = "dead-pid" | "orphan-sock" | "unreadable-json";
+export type GcReason = "dead-pid" | "orphan-sock" | "unreadable-json" | "dead-link";
 
 export interface GcZombie {
   /** Encoded peer name (socket file stem). */
@@ -28,6 +28,8 @@ export interface GcZombie {
   jsonPath?: string;
   pid?: number;
   reason: GcReason;
+  /** Set for a reaped ssh Link: rebuild hint for the gc output (ADR-0021). */
+  linkHost?: string;
 }
 
 export interface GcReport {
@@ -106,11 +108,26 @@ export async function planGc(xferDir: string): Promise<GcReport> {
     const jsonPath = path.join(xferDir, `${stem}.json`);
     const sockPath = path.join(xferDir, `${stem}.sock`);
     let pid: number | undefined;
+    let linkHost: string | undefined;
     try {
       const raw: unknown = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
-      const candidate = (raw as Record<string, unknown> | null)?.pid;
+      const rec = raw as Record<string, unknown> | null;
+      const candidate = rec?.pid;
       if (typeof candidate === "number") pid = candidate;
+      if (rec?.via === "ssh" && typeof rec.host === "string") linkHost = rec.host;
     } catch { /* handled below */ }
+
+    if (linkHost !== undefined) {
+      // ssh Link (ADR-0021): pid is the only honest signal — the ssh local
+      // endpoint always accepts connections, so listener probing is meaningless.
+      // gc reaps the files; the process is `up`/`down`'s business.
+      if (pid !== undefined && !processAlive(pid)) {
+        zombies.push({ name: stem, sockPath, jsonPath, pid, reason: "dead-link", linkHost });
+      } else {
+        alive.push(stem);
+      }
+      continue;
+    }
 
     if (pid === undefined) {
       // Metadata is unusable — only reap when nothing is listening on the sock.
