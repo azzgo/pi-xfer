@@ -236,3 +236,24 @@ describe("plan: the -R landing must not be one of the imported names", () => {
     assert.equal(collides(["a", "b"], "me"), false);
   });
 });
+
+describe("plan: a bare remote socket does not block the landing name", () => {
+  // `sshDown` deletes the metadata immediately, but sshd keeps the -R socket
+  // alive until the connection finishes closing. During that gap the remote
+  // lists a socket with no agent behind it; treating it as a live node made
+  // `down` followed by `in` fail as "the remote already has a node named X".
+  const blocks = (remoteNames: string[], housed: string[], reverseAs: string): boolean =>
+    housed.includes(reverseAs);
+
+  it("blocks when the remote really has an agent by that name", () => {
+    assert.equal(blocks(["mac-xfer"], ["mac-xfer"], "mac-xfer"), true);
+  });
+
+  it("does NOT block on a bare socket left by a teardown", () => {
+    assert.equal(blocks(["mac-xfer"], [], "mac-xfer"), false, "socket without metadata is an sshd leftover");
+  });
+
+  it("does not block on a name that is not listed at all", () => {
+    assert.equal(blocks(["other"], ["other"], "mac-xfer"), false);
+  });
+});

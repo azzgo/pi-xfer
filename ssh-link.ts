@@ -223,18 +223,35 @@ const REMOTE_DIR_EXPR = 'if [ -r ~/.pi/xfer-ssh-env ]; then . ~/.pi/xfer-ssh-env
  * Detect the remote xfer dir and snapshot its existing socks in one round trip.
  * Those names are the `in` candidates: what that machine already listens on.
  */
-export async function probeRemote(host: string, keyPath?: string): Promise<{ dir: string; names: string[] }> {
+export async function probeRemote(
+  host: string,
+  keyPath?: string,
+): Promise<{ dir: string; names: string[]; housed: string[] }> {
+  // Each socket is reported with whether it also has a `.json` beside it, which
+  // is what tells an agent that actually lives there apart from a bare sshd
+  // endpoint. The distinction matters at exactly one moment: teardown. `sshDown`
+  // deletes the metadata immediately but sshd releases the -R socket only when
+  // the connection finishes closing, so for that gap a socket exists with no
+  // agent behind it. Treating those the same made `down` followed by `in` fail
+  // as "the remote already has a node named X" — a phantom collision.
   const out = await sshCapture(host,
-    `${REMOTE_DIR_EXPR} && ls "$XFER_DIR"/*.sock 2>/dev/null || true`,
+    `${REMOTE_DIR_EXPR} && cd "$XFER_DIR" 2>/dev/null && `
+    + `for f in *.sock; do [ -e "$f" ] || continue; n="\${f%.sock}"; `
+    + `if [ -f "$n.json" ]; then echo "$n json"; else echo "$n bare"; fi; done || true`,
     keyPath);
   const lines = out.split("\n").filter(l => l.trim() !== "");
   const dir = lines.shift()?.trim();
   if (!dir) throw new Error(`ssh ${host}: empty probe output`);
-  const names = lines
-    .map(l => l.trim().split("/").pop() ?? "")
-    .filter(n => n.endsWith(".sock"))
-    .map(n => decodeStem(n.slice(0, -".sock".length)));
-  return { dir, names };
+  const names: string[] = [];
+  const housed: string[] = [];
+  for (const line of lines) {
+    const [rawName, kind] = line.trim().split(/\s+/);
+    if (!rawName) continue;
+    const name = decodeStem(rawName);
+    names.push(name);
+    if (kind === "json") housed.push(name);
+  }
+  return { dir, names, housed };
 }
 
 export interface SshUpPlan {
@@ -315,7 +332,11 @@ export async function planSshUp(host: string, opts: SshLinkOptions): Promise<Ssh
   // On a FIRST link the landing must also not shadow a node already on the
   // remote. When extending an existing Link the landing is already established
   // (ssh owns that socket), so the remote legitimately lists it.
-  if (!existing && remote.names.includes(reverseAs)) {
+  //
+  // `housed` (socket AND metadata) is the honest signal: a bare socket is an
+  // sshd endpoint with no agent behind it — most importantly, the remains of a
+  // Link we just tore down, whose socket sshd has not released yet.
+  if (!existing && remote.housed.includes(reverseAs)) {
     throw new Error(
       `${host} already has a node named "${reverseAs}" — rename this pi with /xfer name <name> before linking`,
     );
@@ -328,6 +349,7 @@ export async function planSshUp(host: string, opts: SshLinkOptions): Promise<Ssh
     reverseAs,
     added,
     remoteNames: remote.names,
+    housedNames: remote.housed,
     ...(existing ? { existing } : {}),
   };
 }
