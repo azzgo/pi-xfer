@@ -181,6 +181,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "doctor", label: "doctor", description: "Self-check the install: socket dir / peers / broker / admin / mesh" },
         { value: "status", label: "status", description: "Show listener status" },
         { value: "mesh", label: "mesh", description: "Mesh transport: status / up / down / list / <name> <request>" },
+        { value: "ssh", label: "ssh", description: "SSH Link transport: up <user@host> / list / down [host]" },
         ...peers.map(peer => ({
           value: peer.xferName,
           label: peer.xferName,
