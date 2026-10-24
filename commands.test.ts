@@ -85,6 +85,7 @@ function harness(options: {
   adminManager?: AdminManager;
   meshConfigPath?: string;
   mesh?: any;
+  sshLink?: import("./commands.js").SshLinkOperations;
 } = {}): {
   description: string | undefined;
   handler: (args: string) => Promise<void>;
@@ -117,6 +118,7 @@ function harness(options: {
     adminManager: options.adminManager ?? stubAdminManager(),
     meshConfigPath: options.meshConfigPath ?? path.join(tmpDir, "mesh.config.json"),
     mesh: options.mesh,
+    sshLink: options.sshLink,
   });
   assert.ok(def, "registerCommand was not captured");
   const ctx = {
@@ -753,5 +755,85 @@ describe("xfer command: desc", () => {
     assert.equal(h.notifications[0].type, "error");
     assert.match(h.notifications[0].message, /Saved locally/);
     assert.match(h.notifications[0].message, /limited to 500 characters/);
+  });
+});
+
+/** sshLink stub — no ssh, no sockets; records what the handler asked for. */
+function stubSshLink(overrides: Partial<import("./commands.js").SshLinkOperations> = {}) {
+  const calls: string[] = [];
+  const ops: import("./commands.js").SshLinkOperations = {
+    list: () => [],
+    own: () => [],
+    up: async (host, direction, names) => {
+      calls.push(`up ${direction} ${host} ${(names ?? []).join(",")}`.trim());
+      return { host, pid: 4242, direction, names: names ?? ["self"], rebuilt: [] };
+    },
+    down: (host) => { calls.push(`down ${host ?? "*"}`); return []; },
+    plan: async (host, direction, names) => ({ host, remoteDir: "/remote", names: names ?? [] }),
+    probe: async (host) => { calls.push(`probe ${host}`); return { dir: "/remote/.pi/xfer", names: ["alpha", "beta"] }; },
+    status: () => "up",
+    ...overrides,
+  };
+  return { ops, calls };
+}
+
+describe("xfer command: /xfer ssh argument parsing", () => {
+  it("list <host> probes instead of complaining about surplus args", async () => {
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh list pi-xfer");
+    assert.equal(h.notifications.length, 1);
+    assert.equal(h.notifications[0].type, "info");
+    assert.match(h.notifications[0].message, /alpha/);
+    assert.match(h.notifications[0].message, /beta/);
+    assert.deepEqual(ssh.calls, ["probe pi-xfer"]);
+  });
+
+  it("in <host> <name...> passes the remote names, not the host, as names", async () => {
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh in pi-xfer alpha beta");
+    assert.equal(h.notifications[0].type, "info");
+    assert.deepEqual(ssh.calls, ["up in pi-xfer alpha,beta"]);
+  });
+
+  it("in without names explains and points at list", async () => {
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh in pi-xfer");
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /list <host>/);
+    assert.deepEqual(ssh.calls, []);
+  });
+
+  it("out <host> needs no names", async () => {
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh out pi-xfer");
+    assert.deepEqual(ssh.calls, ["up out pi-xfer"]);
+  });
+
+  it("status does not touch ssh and reports what own() returns", async () => {
+    const ssh = stubSshLink({
+      list: () => [
+        { name: "alpha", host: "h1", pid: 11, owner: process.pid, direction: "in" },
+        { name: "beta", host: "h2", pid: 22, owner: 999999, direction: "out" },
+      ],
+      own: () => [{ name: "alpha", host: "h1", pid: 11, owner: process.pid, direction: "in" }],
+    });
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh status");
+    const text = h.notifications[0].message;
+    assert.match(text, /alpha/);
+    assert.match(text, /beta/);
+    assert.match(text, /foreign/);
+    assert.deepEqual(ssh.calls, []);
+  });
+
+  it("down with a host is scoped to that host", async () => {
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh down pi-xfer");
+    assert.deepEqual(ssh.calls, ["down pi-xfer"]);
   });
 });

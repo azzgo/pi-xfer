@@ -257,7 +257,9 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       if (cmd === "ssh") {
         const sub = parts[1];
         const host = parts[2];
-        const rest = parts.slice(2).filter(Boolean);
+        // names/extra args come AFTER the host; keeping host in `rest` made
+        // every `list <host>` look like surplus arguments.
+        const rest = parts.slice(3).filter(Boolean);
         const usage =
           "Usage: /xfer ssh in <host> <name...>   — import remote nodes (-L)\n" +
           "       /xfer ssh out <host> [name]     — export this pi (-R)\n" +
