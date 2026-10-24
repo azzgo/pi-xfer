@@ -51,10 +51,17 @@ export interface XferNotifyMessage {
   via?: "ssh";
   /**
    * sha256 of `document`, computed by the sender before the frame was built.
-   * The receiver checks it against the bytes it actually wrote, which is the
-   * only way either side can know the payload survived the wire — and, where
-   * a runtime redacts secrets out of outbound text, whether that redaction
-   * touched the body. Absent for path-only frames (local peers).
+   * The receiver checks it against the bytes it actually wrote, so either side
+   * can tell "landed intact" from "landed altered".
+   *
+   * **What it does not prove.** The digest covers the payload the sender had
+   * when it hashed, not the payload the sender meant. If the runtime rewrites
+   * outbound text (a secret redaction, say) BEFORE this hash is taken, the
+   * check passes and the loss is invisible. So `verified` means only "the wire
+   * changed nothing" — never "the text is what the human wrote". Do not treat
+   * a matching hash as evidence that a redaction did not happen.
+   *
+   * Absent for path-only frames (local peers): there is no travelling body.
    */
   docSha256?: string;
 }

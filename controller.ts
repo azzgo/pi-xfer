@@ -63,8 +63,13 @@ export class XferController {
         msg = { ...msg, file: local };
         // The sender hashed the body before building the frame; compare it with
         // the bytes actually written here. A mismatch means the payload was
-        // altered in flight (an outbound redaction rewriting text, say) — the
-        // receiver still has the content, so it delivers, but it says so.
+        // altered between send and write — the receiver still has the content,
+        // so it delivers, but it says so.
+        //
+        // A match proves only that: it cannot detect a rewrite that happened
+        // before the sender hashed (a runtime redacting outbound text, for
+        // instance). See XferNotifyMessage.docSha256 — the limit is deliberate
+        // and must not be read as "the payload was never touched".
         if (msg.docSha256) {
           const actual = createHash("sha256").update(msg.document, "utf-8").digest("hex");
           this.lastIntegrity = actual === msg.docSha256 ? "verified" : "mismatch";

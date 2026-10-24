@@ -12,6 +12,10 @@ export interface InboundDelivery {
    * the bytes that were sent. Reported in the ack so the SENDER learns it —
    * a receiver-only verdict would leave the sender believing `delivered` meant
    * "intact", which is exactly the ambiguity ADR-0020 removed elsewhere.
+   *
+   * `verified` is narrower than it sounds: it says the frame's body reached
+   * this process unchanged, not that the text was never rewritten upstream.
+   * See XferNotifyMessage.docSha256 for the boundary.
    */
   integrity?(): "verified" | "mismatch" | undefined;
 }
