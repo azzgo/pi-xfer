@@ -2,14 +2,15 @@
  * Manual smoke for ssh-link.ts (ADR-0021) — run under tmux:
  *   node --import ./ts-resolve-hook.mjs scripts/ssh-link-smoke.ts
  *
- * Uses `ssh localhost` as the "remote" machine. The remote xfer dir is a
- * temp dir (exported as XFER_DIR so the probe sees it), holding one fake
- * remote node sock with a live listener. Verifies:
- *   1. probe finds the remote dir + node
- *   2. sshUp creates the -L landing sockets + Link json ledger
- *   3. -R lands self.sock in the remote dir
- *   4. the -L tunnel actually connects end to end
- *   5. sshDown kills the pid and removes the ledger files
+ * Uses `ssh localhost` as the "remote" machine. The remote xfer dir is a temp
+ * dir staged in ~/.pi/xfer-ssh-env (XFER_DIR cannot cross ssh: sshd's AcceptEnv
+ * does not allow it) holding one fake remote node sock with a live listener.
+ *
+ * Covers what a Link actually is now: ONE ssh process carrying -L for every
+ * imported name and -R for this pi, so both directions exist by construction.
+ *   - `in a` then `in b` accumulates, never replaces
+ *   - the remote ends up with a `role: reverse` marker for this pi (no pid)
+ *   - down tears the host Link down as a unit
  */
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -29,84 +30,74 @@ const remoteDir = path.join(base, "remote");
 fs.mkdirSync(localDir, { recursive: true });
 fs.mkdirSync(remoteDir, { recursive: true });
 
-const forwardEnv = { ...process.env, XFER_DIR: remoteDir };
+const servers: net.Server[] = [];
+async function fakeNode(name: string): Promise<void> {
+  const server = net.createServer(() => {});
+  servers.push(server);
+  await new Promise<void>(resolve => server.listen(path.join(remoteDir, `${name}.sock`), resolve));
+}
 
-// Fake remote node: a listener on <remoteDir>/remote-alpha.sock
-const remoteServer = net.createServer(() => {});
-await new Promise<void>(resolve => remoteServer.listen(path.join(remoteDir, "remote-alpha.sock"), resolve));
-console.log(`fake remote node listening at ${remoteDir}/remote-alpha.sock`);
+await fakeNode("alpha");
+await fakeNode("beta");
+// This pi's own listener: the -R target. A real pi binds it at session start.
+const selfServer = net.createServer(() => {});
+servers.push(selfServer);
+await new Promise<void>(resolve => selfServer.listen(path.join(localDir, "mac-xfer.sock"), resolve));
+console.log(`fake remote nodes in ${remoteDir}`);
 
-const baseOpts = { xferDir: localDir, myName: "self" as const, keyPath: path.join(os.homedir(), ".ssh", "id_ed25519_smoke") };
-const opts = { ...baseOpts, direction: "in" as const, names: ["remote-alpha"] };
-const childEnvSet = process.env.XFER_DIR;
-// The remote env cannot cross ssh (AcceptEnv), so stage it in the remote
-// user's home via the existing localhost connection — smoke-only mechanism.
+const opts = { xferDir: localDir, myName: "mac-xfer", keyPath: path.join(os.homedir(), ".ssh", "id_ed25519_smoke") };
 fs.writeFileSync(path.join(os.homedir(), ".pi/xfer-ssh-env"), `export XFER_DIR=${JSON.stringify(remoteDir)}\n`);
 
 try {
-  const result = await sshUp("localhost", opts);
-  console.log("sshUp:", result);
-  assert(result.names.includes("remote-alpha"), "in imported remote-alpha");
-  assert(fs.existsSync(path.join(localDir, "remote-alpha.sock")), "-L landing socket created locally");
-  assert(!fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "in writes no self ledger entry");
-  assert(!fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "in leaves no -R landing on the remote");
+  // ── first import ──
+  const first = await sshUp("localhost", { ...opts, names: ["alpha"] });
+  console.log("sshUp(alpha):", first);
+  assert(first.names.join(",") === "alpha", "imports alpha");
+  assert(fs.existsSync(path.join(localDir, "alpha.sock")), "-L landing created locally");
+  assert(fs.existsSync(path.join(remoteDir, "mac-xfer.sock")), "-R landed this pi on the remote");
+  assert(fs.existsSync(path.join(localDir, "mac-xfer.sock")), "this pi's own socket is the -R target");
 
-  const links = listOwnLinks(baseOpts);
-  assert(links.length === 1 && links[0].host === "localhost", "ledger lists exactly the imported entry");
-  assert(links[0].name === "remote-alpha", "ledger entry names the remote node");
+  const reverseMarker = JSON.parse(fs.readFileSync(path.join(remoteDir, "mac-xfer.json"), "utf-8"));
+  assert(reverseMarker.role === "reverse", "the remote got a role:reverse marker");
+  assert(reverseMarker.via === "ssh", "…marked as an ssh Link");
+  assert(reverseMarker.pid === undefined, "…and deliberately carries no pid");
 
-  await new Promise<void>((resolve, reject) => {
-    const conn = net.connect({ path: path.join(localDir, "remote-alpha.sock") });
-    conn.on("connect", () => { conn.destroy(); resolve(); });
-    conn.on("error", reject);
-    setTimeout(() => reject(new Error("tunnel connect timed out")), 5000);
-  });
-  assert(true, "-L tunnel connects end to end (local -> ssh -> remote listener)");
+  // ── accumulate, not replace ──
+  const second = await sshUp("localhost", { ...opts, names: ["beta"] });
+  console.log("sshUp(beta):", second);
+  assert(second.names.sort().join(",") === "alpha,beta", "the second run keeps alpha and adds beta");
+  assert(second.added.join(",") === "beta", "only beta counts as added");
+  assert(fs.existsSync(path.join(localDir, "alpha.sock")), "alpha landing survives the rebuild");
+  assert(fs.existsSync(path.join(localDir, "beta.sock")), "beta landing created");
+  assert(listOwnLinks(opts).length === 1, "still exactly one Link for this host");
 
-  const down = sshDown("localhost", baseOpts).torn;
-  assert(down.length === 1, "sshDown tears down the -L entry");
-  assert(!fs.existsSync(path.join(localDir, "remote-alpha.json")), "ledger json removed");
-
-  // ── direction: in (import a remote node) ──
-  const inResult = await sshUp("localhost", { ...baseOpts, direction: "in", names: ["remote-alpha"] });
-  console.log("sshUp(in):", inResult);
-  assert(inResult.names[0] === "remote-alpha", "in imported the named remote node");
-  assert(fs.existsSync(path.join(localDir, "remote-alpha.sock")), "in created the local landing sock");
-  assert(!fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "in writes no self entry");
-  const inLinks = listOwnLinks(baseOpts);
-  assert(inLinks.length === 1 && inLinks[0].name === "remote-alpha", "ledger lists the imported node");
-  assert(sshDown("remote-alpha", baseOpts).torn.length === 1, "in Link tears down by forward name");
-
-  // ── direction: out (export this pi) ──
-  const outResult = await sshUp("localhost", { ...baseOpts, direction: "out" });
-  console.log("sshUp(out):", outResult);
-  assert(outResult.names[0] === "self", "out exported this pi under its own name");
-  assert(fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "out landed self.sock on the remote");
-  assert(!fs.existsSync(path.join(localDir, "remote-alpha.sock")), "out imports nothing");
-  const outLinks = listOwnLinks(baseOpts);
-  assert(outLinks.length === 1 && outLinks[0].direction === "out", "ledger records the out direction");
-  assert(sshDown("localhost", baseOpts).torn.length === 1, "out Link tears down by host");
-
-  // ── in rejects an unknown remote name, naming what exists ──
-  let rejected = "";
-  try {
-    await sshUp("localhost", { ...baseOpts, direction: "in", names: ["nope"] });
-  } catch (err) {
-    rejected = err instanceof Error ? err.message : String(err);
+  // ── both directions are actually usable ──
+  for (const name of ["alpha", "beta"]) {
+    await new Promise<void>((resolve, reject) => {
+      const conn = net.connect({ path: path.join(localDir, `${name}.sock`) });
+      conn.on("connect", () => { conn.destroy(); resolve(); });
+      conn.on("error", reject);
+      setTimeout(() => reject(new Error(`${name} tunnel timed out`)), 5000);
+    });
   }
-  assert(/not found on localhost: nope/.test(rejected) && /remote-alpha/.test(rejected),
-    "in rejects an unknown remote name and lists the real ones");
+  assert(true, "both -L tunnels connect end to end");
 
-  // ── a foreign pi's Link is not ours to tear down ──
-  fs.writeFileSync(path.join(localDir, "foreign.json"), JSON.stringify({ via: "ssh", host: "localhost", pid: 999999, owner: 999999, direction: "in" }));
-  assert(sshDown(undefined, baseOpts).torn.length === 0, "sshDown leaves a foreign Link alone");
-  assert(listLinks(baseOpts).length === 1, "the foreign Link record survives");
-  fs.unlinkSync(path.join(localDir, "foreign.json"));
+  // ── re-running with no names is a no-op refresh, not a wipe ──
+  const third = await sshUp("localhost", { ...opts });
+  assert(third.names.sort().join(",") === "alpha,beta", "a bare re-run preserves the imported set");
+
+  // ── teardown is per host ──
+  const down = sshDown("alpha", opts).torn;
+  assert(down.length === 1, "naming one forward tears down its whole host Link");
+  assert(!fs.existsSync(path.join(localDir, "alpha.sock")), "alpha landing removed");
+  assert(!fs.existsSync(path.join(localDir, "beta.sock")), "beta landing removed with it");
+  assert(!fs.existsSync(path.join(localDir, ".link.localhost.json")), "ledger removed");
+  assert(listLinks(opts).length === 0, "no Links left");
+
   console.log("\nALL PASS");
 } finally {
-  if (childEnvSet === undefined) delete process.env.XFER_DIR; else process.env.XFER_DIR = childEnvSet;
   fs.rmSync(path.join(os.homedir(), ".pi/xfer-ssh-env"), { force: true });
-  remoteServer.close();
-  sshDown("localhost", baseOpts); // leave nothing behind on failure paths
+  for (const s of servers) s.close();
+  sshDown(undefined, opts);
   console.log(`(artifacts left at ${base} for inspection)`);
 }

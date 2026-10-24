@@ -307,7 +307,7 @@ function readPeerMetadata(xferName, xferDir = XFER_DIR) {
       ...value.via === "ssh" ? {
         via: "ssh",
         host: typeof value.host === "string" ? value.host : "",
-        ...value.direction === "in" || value.direction === "out" ? { direction: value.direction } : {}
+        ...value.role === "reverse" ? { role: "reverse" } : {}
       } : {}
     };
   } catch {
@@ -835,6 +835,7 @@ function readSiblingMetadata(metadataPath) {
       sessionName: typeof value.sessionName === "string" ? value.sessionName : null,
       cwd: typeof value.cwd === "string" ? value.cwd : null,
       status: typeof value.status === "string" ? value.status : null,
+      ...value.via === "ssh" ? { via: "ssh" } : {},
       ...typeof value.description === "string" && value.description.trim() !== "" ? { description: value.description } : {}
     };
   } catch {
@@ -2216,13 +2217,23 @@ async function planGc(xferDir) {
     const sockPath = path8.join(xferDir, `${stem}.sock`);
     let pid;
     let linkHost;
+    let reverseMarker = false;
     try {
       const raw = JSON.parse(fs7.readFileSync(jsonPath, "utf-8"));
       const rec = raw;
       const candidate = rec?.pid;
       if (typeof candidate === "number") pid = candidate;
       if (rec?.via === "ssh" && typeof rec.host === "string") linkHost = rec.host;
+      reverseMarker = rec?.role === "reverse";
     } catch {
+    }
+    if (reverseMarker) {
+      if (!await socketHasListener(sockPath)) {
+        zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link", linkHost });
+      } else {
+        alive.push(stem);
+      }
+      continue;
     }
     if (linkHost !== void 0) {
       if (pid !== void 0 && !processAlive(pid)) {

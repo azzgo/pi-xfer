@@ -31,9 +31,19 @@ function deadPid(): number {
   return r.pid;
 }
 
-function writeLink(dir: string, name: string, host: string, pid: number, owner = process.pid, direction = "in"): void {
-  fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({ via: "ssh", host, pid, owner, direction }, null, 2));
-  fs.writeFileSync(path.join(dir, `${name}.sock`), "");
+function writeLink(
+  dir: string,
+  host: string,
+  pid: number,
+  names: string[],
+  owner = process.pid,
+  reverseAs = "self",
+): void {
+  fs.writeFileSync(
+    path.join(dir, `.link.${encodeURIComponent(host)}.json`),
+    JSON.stringify({ host, pid, owner, names, reverseAs }, null, 2),
+  );
+  for (const name of names) fs.writeFileSync(path.join(dir, `${name}.sock`), "");
 }
 
 function opts(dir: string): SshLinkOptions {
@@ -41,18 +51,25 @@ function opts(dir: string): SshLinkOptions {
 }
 
 describe("ssh-link: listLinks", () => {
-  it("lists only via:ssh records with host+pid", () => {
+  it("reads one ledger per host with its names and reverse landing", () => {
     const dir = tmpXferDir();
-    writeLink(dir, "remote-a", "a@host1", 123);
-    fs.writeFileSync(path.join(dir, "peer.json"), JSON.stringify({ xferName: "peer", pid: process.pid }));
-    fs.writeFileSync(path.join(dir, "broken.json"), "{ not json");
-    fs.writeFileSync(path.join(dir, "partial.json"), JSON.stringify({ via: "ssh", host: "x" }));
+    writeLink(dir, "pi-nas", 123, ["alpha", "beta"], process.pid, "mac-xfer");
+    writeLink(dir, "other", 456, ["gamma"]);
 
-    const links = listLinks(opts(dir));
-    assert.equal(links.length, 1);
-    assert.equal(links[0].name, "remote-a");
-    assert.equal(links[0].host, "a@host1");
-    assert.equal(links[0].pid, 123);
+    const links = listLinks(opts(dir)).sort((a, b) => a.host.localeCompare(b.host));
+    assert.equal(links.length, 2);
+    assert.deepEqual(links[0].names, ["gamma"]);
+    assert.deepEqual(links[1].names, ["alpha", "beta"]);
+    assert.equal(links[1].pid, 123);
+    assert.equal(links[1].reverseAs, "mac-xfer");
+  });
+
+  it("ignores peer metadata and malformed ledgers", () => {
+    const dir = tmpXferDir();
+    fs.writeFileSync(path.join(dir, "peer.json"), JSON.stringify({ xferName: "peer", pid: process.pid }));
+    fs.writeFileSync(path.join(dir, ".link.broken.json"), "{ not json");
+    fs.writeFileSync(path.join(dir, ".link.nopid.json"), JSON.stringify({ host: "x", owner: 1 }));
+    assert.deepEqual(listLinks(opts(dir)), []);
   });
 
   it("returns [] for a missing directory", () => {
@@ -63,111 +80,50 @@ describe("ssh-link: listLinks", () => {
 describe("ssh-link: ownership", () => {
   it("listOwnLinks separates this process's Links from another pi's", () => {
     const dir = tmpXferDir();
-    writeLink(dir, "mine", "h1", process.pid, process.pid);
-    writeLink(dir, "theirs", "h2", process.pid + 999999, process.pid + 999999);
-    assert.deepEqual(listOwnLinks(opts(dir)).map(l => l.name), ["mine"]);
+    writeLink(dir, "h1", deadPid(), ["mine"], process.pid);
+    writeLink(dir, "h2", deadPid(), ["theirs"], process.pid + 999999);
+    assert.deepEqual(listOwnLinks(opts(dir)).map(l => l.host), ["h1"]);
     assert.equal(listLinks(opts(dir)).length, 2);
-    assert.equal(linkStatus(listOwnLinks(opts(dir))[0]), "up");
+    assert.equal(linkStatus(listOwnLinks(opts(dir))[0]), "dead", "its ssh process is gone");
   });
 
   it("reports a Link whose ssh process is gone as dead", () => {
     const dir = tmpXferDir();
-    writeLink(dir, "gone", "h1", deadPid(), process.pid);
+    writeLink(dir, "h1", deadPid(), ["gone"], process.pid);
     assert.equal(linkStatus(listOwnLinks(opts(dir))[0]), "dead");
   });
 });
 
 describe("ssh-link: sshDown", () => {
-  it("kills the recorded pid and removes sock+json, scoped by host", () => {
+  it("kills the ssh process, removes every imported socket and the ledger", () => {
     const dir = tmpXferDir();
-    writeLink(dir, "remote-a", "a@host1", deadPid());
-    writeLink(dir, "remote-b", "b@host2", deadPid());
-
-    const torn = sshDown("a@host1", opts(dir)).torn;
-    assert.equal(torn.length, 1);
-    assert.equal(fs.existsSync(path.join(dir, "remote-a.json")), false);
-    assert.equal(fs.existsSync(path.join(dir, "remote-a.sock")), false);
-    assert.equal(fs.existsSync(path.join(dir, "remote-b.json")), true);
-
-    const rest = sshDown(undefined, opts(dir)).torn;
-    assert.equal(rest.length, 1);
-    assert.equal(fs.existsSync(path.join(dir, "remote-b.sock")), false);
-  });
-
-  it("survives an already-dead pid", () => {
-    const dir = tmpXferDir();
-    writeLink(dir, "remote-a", "a@host1", deadPid());
-    assert.equal(sshDown("a@host1", opts(dir)).torn.length, 1);
-  });
-
-  it("never touches a Link another pi process owns", () => {
-    const dir = tmpXferDir();
-    writeLink(dir, "theirs", "a@host1", process.pid + 999999, process.pid + 999999);
-    assert.equal(sshDown(undefined, opts(dir)).torn.length, 0);
-    assert.equal(fs.existsSync(path.join(dir, "theirs.sock")), true);
-    assert.equal(fs.existsSync(path.join(dir, "theirs.json")), true);
-  });
-});
-
-describe("gc: ssh Link branch", () => {
-  it("reaps a dead Link as dead-link and reports the host for the rebuild hint", async () => {
-    const dir = tmpXferDir();
-    writeLink(dir, "remote-a", "a@host1", deadPid());
-
-    const report = await collect(dir);
-    assert.equal(report.zombies.length, 1);
-    assert.equal(report.zombies[0].reason, "dead-link");
-    assert.equal(report.zombies[0].linkHost, "a@host1");
-    assert.equal(fs.existsSync(path.join(dir, "remote-a.sock")), false);
-    assert.equal(fs.existsSync(path.join(dir, "remote-a.json")), false);
-  });
-
-  it("keeps a live Link without any listener probing", async () => {
-    const dir = tmpXferDir();
-    // A plain file, not a socket: would probe as "no listener" for a Peer,
-    // so this only passes if the Link branch skips probing entirely.
-    writeLink(dir, "remote-a", "a@host1", process.pid);
-
-    const report = await collect(dir);
-    assert.equal(report.zombies.length, 0);
-    assert.deepEqual(report.alive, ["remote-a"]);
-  });
-
-  it("treats a via:ssh record without pid as alive (conservative)", async () => {
-    const dir = tmpXferDir();
-    fs.writeFileSync(path.join(dir, "remote-a.json"), JSON.stringify({ via: "ssh", host: "h" }));
-    fs.writeFileSync(path.join(dir, "remote-a.sock"), "");
-    const report = await collect(dir);
-    assert.equal(report.zombies.length, 0);
-  });
-});
-
-async function collect(dir: string) {
-  const { collectGarbage } = await import("./gc.js");
-  return collectGarbage(dir);
-}
-
-describe("ssh-link: sshDown by forward name", () => {
-  it("tears down the whole ssh process group a name belongs to", () => {
-    const dir = tmpXferDir();
-    // One `in` importing two remote nodes: one ssh pid, two ledger entries.
-    writeLink(dir, "alpha", "pi-nas", 4242, process.pid);
-    writeLink(dir, "beta", "pi-nas", 4242, process.pid);
-    writeLink(dir, "self", "mac", 4343, process.pid, "out");
-
-    const result = sshDown("alpha", opts(dir));
-    assert.deepEqual(result.torn.map(l => l.name).sort(), ["alpha", "beta"]);
+    writeLink(dir, "pi-nas", deadPid(), ["alpha", "beta"]);
+    // The recorded pid is a real process here, so let SIGTERM land harmlessly.
+    const result = sshDown("pi-nas", opts(dir));
+    assert.equal(result.torn.length, 1);
+    assert.deepEqual(result.torn[0].names, ["alpha", "beta"]);
     assert.equal(fs.existsSync(path.join(dir, "alpha.sock")), false);
     assert.equal(fs.existsSync(path.join(dir, "beta.sock")), false);
-    assert.equal(fs.existsSync(path.join(dir, "self.sock")), true, "the other ssh process survives");
+    assert.equal(fs.existsSync(path.join(dir, ".link.pi-nas.json")), false);
   });
 
-  it("falls back to a host identifier", () => {
+  it("matches a forward name to its whole host Link", () => {
     const dir = tmpXferDir();
-    writeLink(dir, "alpha", "pi-nas", 4242, process.pid);
-    writeLink(dir, "self", "mac", 4343, process.pid, "out");
-    const result = sshDown("mac", opts(dir));
-    assert.deepEqual(result.torn.map(l => l.name), ["self"]);
-    assert.equal(result.host, "mac");
+    writeLink(dir, "pi-nas", deadPid(), ["alpha", "beta"]);
+    writeLink(dir, "other", deadPid(), ["gamma"]);
+    const result = sshDown("alpha", opts(dir));
+    assert.equal(result.torn.length, 1, "one host Link tears down as a unit");
+    assert.equal(result.torn[0].host, "pi-nas");
+    assert.equal(fs.existsSync(path.join(dir, "gamma.sock")), true, "the other host survives");
+  });
+
+  it("bare down tears down every Link this pi owns, and never another pi's", () => {
+    const dir = tmpXferDir();
+    // A dead pid: sshDown SIGTERMs it, which must never be our own process.
+    writeLink(dir, "h1", deadPid(), ["a"], process.pid);
+    writeLink(dir, "h2", deadPid(), ["b"], process.pid + 999999);
+    assert.equal(sshDown(undefined, opts(dir)).torn.length, 1);
+    assert.equal(fs.existsSync(path.join(dir, ".link.h2.json")), true);
+    assert.equal(fs.existsSync(path.join(dir, "b.sock")), true);
   });
 });

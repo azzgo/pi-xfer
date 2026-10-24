@@ -14,25 +14,15 @@ import { deriveName, endpointForName, metadataForName } from "./utils.ts";
 import { FROM_WEB_PICKER } from "./wire.ts";
 
 /**
- * Tell a Link receiver whether a reply can physically reach the sender.
- *
- * The answer is decided locally: the sender's `out` Link landed a socket named
- * after it in THIS machine's xfer dir, and a reply is just a connect to that
- * socket. No socket ⇒ no route, and saying so up front is what stops an agent
- * from hunting for a return path that does not exist. A wrong guess here is
- * cheap to correct; a silent one sends conclusions into the void.
+ * A Link is always bidirectional (ADR-0021): this pi imported the sender's
+ * socket with -L and exported its own with -R in the same ssh process, so the
+ * reply route exists by construction. The note therefore states a fact rather
+ * than asking the receiver to guess or to fall back to notifications.
  */
-function sshReturnChannelNote(sender: string, xferDir: string): string {
-  const reachable = fs.existsSync(endpointForName(sender, xferDir));
-  return reachable
-    ? `\n\nThis arrived over an **ssh Link**. The return channel exists: this machine has ` +
-      `\`${sender}.sock\`, so \`xfer_to\` with target \`${sender}\` reaches the sender.`
-    : `\n\nThis arrived over an **ssh Link**, and **there is no verified return channel**: ` +
-      `this machine has no \`${sender}.sock\`, so \`xfer_to\` to \`${sender}\` will most likely ` +
-      `fail with "peer not found". That is the tunnel's shape (the sender opened \`in\` only), not the ` +
-      `sender disappearing. Do not search this machine for a route and do not retry xfer_to: ` +
-      `report the conclusion in your own session, or ask the human to open the reverse Link ` +
-      `(\`/xfer ssh out\` on the other machine, or \`/xfer ssh in\` here).`;
+function sshLinkNote(sender: string): string {
+  return `\n\nThis arrived over an **ssh Link**. The tunnel is bidirectional: this machine ` +
+    `exported its own socket to the sender's, so a reply to \`${sender}\` has a route. ` +
+    `The document was carried inline because the sender's filesystem is not reachable here.`;
 }
 
 /**
@@ -42,13 +32,10 @@ function sshReturnChannelNote(sender: string, xferDir: string): string {
 export class XferController {
   private readonly pi: ExtensionAPI;
   readonly state: XferState;
-  /** Where peer sockets live; overridable so tests never touch the real dir. */
-  private readonly xferDir: string;
 
-  constructor(pi: ExtensionAPI, state: XferState, xferDir: string = XFER_DIR) {
+  constructor(pi: ExtensionAPI, state: XferState) {
     this.pi = pi;
     this.state = state;
-    this.xferDir = xferDir;
   }
 
   /** Route one inbound frame into the session. */
@@ -110,7 +97,7 @@ export class XferController {
             (kind === "task"
               ? `\n\nThis handoff is a **Task**: it asks you for output. Send exactly one reverse handoff to \`${msg.from}\` once you have a conclusion, and declare its kind deliberately — \`notification\` when it carries that conclusion, which closes the exchange, or \`task\` when you are blocked and need something further from \`${msg.from}\`. A bare acknowledgement is not a conclusion.`
               : `\n\nThis handoff is a **Notification**: it asks you for nothing. Do not reply. Send a reverse handoff only if you are missing information you need, or if the document conflicts with fact — declare it \`task\` when you need something back.`) +
-            (transportLabel === "ssh" ? sshReturnChannelNote(msg.from, this.xferDir) : "")
+            (transportLabel === "ssh" ? sshLinkNote(msg.from) : "")
           );
     pi.sendMessage({
       customType: "xfer-inbound",

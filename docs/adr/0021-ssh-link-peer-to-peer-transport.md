@@ -10,17 +10,20 @@ Mesh（ADR 0013）为跨机 handoff 提供了注册/发现/路由/离线缓冲�
 
 **Link 是 Mesh 的补充，不是替代。** Mesh 是跨机的主打路径：注册、发现、路由、durable queue 是它的职责，代价是一台常驻引擎。Link 只覆盖"两台已经互信、临时连通、用完即拆"的点对点场景——不建引擎、不注册、不缓冲、不发现（发现就是对端目录快照）。需要离线投递、需要目标休眠时也能排队、需要多机发现，这些都只有 Mesh 能给。
 
+**Link 永远是双向的**：一条 Link = 一个 ssh 进程 = 双向通路。`-L` 把远端节点引进来，`-R` 把本机推出去，同一个进程、同一条命令。任何"半条隧道"都不是我们保留的形态——它不是缺省偏好问题，而是让**回程是否存在**变成发送方必须猜的东西，猜错就把结论发进虚空。
+
 命令面（`<host>` 是任何 ssh 目标：`~/.ssh/config` 的别名、主机名，或 `user@host`）：
 
 ```
-/xfer ssh in <host> <name...>   -L：把远端已有的 socket 引进来（必须点名——远端有什么只有它知道）
-/xfer ssh out <host> [name]     -R：把本机 pi 的 socket 推出去（不用点名——对象就是自己）
-/xfer ssh list <host>           只读探测：远端 xfer 目录与可 in 的 socket
-/xfer ssh status                本进程维护的 forward + 存活状态（外来的那些另列）
-/xfer ssh down [host]           只拆本进程建的
+/xfer ssh in <host> [name...]   打开/扩展一条 Link：导入远端节点(-L) 且导出本机(-R)
+/xfer ssh list <host>           只读探测：远端 xfer 目录与可导入的 socket
+/xfer ssh status                本进程维护的 Link + 存活状态（外来的另列）
+/xfer ssh down [host|name]      整台 host 的 Link 一起拆
 ```
 
-- **in 必须点名，out 不必**：这不是对称性缺失，而是两个方向的目标来源不同。`out` 的对象是本机 pi 自己的监听 socket，永远存在、不用问；`in` 的对象是远端的某个 socket，只有探测才知道它叫什么，所以必须显式给出，错了就报"没有这个，可用的是 …"。`list <host>` 就是为拿这份名单而存在的。
+- **in 是累加的，不是替换**：`in pi-nas a` 之后再 `in pi-nas b`，得到一条承载 a+b 的 Link。不加名字地重跑只做刷新。ssh 无法在运行时增删单条 `-L`，所以扩展 = 杀掉重建，imported 集合被保留。
+- **为什么没有 `out`**：它只能完成"远端能发给我"这一半，解决不了"我能不能发过去"，于是又回到猜回程。把 `-R` 并入 `in` 之后，`-R` 变成单例：一台机器一条，随该 host 的 Link 生死。
+- **拆除粒度 = host**（初期决定）：不能只拆一条 `-L`；真要拆一条，就杀掉重建剩下的。per-name 计数器属于"没有计数器的必要性"的复杂度。
 
 - **方向必须显式指定，没有 `both`**：方向不是能取中间值的参数，而是"哪一边的监听对象已经存在"这个事实。两个半边的**前提不同源**（本机 socket 永远在；远端 socket 要先探测），一条命令同时断言两边，只是把两个不保证成立的假设叠起来——所以 `both` 不是权衡，是范畴错误。
 - **无 TTY，因此必须免密**：spawn 的 ssh 带 `BatchMode=yes`，交互式密码提示不可能被回答（pi 的 stdin 归 TUI）。支持密钥与 ssh-agent；认证失败时把 ssh 的 stderr 翻成可执行的建议（放公钥 / ssh-add），而不是一个裸退出码。
@@ -29,7 +32,7 @@ Mesh（ADR 0013）为跨机 handoff 提供了注册/发现/路由/离线缓冲�
 - **`list` 与 `status` 是两件事**：`list <host>` 回答"那台机器有什么可 in"（只读探测，不建隧道）；`status` 回答"我这条 pi 现在维持着哪些 forward、它们还活着吗"。混成一条命令会让"我要连什么"和"我连了什么"共用输出，两个问题都答不好。
 - **所有权写进账本**：每条 Link 的 `.json` 记 `owner`（创建它的 pi 进程 pid）。`down` 与 `session_shutdown` 只拆 `owner === 自己` 的；别人的 Link 由别人的 pi 负责，它死了以后由 gc 按 dead-link 收尾。
 - **退出必须显式拆**：ssh 子进程 `unref` 后**不会**随父进程死（会被 init 收养），所以"autodispose"靠 `session_shutdown` 里显式 `sshDown`，不是靠进程树。
-- **Link 是一等词汇，不是 Peer**：`<name>.json` 写 `{ via: "ssh", host, pid }`——json 即账本，不另建注册表；`/xfer list` 显示瘦条目（`· via ssh host`，无 cwd/model）。探测远端用 `ssh host 'echo ${XFER_DIR:-$HOME/.pi/xfer}'`，一次往返拿目录+快照。
+- **两处记录，两种角色**：本机用 `.link.<host>.json`（host/pid/owner/names/reverseAs）作为该 host 的 Link 账本——**以 host 为键**，因为一个 ssh 进程不可能拆成多条；对端则收到一条 `<本机名>.json`，标 `role: "reverse"`、`via: "ssh"`，**故意不带 pid**（那会是本机的进程号，在对端毫无意义且会让 gc 判错）。没有这条远端标记，对端会把 Link 端点当成普通本地 Peer，文档只给路径——原本的 bug 会从反方向重演。
 - **gc 管文件，in/out/down 管进程**：gc 的 Link 分支只判 pid（不做 listener 探测——ssh 本地端永远 accept，探测无意义）；死 → 删 sock+json 并提示 `/xfer ssh in|out` 重建。gc 不 kill 进程。
 
 ## 单向隧道对 handoff 的两条硬约束
@@ -37,7 +40,7 @@ Mesh（ADR 0013）为跨机 handoff 提供了注册/发现/路由/离线缓冲�
 Link 的 socket 是本地的，但 socket 后面的人不在本机。ADR 0013 早已为 mesh 解决过同一个矛盾（跨机 `/tmp` 路径失效 → 文档内联进队列消息），Link 沿用同一结论，只是触发条件是"目标是 Link"而不是"传输是 mesh"：
 
 - **文档必须内联，不能只给路径**。发送侧先照旧写本地 tmp（本地观察、日志、返回值的 `Doc:` 都是它），但检测到目标是 Link（同一个 `readPeerMetadata` 判活里能读到 `via: "ssh"`）时，把正文拼进消息帧，收端写入**自己**的 tmp 再走既有 inbound 管线。收端因此永远拿到一个本机可读的路径，下游毫不知情。
-- **不假设反向通道**。`in` 与 `out` 各开半边，没有对侧配合就不存在回路。发送侧检测到目标是 Link 且 `kind: "task"` 时，在结果里明确警告"对方可能答不回来"；收端看到 `· ssh` 标记时也会被告知"回复失败是隧道的形状，不是对方消失"。产品层面**不禁止** `task`——禁止会是撒谎（有人确实两边都开了），但沉默地让 task 掉进虚空更糟。
+- **回程不需要判断，因为它按构造存在**。之前 `in`/`out` 各开半边的形态被否决了：它把"能不能回信"变成一个无法从本机断言的猜测，只能靠警告和降级去兜。现在两侧都能直接陈述事实——收端知道文档是内联来的、隧道是双向的；发端知道文档已内联。`task` 在 Link 上和本地一样安全，不需要任何降级建议。
 
 **明确不做**：路由、离线缓冲、自动发现（发现 = 对端目录快照）、adapterd 支持（pi 扩展专属）。
 

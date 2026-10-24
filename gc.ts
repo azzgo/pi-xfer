@@ -109,18 +109,35 @@ export async function planGc(xferDir: string): Promise<GcReport> {
     const sockPath = path.join(xferDir, `${stem}.sock`);
     let pid: number | undefined;
     let linkHost: string | undefined;
+    let reverseMarker = false;
     try {
       const raw: unknown = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
       const rec = raw as Record<string, unknown> | null;
       const candidate = rec?.pid;
       if (typeof candidate === "number") pid = candidate;
       if (rec?.via === "ssh" && typeof rec.host === "string") linkHost = rec.host;
+      reverseMarker = rec?.role === "reverse";
     } catch { /* handled below */ }
 
+    if (reverseMarker) {
+      // A reverse marker (ADR-0021) is written BY the other machine and carries
+      // no pid on purpose: the landing socket here is an sshd endpoint, so the
+      // only honest signal is whether anything still answers behind it. A dead
+      // tunnel leaves the file connectable but silent — that is what the
+      // listener probe distinguishes, unlike an `in` Link's own ledger.
+      if (!(await socketHasListener(sockPath))) {
+        zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link", linkHost });
+      } else {
+        alive.push(stem);
+      }
+      continue;
+    }
+
     if (linkHost !== undefined) {
-      // ssh Link (ADR-0021): pid is the only honest signal — the ssh local
-      // endpoint always accepts connections, so listener probing is meaningless.
-      // gc reaps the files; the process is `up`/`down`'s business.
+      // This machine's own Link ledger (ADR-0021): the ssh process is the only
+      // honest signal — a local endpoint always accepts connections, so probing
+      // the socket would call a dead tunnel alive. gc reaps the files; the
+      // process is `in`/`down`'s business.
       if (pid !== undefined && !processAlive(pid)) {
         zombies.push({ name: stem, sockPath, jsonPath, pid, reason: "dead-link", linkHost });
       } else {

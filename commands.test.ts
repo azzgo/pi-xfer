@@ -764,12 +764,12 @@ function stubSshLink(overrides: Partial<import("./commands.js").SshLinkOperation
   const ops: import("./commands.js").SshLinkOperations = {
     list: () => [],
     own: () => [],
-    up: async (host, direction, names) => {
-      calls.push(`up ${direction} ${host} ${(names ?? []).join(",")}`.trim());
-      return { host, pid: 4242, direction, names: names ?? ["self"], rebuilt: [] };
+    up: async (host, names) => {
+      calls.push(`up ${host} ${(names ?? []).join(",")}`.trim());
+      return { host, pid: 4242, names: names ?? ["self"], reverseAs: "me", added: names ?? [] };
     },
     down: (ident) => { calls.push(`down ${ident ?? "*"}`); return { torn: [] }; },
-    plan: async (host, direction, names) => ({ host, remoteDir: "/remote", names: names ?? [] }),
+    plan: async (host, names) => ({ host, remoteDir: "/remote", names: names ?? [], reverseAs: "me", added: names ?? [] }),
     probe: async (host) => { calls.push(`probe ${host}`); return { dir: "/remote/.pi/xfer", names: ["alpha", "beta"] }; },
     status: () => "up",
     ...overrides,
@@ -794,52 +794,52 @@ describe("xfer command: /xfer ssh argument parsing", () => {
     const h = harness({ sshLink: ssh.ops });
     await h.handler("ssh in pi-xfer alpha beta");
     assert.equal(h.notifications[0].type, "info");
-    assert.deepEqual(ssh.calls, ["up in pi-xfer alpha,beta"]);
+    assert.deepEqual(ssh.calls, ["up pi-xfer alpha,beta"]);
   });
 
-  it("in without names explains and points at list", async () => {
+  it("in without names lets the link layer keep the existing set", async () => {
     const ssh = stubSshLink();
     const h = harness({ sshLink: ssh.ops });
     await h.handler("ssh in pi-xfer");
-    assert.equal(h.notifications[0].type, "error");
-    assert.match(h.notifications[0].message, /list <host>/);
-    assert.deepEqual(ssh.calls, []);
+    assert.deepEqual(ssh.calls, ["up pi-xfer"], "no names forwarded, so nothing is added");
   });
 
-  it("out <host> needs no names", async () => {
+  it("there is no out subcommand any more", async () => {
     const ssh = stubSshLink();
     const h = harness({ sshLink: ssh.ops });
     await h.handler("ssh out pi-xfer");
-    assert.deepEqual(ssh.calls, ["up out pi-xfer"]);
+    assert.equal(h.notifications[0].type, "error");
+    assert.match(h.notifications[0].message, /Usage: \/xfer ssh in/);
+    assert.deepEqual(ssh.calls, []);
   });
 
-  it("status does not touch ssh and reports what own() returns", async () => {
+  it("status reports imports and the reverse name, and marks other processes' Links", async () => {
     const ssh = stubSshLink({
       list: () => [
-        { name: "alpha", host: "h1", pid: 11, owner: process.pid, direction: "in" },
-        { name: "beta", host: "h2", pid: 22, owner: 999999, direction: "out" },
+        { host: "pi-nas", pid: 11, owner: process.pid, names: ["alpha", "beta"], reverseAs: "mac-xfer" },
+        { host: "other", pid: 22, owner: 999999, names: ["gamma"], reverseAs: "self" },
       ],
-      own: () => [{ name: "alpha", host: "h1", pid: 11, owner: process.pid, direction: "in" }],
+      own: () => [{ host: "pi-nas", pid: 11, owner: process.pid, names: ["alpha", "beta"], reverseAs: "mac-xfer" }],
     });
     const h = harness({ sshLink: ssh.ops });
     await h.handler("ssh status");
     const text = h.notifications[0].message;
-    assert.match(text, /alpha/);
-    assert.match(text, /beta/);
+    assert.match(text, /imports alpha, beta/);
+    assert.match(text, /appear there as "mac-xfer"/);
     assert.match(text, /foreign/);
     assert.deepEqual(ssh.calls, []);
   });
 
-  it("down takes a forward name or host as its identifier", async () => {
+  it("down with a host is scoped to that host", async () => {
     const ssh = stubSshLink();
     const h = harness({ sshLink: ssh.ops });
-    await h.handler("ssh down incus-xfer");
-    assert.deepEqual(ssh.calls, ["down incus-xfer"]);
+    await h.handler("ssh down pi-xfer");
+    assert.deepEqual(ssh.calls, ["down pi-xfer"]);
   });
 
-  it("bare down tears everything this pi owns", async () => {
+  it("bare down tears down every Link this pi owns", async () => {
     const ssh = stubSshLink({
-      own: () => [{ name: "alpha", host: "pi-nas", pid: 11, owner: process.pid, direction: "in" }],
+      own: () => [{ host: "pi-nas", pid: 11, owner: process.pid, names: ["alpha"], reverseAs: "self" }],
     });
     const h = harness({ sshLink: ssh.ops });
     await h.handler("ssh down");
@@ -852,32 +852,6 @@ describe("xfer command: /xfer ssh argument parsing", () => {
     await h.handler("ssh down");
     assert.match(h.notifications[0].message, /nothing to tear down/);
     assert.deepEqual(ssh.calls, []);
-  });
-
-  it("down completion lists owned forwards, never plain ssh hosts", () => {
-    const ssh = stubSshLink({
-      own: () => [
-        { name: "alpha", host: "pi-nas", pid: 11, owner: process.pid, direction: "in" },
-        { name: "beta", host: "pi-nas", pid: 11, owner: process.pid, direction: "in" },
-        { name: "self", host: "mac", pid: 22, owner: process.pid, direction: "out" },
-      ],
-    });
-    const h = harness({ sshLink: ssh.ops });
-    const items = h.completions("ssh down ") ?? [];
-    const labels = items.map(i => i.label);
-    assert.ok(labels.includes("self"));
-    assert.ok(labels.some(l => l.startsWith("alpha +1")), "one row per ssh process, labelled with its group size");
-    const groupRow = items.find(i => i.label === "alpha +1");
-    assert.match(groupRow!.description, /carries alpha, beta/);
-    assert.match(groupRow!.description, /all go together/);
-    assert.ok(!labels.some(l => /github|aliyun/.test(l)), "no unrelated ssh config hosts");
-  });
-
-  it("down completion says so when this pi owns nothing", () => {
-    const h = harness({ sshLink: stubSshLink().ops });
-    const items = h.completions("ssh down ") ?? [];
-    assert.equal(items.length, 1);
-    assert.match(items[0].label, /none/);
   });
 });
 
@@ -913,11 +887,9 @@ describe("xfer command: /xfer ssh completion", () => {
     assert.match(none[0].label, /probe unknown-host/);
   });
 
-  it("does not offer names for out", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-ssh-comp-"));
-    const h = harness({ sshLink: stubSshLink().ops, xferDir: dir });
-    const { rememberRemoteNames } = await import("./ssh-hosts.js") as unknown as { rememberRemoteNames: (d: string, h: string, n: string[]) => void };
-    rememberRemoteNames(dir, "pi-nas", ["alpha"]);
-    assert.equal(h.completions("ssh out pi-nas "), null);
+  it("offers no subcommand named out", () => {
+    const h = harness({ sshLink: stubSshLink().ops });
+    const items = h.completions("ssh ") ?? [];
+    assert.ok(!items.some(i => i.label === "out"));
   });
 });

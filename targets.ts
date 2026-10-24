@@ -24,6 +24,7 @@ function readSiblingMetadata(metadataPath: string): SiblingMetadata {
       sessionName: typeof value.sessionName === "string" ? value.sessionName : null,
       cwd: typeof value.cwd === "string" ? value.cwd : null,
       status: typeof value.status === "string" ? value.status : null,
+      ...(value.via === "ssh" ? { via: "ssh" as const } : {}),
       ...(typeof value.description === "string" && value.description.trim() !== "" ? { description: value.description } : {}),
     };
   } catch {

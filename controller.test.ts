@@ -176,7 +176,7 @@ describe("inbound: ssh Link frames carry their document inline", () => {
     assert.ok(docPath, "the envelope names a local doc path");
     assert.equal(fs.readFileSync(docPath!, "utf-8"), body, "the body landed in a local tmp file");
     assert.match(text, /ssh Link/);
-    assert.match(text, /peer not found/);
+    assert.match(text, /tunnel is bidirectional/);
   });
 
   it("never treats a Link sender as local even when hostnames match", () => {
@@ -219,25 +219,26 @@ describe("inbound: the envelope's kind wins over the body", () => {
   });
 });
 
-describe("inbound: ssh Link return-channel verdict", () => {
-  it("says a reply is possible when the sender's socket is here", () => {
-    fs.writeFileSync(path.join(sandbox, "remote-alpha.sock"), "");
+describe("inbound: ssh Link is bidirectional by construction", () => {
+  it("states that a reply has a route, without asking the receiver to guess", () => {
     controller().deliverInbound(
-      { type: "xfer-notify", msg_id: "r1", from: "remote-alpha", document: "# x\n", summary: "s", kind: "task", via: "ssh" },
+      { type: "xfer-notify", msg_id: "b1", from: "remote-alpha", document: "# x\n", summary: "s", kind: "task", via: "ssh" },
       "ssh",
     );
     const text = sent.at(-1)!.content;
-    assert.match(text, /return channel exists/);
+    assert.match(text, /tunnel is bidirectional/);
+    assert.match(text, /has a route/);
     assert.doesNotMatch(text, /no verified return channel/);
+    assert.doesNotMatch(text, /peer not found/);
   });
 
-  it("says plainly that no route exists when the sender has no socket here", () => {
+  it("does not require the receiver to downgrade a task", () => {
     controller().deliverInbound(
-      { type: "xfer-notify", msg_id: "r2", from: "ghost", document: "# x\n", summary: "s", kind: "task", via: "ssh" },
+      { type: "xfer-notify", msg_id: "b2", from: "remote-alpha", document: "# x\n", summary: "s", kind: "task", via: "ssh" },
       "ssh",
     );
     const text = sent.at(-1)!.content;
-    assert.match(text, /no verified return channel/);
-    assert.match(text, /Do not search this machine for a route/);
+    assert.match(text, /kind: task/);
+    assert.match(text, /asks you for output/);
   });
 });

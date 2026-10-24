@@ -182,7 +182,7 @@ function readPeerMetadata(xferName, xferDir = XFER_DIR) {
       ...value.via === "ssh" ? {
         via: "ssh",
         host: typeof value.host === "string" ? value.host : "",
-        ...value.direction === "in" || value.direction === "out" ? { direction: value.direction } : {}
+        ...value.role === "reverse" ? { role: "reverse" } : {}
       } : {}
     };
   } catch {
@@ -49547,6 +49547,7 @@ function readSiblingMetadata(metadataPath) {
       sessionName: typeof value.sessionName === "string" ? value.sessionName : null,
       cwd: typeof value.cwd === "string" ? value.cwd : null,
       status: typeof value.status === "string" ? value.status : null,
+      ...value.via === "ssh" ? { via: "ssh" } : {},
       ...typeof value.description === "string" && value.description.trim() !== "" ? { description: value.description } : {}
     };
   } catch {

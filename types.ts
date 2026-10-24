@@ -11,11 +11,15 @@ export interface PeerInfo {
   pid?: number;
   startedAt?: number;
   description?: string;
-  /** SSH Link marker (ADR-0021): present only on a Link's `.json`, never on a Peer's. */
+  /** SSH Link marker (ADR-0021): present only on a Link's record, never on a local Peer's. */
   via?: "ssh";
   host?: string;
-  /** Which half of the tunnel this Link is — decides whether a reply has a route. */
-  direction?: "in" | "out";
+  /**
+   * `reverse` marks a socket this machine received from the other end of a
+   * Link: the other machine exported it here, and the record was written over
+   * ssh. It is not a local agent — it has no pid here by design.
+   */
+  role?: "reverse";
 }
 
 /** `xfer-notify` frame sent over the peer socket (one-way handoff). */
@@ -39,8 +43,8 @@ export interface XferNotifyMessage {
    * is not the same claim as a sender who never said task.
    */
   kind?: "task" | "notification";
-  /** Set when the socket itself is an ssh Link, so the receiver knows the
-   *  reverse channel may not exist. */
+  /** Set when the socket itself is an ssh Link. Both halves are always open,
+   *  so this only tells the receiver the document travelled inline. */
   via?: "ssh";
 }
 

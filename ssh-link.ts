@@ -1,108 +1,114 @@
 /**
  * ssh-link.ts — peer-to-peer ssh transport (ADR-0021).
  *
- * A **Link** is one ssh forward between this pi and a remote machine:
+ * A **Link** is one ssh process to one host. It is always bidirectional:
  *
- *   in   (-L)  a remote socket is imported into this machine's xfer dir, so
- *              `listPeers` finds it and `/xfer <name>` reaches it. The remote
- *              names must be given: they are what the remote already listens on.
- *   out  (-R)  this pi's own socket is exported to the remote, so the remote
- *              can address this agent by name. Nothing to name — the target is
- *              always this process's own listener (override only when the
- *              remote needs a different name).
+ *   -L  every remote socket this pi imported, appearing in the local xfer dir
+ *       under the remote's name — `listPeers` finds it, `/xfer <name>` reaches it
+ *   -R  this pi's own socket exported to the remote, exactly once, so the
+ *       remote can always send back
  *
- * The direction is never a middle value: each half has a different
- * precondition — `out` needs this pi's socket (always there), `in` needs the
- * remote's sockets (only a probe knows). Asserting both at once would assume a
- * symmetric situation the workflow never guarantees, so there is no `both`.
+ * A tunnel with only one half is the thing this design rejected: with -L alone
+ * a reply has no route, and every handoff then has to guess whether the other
+ * side can answer. One process, both halves, no guessing.
  *
- * The ssh process belongs to the pi process that created it: `shutdown` kills
- * it, and every ledger entry records that owner so `down` never touches a Link
- * someone else maintains. Sockets are created by ssh itself, which is what
- * makes them discoverable to `listPeers`.
+ * `in` is therefore additive per host: `/xfer ssh in pi-nas a` then
+ * `/xfer ssh in pi-nas b` yields one ssh process carrying both `-L` entries and
+ * the single `-R`. The unit of teardown is the host (a2's per-name teardown
+ * would mean killing and rebuilding the process, which is complexity without
+ * benefit at this size).
+ *
+ * The ledger is one file per host: `.link.<host>.json`, holding the ssh pid,
+ * the owner pi, the imported names, and the reverse name. The remote side gets
+ * a `<thisPi>.json` marked `role: "reverse"` so ITS agents know this socket is
+ * a Link (inline the document, do not treat it as a local peer).
  */
 import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { encodeAgentName, metadataForName } from "./utils.ts";
 
-/** `in` imports remote sockets locally (-L), `out` exports this pi's socket (-R). */
-export type LinkDirection = "in" | "out";
-
 /** Options read by every ssh-link operation (tests inject these). */
 export interface SshLinkOptions {
   /** Local xfer dir holding the Link sockets; defaults to XFER_DIR via the caller. */
   xferDir: string;
-  /** This pi's xfer name — the `out` target and the default remote landing name. */
+  /** This pi's xfer name — the `-R` landing name on the remote. */
   myName: string;
   /** Optional identity file passed to every ssh invocation (-i). */
   keyPath?: string;
-  /** Remote names to import; required by `in`, ignored by `out`. */
+  /** Remote names to import; `in` merges them into the host's existing set. */
   names?: string[];
-  /** Remote landing name for `out`; defaults to `myName`. */
-  asName?: string;
-  /** Required by `sshUp`; ignored by list/down. */
-  direction?: LinkDirection;
   /** Owner pid written into the ledger; defaults to this process. */
   ownerPid?: number;
 }
 
-/** One live Link, as recorded in its `<name>.json`. */
+/** One Link = one ssh process to one host. */
 export interface LinkInfo {
-  /** The local socket-file name this Link occupies (decoded). */
-  name: string;
-  /** For `in`, the remote socket it points at. Same as `name`. */
   host: string;
+  /** ssh process pid (the liveness anchor). */
   pid: number;
   /** The pi process that created it; `down` only touches its own. */
   owner: number;
-  direction: LinkDirection;
+  /** Remote sockets imported here, by their remote (and local) names. */
+  names: string[];
+  /** This pi's name on the remote — the one -R landing. */
+  reverseAs: string;
 }
 
 /** Result of a successful link-up. */
 export interface SshUpResult {
   host: string;
   pid: number;
-  direction: LinkDirection;
-  /** Local names this Link now serves (remote names for `in`, own name for `out`). */
+  /** Every name now imported from this host (previous + newly requested). */
   names: string[];
-  /** Pre-existing Links to the same host that were killed and rebuilt. */
-  rebuilt: string[];
+  /** The single reverse landing name on the remote. */
+  reverseAs: string;
+  /** Names that this run added to an existing Link (kept alive, no rebuild). */
+  added: string[];
 }
 
-function requireDirection(opts: SshLinkOptions): LinkDirection {
-  if (!opts.direction) throw new Error("a direction is required (in | out)");
-  return opts.direction;
-}
-
-function linkJsonPath(name: string, opts: SshLinkOptions): string {
-  return metadataForName(name, opts.xferDir);
+function ledgerPath(host: string, opts: SshLinkOptions): string {
+  // Host may contain '/' or ':' (user@host, tunnel addresses); encode it so the
+  // ledger stays a flat file next to the sockets.
+  return path.join(opts.xferDir, `.link.${encodeURIComponent(host)}.json`);
 }
 
 function decodeStem(stem: string): string {
   try { return decodeURIComponent(stem); } catch { return stem; }
 }
 
-/** Every Link record in `xferDir`, regardless of owner or liveness. */
-export function listLinks(opts: SshLinkOptions): LinkInfo[] {
+/** Parse one ledger file; null when absent or unusable. */
+function readLedger(file: string, host: string): LinkInfo | null {
   try {
-    return fs.readdirSync(opts.xferDir)
-      .filter(f => f.endsWith(".json"))
-      .map(f => {
-        try {
-          const raw = JSON.parse(fs.readFileSync(path.join(opts.xferDir, f), "utf-8")) as Record<string, unknown>;
-          if (raw.via !== "ssh" || typeof raw.host !== "string" || typeof raw.pid !== "number") return null;
-          return {
-            name: decodeStem(f.slice(0, -".json".length)),
-            host: raw.host,
-            pid: raw.pid,
-            owner: typeof raw.owner === "number" ? raw.owner : -1,
-            direction: raw.direction === "out" ? "out" : "in",
-          } as LinkInfo;
-        } catch { return null; }
-      })
-      .filter((v): v is LinkInfo => v !== null);
-  } catch { return []; }
+    const raw = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+    if (typeof raw.pid !== "number" || typeof raw.owner !== "number") return null;
+    const names = Array.isArray(raw.names) ? raw.names.filter((n): n is string => typeof n === "string") : [];
+    return {
+      host,
+      pid: raw.pid,
+      owner: raw.owner,
+      names,
+      reverseAs: typeof raw.reverseAs === "string" ? raw.reverseAs : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Every Link in `xferDir`, whoever owns it. */
+export function listLinks(opts: SshLinkOptions): LinkInfo[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(opts.xferDir).filter(f => f.startsWith(".link.") && f.endsWith(".json"));
+  } catch {
+    return [];
+  }
+  return entries
+    .map(file => {
+      const host = decodeStem(file.slice(".link.".length, -".json".length));
+      return readLedger(path.join(opts.xferDir, file), host);
+    })
+    .filter((v): v is LinkInfo => v !== null);
 }
 
 /** Links created by this very process — the only ones `down`/`shutdown` may reap. */
@@ -111,28 +117,38 @@ export function listOwnLinks(opts: SshLinkOptions): LinkInfo[] {
   return listLinks(opts).filter(l => l.owner === me);
 }
 
-/** True when the process behind a Link still exists. */
 function linkAlive(link: LinkInfo): boolean {
   try { process.kill(link.pid, 0); return true; } catch { return false; }
 }
 
-/** Status word for `/xfer ssh list`: the ssh process is the only authority. */
+/** Status word for `/xfer ssh status`: the ssh process is the only authority. */
 export function linkStatus(link: LinkInfo): "up" | "dead" | "foreign" {
   if (!linkAlive(link)) return "dead";
   return link.owner === process.pid ? "up" : "foreign";
 }
 
+function localSock(name: string, opts: SshLinkOptions): string {
+  return path.join(opts.xferDir, `${encodeAgentName(name)}.sock`);
+}
+
+/**
+ * Remove a Link's local footprint: the ssh process, every socket it created
+ * here, and its ledger. The remote side is left alone — its sshd owns that
+ * socket, and its gc reaps a leftover once the connection is gone.
+ */
 function killLink(link: LinkInfo, opts: SshLinkOptions): void {
   try { process.kill(link.pid, "SIGTERM"); } catch { /* already gone */ }
-  try { fs.unlinkSync(path.join(opts.xferDir, `${encodeAgentName(link.name)}.sock`)); } catch { /* best effort */ }
-  try { fs.unlinkSync(linkJsonPath(link.name, opts)); } catch { /* best effort */ }
+  for (const name of link.names) {
+    try { fs.unlinkSync(localSock(name, opts)); } catch { /* best effort */ }
+  }
+  try { fs.unlinkSync(ledgerPath(link.host, opts)); } catch { /* best effort */ }
 }
 
 /**
  * Build the ssh argv common to probe and tunnel. `BatchMode=yes` is mandatory:
  * the spawned ssh has no TTY, so an interactive password prompt can only hang
- * or fail. Key/agent auth is the supported path; a failure now reports ssh's
- * own stderr instead of a bare exit code.
+ * or fail. Key/agent auth is the supported path; a failure reports ssh's own
+ * stderr instead of a bare exit code.
  */
 function sshBaseArgs(keyPath?: string): string[] {
   return [
@@ -169,16 +185,16 @@ function sshCapture(host: string, remoteCommand: string, keyPath?: string): Prom
   });
 }
 
+/** The remote xfer dir, honouring an optional staged XFER_DIR file. */
+const REMOTE_DIR_EXPR = 'if [ -r ~/.pi/xfer-ssh-env ]; then . ~/.pi/xfer-ssh-env; fi; XFER_DIR="${XFER_DIR:-$HOME/.pi/xfer}"; echo "$XFER_DIR"';
+
 /**
  * Detect the remote xfer dir and snapshot its existing socks in one round trip.
- * This is the `in` candidate list: what the remote already listens on.
+ * Those names are the `in` candidates: what that machine already listens on.
  */
 export async function probeRemote(host: string, keyPath?: string): Promise<{ dir: string; names: string[] }> {
-  // XFER_DIR cannot travel via SendEnv/SetEnv (sshd AcceptEnv defaults don't
-  // allow it), so the expression reads an env file the caller may have staged.
   const out = await sshCapture(host,
-    'if [ -r ~/.pi/xfer-ssh-env ]; then . ~/.pi/xfer-ssh-env; fi; '
-    + 'echo "${XFER_DIR:-$HOME/.pi/xfer}" && ls "${XFER_DIR:-$HOME/.pi/xfer}"/*.sock 2>/dev/null || true',
+    `${REMOTE_DIR_EXPR} && ls "$XFER_DIR"/*.sock 2>/dev/null || true`,
     keyPath);
   const lines = out.split("\n").filter(l => l.trim() !== "");
   const dir = lines.shift()?.trim();
@@ -193,8 +209,14 @@ export async function probeRemote(host: string, keyPath?: string): Promise<{ dir
 export interface SshUpPlan {
   host: string;
   remoteDir: string;
-  /** For `in`: the remote names being imported. For `out`: the remote landing name. */
+  /** The full imported set after merging the request into the existing Link. */
   names: string[];
+  /** The single reverse landing name on the remote. */
+  reverseAs: string;
+  /** Names this run adds (empty when the request only re-affirms what exists). */
+  added: string[];
+  /** The existing Link this run extends, when there is one. */
+  existing?: LinkInfo;
 }
 
 /**
@@ -202,9 +224,27 @@ export interface SshUpPlan {
  * Rejects on name collisions (ADR-0021: refuse, never auto-rename).
  */
 export async function planSshUp(host: string, opts: SshLinkOptions): Promise<SshUpPlan> {
-  const direction = requireDirection(opts);
   const remote = await probeRemote(host, opts.keyPath);
-  const own = listOwnLinks(opts);
+  const existing = listOwnLinks(opts).find(l => l.host === host);
+  const requested = opts.names ?? [];
+
+  // Union: `in` extends a host's Link, never replaces it.
+  const names = [...new Set([...(existing?.names ?? []), ...requested])];
+  const added = names.filter(n => !(existing?.names ?? []).includes(n));
+
+  if (names.length === 0) {
+    throw new Error(
+      `in needs at least one remote name — available on ${host}: ${remote.names.join(", ") || "(none)"}`,
+    );
+  }
+
+  const missing = names.filter(n => !remote.names.includes(n));
+  if (missing.length > 0) {
+    throw new Error(
+      `not found on ${host}: ${missing.join(", ")} — available: ${remote.names.join(", ") || "(none)"}`,
+    );
+  }
+
   const localStems = new Set(
     fs.existsSync(opts.xferDir)
       ? fs.readdirSync(opts.xferDir)
@@ -212,56 +252,48 @@ export async function planSshUp(host: string, opts: SshLinkOptions): Promise<Ssh
         .map(f => decodeStem(f.slice(0, -".sock".length)))
       : [],
   );
-  const linkedByUs = new Set(own.filter(l => l.host === host).map(l => l.name));
-
-  if (direction === "in") {
-    const wanted = opts.names ?? [];
-    if (wanted.length === 0) {
-      throw new Error(`in needs at least one remote name — available on ${host}: ${remote.names.join(", ") || "(none)"}`);
+  for (const name of added) {
+    if (localStems.has(name)) {
+      throw new Error(`"${name}" already exists locally as a non-Link socket — rename one side before linking`);
     }
-    const missing = wanted.filter(n => !remote.names.includes(n));
-    if (missing.length > 0) {
-      throw new Error(
-        `not found on ${host}: ${missing.join(", ")} — available: ${remote.names.join(", ") || "(none)"}`,
-      );
-    }
-    for (const name of wanted) {
-      if (localStems.has(name) && !linkedByUs.has(name)) {
-        throw new Error(`"${name}" already exists locally as a non-Link socket — rename one side before linking`);
-      }
-    }
-    return { host, remoteDir: remote.dir, names: wanted };
   }
 
-  const landing = opts.asName ?? opts.myName;
-  if (!landing) throw new Error("out needs a name to expose this pi under");
-  if (remote.names.includes(landing)) {
-    throw new Error(`${host} already has a node named "${landing}" — pick another name with: /xfer ssh out ${host} <name>`);
+  const reverseAs = existing?.reverseAs ?? opts.myName;
+  if (!reverseAs) throw new Error("cannot expose this pi without a name — /xfer name <name> first");
+  // The reverse landing must not shadow a node already living on the remote,
+  // unless that node is a previous landing of ours.
+  if (!existing && remote.names.includes(reverseAs)) {
+    throw new Error(
+      `${host} already has a node named "${reverseAs}" — rename this pi with /xfer name <name> before linking`,
+    );
   }
-  return { host, remoteDir: remote.dir, names: [landing] };
+
+  return {
+    host,
+    remoteDir: remote.dir,
+    names,
+    reverseAs,
+    added,
+    ...(existing ? { existing } : {}),
+  };
 }
 
 /**
- * Bring a Link up: kill any previous Link of ours to the same host, spawn
- * `ssh -N` for the one requested direction, write the ledger entries.
+ * Bring a Link up: one ssh process carrying every imported socket (-L) and this
+ * pi's single reverse landing (-R). Adding names to an existing Link rebuilds
+ * the process (ssh cannot add a forward at runtime); the set is preserved.
  */
 export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpResult> {
-  const direction = requireDirection(opts);
   const plan = await planSshUp(host, opts);
 
-  const previous = listOwnLinks(opts).filter(l => l.host === host);
-  const rebuilt = previous.map(l => l.name);
-  for (const link of previous) killLink(link, opts);
+  if (plan.existing) killLink(plan.existing, opts);
 
   const remoteSock = (name: string) => `${plan.remoteDir}/${encodeAgentName(name)}.sock`;
-  const localSock = (name: string) => path.join(opts.xferDir, `${encodeAgentName(name)}.sock`);
-
   const forwards: string[] = [];
-  if (direction === "in") {
-    for (const name of plan.names) forwards.push("-L", `${localSock(name)}:${remoteSock(name)}`);
-  } else {
-    forwards.push("-R", `${remoteSock(plan.names[0])}:${localSock(opts.myName)}`);
+  for (const name of plan.names) {
+    forwards.push("-L", `${localSock(name, opts)}:${remoteSock(name)}`);
   }
+  forwards.push("-R", `${remoteSock(plan.reverseAs)}:${localSock(opts.myName, opts)}`);
 
   const child = spawnSsh(host, [
     "-N",
@@ -270,19 +302,16 @@ export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpRe
     ...forwards,
   ], opts.keyPath);
 
-  // `in` waits for its local landing sockets. `out` waits for the landing to
-  // materialize on the remote: sshd creates it asynchronously, and a peer
-  // scanning the remote dir before it lands would see this node flap.
-  if (direction === "in") {
-    await waitForSockets(child, plan.names.map(localSock), host);
-  } else {
-    await waitForRemoteSock(host, remoteSock(plan.names[0]), opts.keyPath);
-  }
+  // Wait for the local landings, then for the reverse socket to materialise on
+  // the remote (sshd creates it asynchronously; a peer scanning that dir before
+  // it lands would see this node flap).
+  await waitForSockets(child, plan.names.map(n => localSock(n, opts)), host);
+  await waitForRemoteSock(host, remoteSock(plan.reverseAs), opts.keyPath);
 
-  for (const name of plan.names) {
-    writeLinkJson(name, host, child.pid!, direction, opts);
-  }
-  return { host, pid: child.pid!, direction, names: plan.names, rebuilt };
+  writeLedger(plan, child.pid!, opts);
+  await writeReverseMarker(plan, opts);
+
+  return { host, pid: child.pid!, names: plan.names, reverseAs: plan.reverseAs, added: plan.added };
 }
 
 function spawnSsh(host: string, args: string[], keyPath?: string) {
@@ -313,6 +342,12 @@ function waitForSockets(
     };
     child.on("exit", exitFn);
     child.on("error", errFn);
+    if (sockPaths.length === 0) {
+      clearTimeout(timer);
+      cleanup();
+      resolve();
+      return;
+    }
     const poll = setInterval(() => {
       if (sockPaths.every(p => fs.existsSync(p))) {
         clearInterval(poll);
@@ -321,12 +356,7 @@ function waitForSockets(
         resolve();
       }
     }, 100);
-    if (sockPaths.length === 0) {
-      clearInterval(poll);
-      clearTimeout(timer);
-      cleanup();
-      resolve();
-    }
+    child.on("exit", () => clearInterval(poll));
   });
 }
 
@@ -343,44 +373,65 @@ async function waitForRemoteSock(host: string, sockPath: string, keyPath?: strin
   throw new Error(`ssh ${host}: -R landing ${sockPath} never appeared`);
 }
 
-function writeLinkJson(name: string, host: string, pid: number, direction: LinkDirection, opts: SshLinkOptions): void {
+function writeLedger(plan: SshUpPlan, pid: number, opts: SshLinkOptions): void {
+  const file = ledgerPath(plan.host, opts);
   const body = `${JSON.stringify({
-    via: "ssh",
-    host,
+    host: plan.host,
     pid,
-    direction,
     owner: opts.ownerPid ?? process.pid,
+    names: plan.names,
+    reverseAs: plan.reverseAs,
   }, null, 2)}\n`;
-  fs.writeFileSync(linkJsonPath(name, opts), body, { encoding: "utf-8", mode: 0o600 });
+  const temp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(temp, body, { encoding: "utf-8", mode: 0o600 });
+    fs.renameSync(temp, file);
+  } catch {
+    try { fs.unlinkSync(temp); } catch { /* best effort */ }
+  }
 }
 
 /**
- * Tear down Links **this process** maintains.
+ * Write `<reverseAs>.json` on the remote, marked `role: "reverse"`.
  *
- * `ident` is either a Link name (`in` names each imported socket, so it is the
- * natural identifier — no hash needed) or a host. When it names a Link, the
- * whole ssh process behind it goes: a running ssh cannot drop one -L, so
- * one `in` with several names is torn down as a group. `torn` reports every
- * entry that went with it.
+ * Without it the remote's agents see only a socket with no metadata, decide it
+ * is a local peer, and hand off a path this machine can never read — the exact
+ * failure that made the document inline rule necessary in the first place.
+ * Deliberately carries **no pid**: it would name a process on THIS machine,
+ * meaningless over there, and would make that side's gc judge liveness wrongly.
+ */
+async function writeReverseMarker(plan: SshUpPlan, opts: SshLinkOptions): Promise<void> {
+  const marker = JSON.stringify({
+    xferName: plan.reverseAs,
+    via: "ssh",
+    host: opts.myName,
+    role: "reverse",
+  });
+  const target = `${plan.remoteDir}/${encodeAgentName(plan.reverseAs)}.json`;
+  // printf with a single-quoted JSON body: no shell expansion of the payload.
+  const body = marker.replace(/'/g, `'\\''`);
+  await sshCapture(
+    plan.host,
+    `mkdir -p "${plan.remoteDir}" && printf '%s\\n' '${body}' > ${JSON.stringify(target)} && chmod 600 ${JSON.stringify(target)}`,
+    opts.keyPath,
+  ).catch(() => { /* marker is advisory: a missing one degrades to path-only docs */ });
+}
+
+/**
+ * Tear down Links **this process** maintains, optionally narrowed to one host.
+ *
+ * One host = one ssh process = one unit: naming a forward tears down its whole
+ * host Link, because ssh cannot drop a single -L at runtime (initial design
+ * choice: no per-name counters).
  *
  * A Link another pi started is never ours to kill: it dies with its own owner,
  * and gc reaps the leftovers if that owner already exited.
  */
-export function sshDown(ident: string | undefined, opts: SshLinkOptions): { torn: LinkInfo[]; host?: string } {
+export function sshDown(ident: string | undefined, opts: SshLinkOptions): { torn: LinkInfo[] } {
   const own = listOwnLinks(opts);
-  if (ident === undefined) {
-    for (const link of own) killLink(link, opts);
-    return { torn: own };
-  }
-  const byName = own.filter(l => l.name === ident);
-  if (byName.length > 0) {
-    // Same pid ⇒ same ssh process ⇒ everything it carries goes together.
-    const pids = new Set(byName.map(l => l.pid));
-    const group = own.filter(l => pids.has(l.pid));
-    for (const link of group) killLink(link, opts);
-    return { torn: group };
-  }
-  const byHost = own.filter(l => l.host === ident);
-  for (const link of byHost) killLink(link, opts);
-  return { torn: byHost, host: ident };
+  const targets = ident === undefined
+    ? own
+    : own.filter(l => l.host === ident || l.names.includes(ident));
+  for (const link of targets) killLink(link, opts);
+  return { torn: targets };
 }
