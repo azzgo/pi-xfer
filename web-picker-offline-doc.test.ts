@@ -152,3 +152,33 @@ describe("trusted types: no direct HTML sinks in userscript sources", () => {
     assert.equal(SINKS.test("const html = clone.outerHTML;"), false);
   });
 });
+
+/**
+ * Regression guard for the broker-link request/response table: every pending
+ * request kind registered in broker-conn.js must be dispatched by the ACK
+ * (and error) branch. A missing branch leaves the promise unresolved, so the
+ * caller times out even though the broker answered — the exact bug that made
+ * 「暂存到 broker」 report "timeout — broker no response" while the socket
+ * trace showed a healthy ack.
+ */
+describe("broker-conn: every pending kind has an ACK dispatcher", () => {
+  it("registers no kind the ACK/error branches ignore", () => {
+    const src = readFileSync(new URL("./web-picker.src/broker-conn.js", import.meta.url), "utf-8");
+    const registered = new Set(
+      [...src.matchAll(/pending\.set\(\s*id\s*,\s*\{\s*kind:\s*'([a-z]+)'/g)].map((m) => m[1]!),
+    );
+    assert.ok(registered.size >= 5, `expected the request table to be discovered, got ${[...registered].join(",")}`);
+    const ackBranch = src.slice(src.indexOf("KIND_ACK"), src.indexOf("KIND_ERROR"));
+    const errorBranch = src.slice(src.indexOf("KIND_ERROR"), src.indexOf("KIND_TARGETS_RESULT"));
+    for (const kind of registered) {
+      // ACK: either an explicit `p.kind === '<kind>'` or, for the array-shaped
+      // targets kind, the targets.result frame (asserted separately below).
+      const inAck = ackBranch.includes(`p.kind === '${kind}'`);
+      assert.ok(inAck || kind === 'targets', `pending kind '${kind}' is never resolved by an ack — it will time out`);
+    }
+    // The error branch may resolve kinds generically (a trailing else), which is
+    // fine as long as it always settles the promise and keeps baglist's shape.
+    assert.match(errorBranch, /else\s+p\.resolve\(/, "error frames must settle every pending request");
+    assert.match(errorBranch, /p\.kind === 'baglist'/, "a baglist error must still answer with an items array");
+  });
+});

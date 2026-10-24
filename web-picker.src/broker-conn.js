@@ -203,19 +203,27 @@ export function createBrokerConn(deps) {
       }
       if (f.type === PROTOCOL.KIND_ACK) {
         const p = pending.get(f.id);
+        // Every request kind must be dispatched here — an unhandled kind never
+        // resolves and the caller times out even though the broker answered
+        // (that is exactly how stage "timed out" while the trace showed ack).
         if (p && p.kind === 'submit') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
         else if (p && p.kind === 'compose') {
           pending.delete(f.id);
           p.resolve({ ok: true, text: f.result && typeof f.result.prompt === 'string' ? f.result.prompt : '' });
-        }
+        } else if (p && p.kind === 'stage') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
+        else if (p && p.kind === 'baglist') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
+        else if (p && p.kind === 'bagsubmit') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
         return;
       }
       if (f.type === PROTOCOL.KIND_ERROR) {
         const p = pending.get(f.id);
         if (p) {
           pending.delete(f.id);
-          p.resolve(p.kind === 'submit' ? { ok: false, code: f.code, message: f.message }
-            : p.kind === 'compose' ? { ok: false, code: f.code, message: f.message } : []);
+          // 'targets' answers an array; 'baglist' still needs its items shape;
+          // every other kind answers {ok:false, code, message}.
+          if (p.kind === 'targets') p.resolve([]);
+          else if (p.kind === 'baglist') p.resolve({ ok: false, code: f.code, message: f.message, items: [] });
+          else p.resolve({ ok: false, code: f.code, message: f.message });
         } else {
           toast(t('conn.brokerError', { code: f.code || '?' }));
         }

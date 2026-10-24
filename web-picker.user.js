@@ -1397,6 +1397,15 @@
           } else if (p && p.kind === "compose") {
             pending.delete(f.id);
             p.resolve({ ok: true, text: f.result && typeof f.result.prompt === "string" ? f.result.prompt : "" });
+          } else if (p && p.kind === "stage") {
+            pending.delete(f.id);
+            p.resolve({ ok: true, result: f.result });
+          } else if (p && p.kind === "baglist") {
+            pending.delete(f.id);
+            p.resolve({ ok: true, result: f.result });
+          } else if (p && p.kind === "bagsubmit") {
+            pending.delete(f.id);
+            p.resolve({ ok: true, result: f.result });
           }
           return;
         }
@@ -1404,7 +1413,9 @@
           const p = pending.get(f.id);
           if (p) {
             pending.delete(f.id);
-            p.resolve(p.kind === "submit" ? { ok: false, code: f.code, message: f.message } : p.kind === "compose" ? { ok: false, code: f.code, message: f.message } : []);
+            if (p.kind === "targets") p.resolve([]);
+            else if (p.kind === "baglist") p.resolve({ ok: false, code: f.code, message: f.message, items: [] });
+            else p.resolve({ ok: false, code: f.code, message: f.message });
           } else {
             toast(t("conn.brokerError", { code: f.code || "?" }));
           }
