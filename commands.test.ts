@@ -906,7 +906,10 @@ describe("xfer command: /xfer ssh completion", () => {
 
     const none = h.completions("ssh in unknown-host ") ?? [];
     assert.equal(none.length, 1);
-    assert.match(none[0].label, /probe unknown-host/);
+    // Either the background probe is already in flight or it is waiting to be
+    // asked — both are actionable, and neither invents names.
+    assert.match(none[0].label, /probe|probing/);
+    assert.match(none[0].label, /unknown-host/);
   });
 
   it("offers no subcommand named out", () => {

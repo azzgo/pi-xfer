@@ -91,9 +91,63 @@ export function cachedRemoteNames(xferDir: string, host: string, now = Date.now(
   return entry.names;
 }
 
+/** How long a cache entry is worth showing without a refresh attempt. */
+const FRESH_MS = 60_000;
+
+/**
+ * Whether a background probe is worth starting for `host`: nothing cached, a
+ * stale entry, or one older than the freshness window.
+ */
+export function wantsProbe(xferDir: string, host: string, now = Date.now()): boolean {
+  const entry = readCache(xferDir)[host];
+  if (!entry || !Array.isArray(entry.names)) return true;
+  return now - entry.at > FRESH_MS;
+}
+
 /** Hosts we have ever probed — suggestions even without an ssh config alias. */
 export function cachedHosts(xferDir: string, now = Date.now()): string[] {
   return Object.entries(readCache(xferDir))
     .filter(([, entry]) => Array.isArray(entry.names) && now - entry.at <= CACHE_TTL_MS)
     .map(([host]) => host);
+}
+
+/**
+ * In-flight background probes, keyed by host.
+ *
+ * Completion runs on every keystroke, so without this a user typing a host name
+ * would spawn one ssh per character: they compete for the same connection,
+ * each holds a slot for up to 15s, and the last one to finish wins the cache —
+ * possibly with an older answer than one already written. One probe per host at
+ * a time, and a second request joins the first instead of stacking up.
+ */
+const inflight = new Map<string, Promise<string[]>>();
+
+/**
+ * Kick off a probe for `host` unless one is already running; returns the shared
+ * promise. Callers must not await this from a completion path — completion is
+ * synchronous and must never block on the network.
+ */
+export function prefetchRemoteNames(
+  xferDir: string,
+  host: string,
+  probe: (host: string) => Promise<{ names: string[] }>,
+): Promise<string[]> {
+  const running = inflight.get(host);
+  if (running) return running;
+
+  const task = probe(host)
+    .then(({ names }) => {
+      rememberRemoteNames(xferDir, host, names);
+      return names;
+    })
+    .catch(() => cachedRemoteNames(xferDir, host))
+    .finally(() => { inflight.delete(host); });
+
+  inflight.set(host, task);
+  return task;
+}
+
+/** True while a background probe for `host` is running (for the completion hint). */
+export function isPrefetching(host: string): boolean {
+  return inflight.has(host);
 }

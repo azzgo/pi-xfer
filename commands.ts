@@ -17,7 +17,7 @@ import { loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
 import { linkStatus, listLinks, listOwnLinks, planSshUp, probeRemote, sshDown, sshUp, type LinkInfo, type SshLinkOptions, type SshUpPlan, type SshUpResult } from "./ssh-link.ts";
-import { cachedHosts, cachedRemoteNames, listSshHosts, rememberRemoteNames } from "./ssh-hosts.ts";
+import { cachedHosts, cachedRemoteNames, isPrefetching, listSshHosts, prefetchRemoteNames, rememberRemoteNames, wantsProbe } from "./ssh-hosts.ts";
 
 /** Options for `registerXferCommand`. */
 export interface XferCommandOptions {
@@ -207,12 +207,30 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         const linked = new Set(listOwnLinks({ xferDir, myName: controller.state.identity?.name ?? "" })
           .filter(l => l.host === host)
           .flatMap(l => l.names));
-        const items = cachedRemoteNames(xferDir, host)
-          .filter(n => n.startsWith(namePrefix) && !linked.has(n))
+        const cached = cachedRemoteNames(xferDir, host)
+          .filter(n => n.startsWith(namePrefix) && !linked.has(n));
+        const items: AutocompleteItem[] = cached
           .map(n => ({ value: `ssh in ${host} ${n}`, label: n, description: `remote node on ${host}` }));
-        return items.length > 0
-          ? items
-          : [{ value: `ssh list ${host}`, label: `(probe ${host})`, description: "No cached names yet — run this to fetch them" }];
+
+        // "The host is finished" is only knowable from the input shape: a third
+        // token exists once the user types a space after the host. Probing on
+        // every partial host would fire one ssh per keystroke ("p", "pi", …),
+        // and dedupe cannot help because each string is a different key.
+        const hostFinished = tokens.length >= 3;
+        if (hostFinished && wantsProbe(xferDir, host)) {
+          // Never awaited: completion is synchronous and must not block on the
+          // network. prefetchRemoteNames dedupes per host.
+          void prefetchRemoteNames(xferDir, host, (h) => sshOps.probe(h));
+        }
+
+        if (items.length > 0) return items;
+        return [{
+          value: `ssh list ${host}`,
+          label: isPrefetching(host) ? `(probing ${host}…)` : `(probe ${host})`,
+          description: isPrefetching(host)
+            ? "Fetching that host's nodes — press TAB again in a moment"
+            : "No names yet — select this to fetch them",
+        }];
       }
       const peers = listPeers(controller.state.identity?.name ?? "", xferDir);
       // `/xfer mesh <TAB>` completes the mesh subcommand group.

@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
-import { cachedHosts, cachedRemoteNames, listSshHosts, parseSshConfigHosts, rememberRemoteNames } from "./ssh-hosts.js";
+import { cachedHosts, cachedRemoteNames, isPrefetching, listSshHosts, parseSshConfigHosts, prefetchRemoteNames, rememberRemoteNames, wantsProbe } from "./ssh-hosts.js";
 
 const tmpDirs: string[] = [];
 after(() => {
@@ -80,5 +80,55 @@ describe("ssh-hosts: probe cache", () => {
     assert.deepEqual(cachedRemoteNames(dir, "pi-nas"), []);
     rememberRemoteNames(dir, "pi-nas", ["design"]);
     assert.deepEqual(cachedRemoteNames(dir, "pi-nas"), ["design"]);
+  });
+});
+
+describe("ssh-hosts: background prefetch", () => {
+  it("runs one probe per host no matter how many requests arrive", async () => {
+    const dir = tmpDir("xfer-ssh-prefetch-");
+    let probes = 0;
+    let release: (names: string[]) => void = () => {};
+    const gate = new Promise<string[]>(resolve => { release = resolve; });
+    const probe = async () => { probes++; await gate; return { names: ["alpha"] }; };
+
+    const a = prefetchRemoteNames(dir, "pi-nas", probe);
+    const b = prefetchRemoteNames(dir, "pi-nas", probe);
+    const c = prefetchRemoteNames(dir, "pi-nas", probe);
+    assert.equal(probes, 1, "three calls, one ssh");
+    assert.equal(isPrefetching("pi-nas"), true);
+
+    release([]);
+    const [ra, rb] = await Promise.all([a, b, c]);
+    assert.deepEqual(ra, ["alpha"]);
+    assert.equal(rb, ra);
+    assert.deepEqual(cachedRemoteNames(dir, "pi-nas"), ["alpha"], "the result landed in the cache");
+    assert.equal(isPrefetching("pi-nas"), false, "and the in-flight entry is cleared");
+  });
+
+  it("a failed probe keeps the previous cache instead of emptying it", async () => {
+    const dir = tmpDir("xfer-ssh-prefetch-");
+    rememberRemoteNames(dir, "pi-nas", ["stale-but-real"]);
+    const probe = async () => { throw new Error("ssh: host unreachable"); };
+    const names = await prefetchRemoteNames(dir, "pi-nas", probe);
+    assert.deepEqual(names, ["stale-but-real"]);
+    assert.deepEqual(cachedRemoteNames(dir, "pi-nas"), ["stale-but-real"]);
+  });
+
+  it("allows a new probe once the previous one settled", async () => {
+    const dir = tmpDir("xfer-ssh-prefetch-");
+    let probes = 0;
+    const probe = async () => { probes++; return { names: [`n${probes}`] }; };
+    await prefetchRemoteNames(dir, "h", probe);
+    await prefetchRemoteNames(dir, "h", probe);
+    assert.equal(probes, 2, "sequential calls each probe again");
+  });
+
+  it("asks for a probe only when the cache is missing or older than the window", () => {
+    const dir = tmpDir("xfer-ssh-prefetch-");
+    assert.equal(wantsProbe(dir, "h"), true, "nothing cached");
+    rememberRemoteNames(dir, "h", ["a"]);
+    const now = Date.now();
+    assert.equal(wantsProbe(dir, "h", now), false, "just refreshed");
+    assert.equal(wantsProbe(dir, "h", now + 61_000), true, "older than the freshness window");
   });
 });
