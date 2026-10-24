@@ -18,6 +18,10 @@ ls -la "$(node -p 'require("os").tmpdir()')/pi-xfer-$MSG_ID.md"
 # ③ 完整性：比对整篇 sha256，不比对任何短字符串
 sha256sum "$(node -p 'require("os").tmpdir()')/pi-xfer-$MSG_ID.md"
 #   与发送端取哈希前对同一文档算的值比较；相等 = 这一段线路上无人改动
+
+# ④ 归因：这条到底走了哪条通道？（Link 和 mesh 的落盘文件同名）
+grep -c "$MSG_ID" ~/.pi/xfer/mesh.log
+#   >0 = 走了 mesh（engine 的 durable queue）；0 = 走了 ssh Link
 ```
 
 ## 每条背后是一次真实误判
