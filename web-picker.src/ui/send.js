@@ -120,10 +120,11 @@ export function initSend(ctx) {
       else { toast(t('bag.stageFailed', { detail: res.code + (res.message ? ' — ' + res.message : '') })); return; }
     }
     toast(t('bag.staged', { n: ok }));
-    // 入袋后默认清空本页（开放问题的拍板：不保留副本，避免双份）
+    // 入袋后默认清空本页（开放问题的拍板：不保留副本，避免双份）。
+    // 不在这里全量刷新袋 —— 大袋的 list 快照又大又慢，stage 的 ack count 已足够；
+    // 抽屉打开时和连接恢复时各自刷新。
     ctx.clearBatch();
     ctx.renderPanel();
-    if (ctx.refreshBag) void ctx.refreshBag();
   }
   elStage.addEventListener('click', stageToBroker);
   window.addEventListener('pointerdown', (e) => {

@@ -96,6 +96,7 @@ const STRINGS = {
   'bag.entry': { en: 'Bag', zh: '暂存袋' },
   'bag.entry.title': { en: 'Cross-page staging bag (requires broker connection)', zh: '跨页暂存袋（需要连接 broker）' },
   'bag.title': { en: 'Staging bag', zh: '暂存袋' },
+  'bag.countTruncated': { en: '{n} of {total} markers (sending covers all)', zh: '显示 {n} / 共 {total} 条（发送覆盖全部）' },
   'bag.count': { en: '{pages} pages · {n} markers', zh: '{pages} 页 · {n} 条' },
   'bag.empty': { en: 'Bag is empty — on any connected page use ▾ → Stage to broker', zh: '暂存袋是空的 — 在已连接的页面用 ▾ → 暂存到 broker' },
   'bag.sendLabel': { en: 'Send whole bag (multi-page provenance in one handoff)', zh: '整袋发送（多页 provenance 合成一只 handoff）' },

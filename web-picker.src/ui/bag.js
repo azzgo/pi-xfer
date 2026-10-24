@@ -154,7 +154,9 @@ export function initBag(ctx) {
   function render() {
     if (!bagOpen) return;
     const groups = groupByPage(items);
-    elBagCount.textContent = t('bag.count', { pages: groups.size, n: items.length });
+    elBagCount.textContent = bagTruncated
+      ? t('bag.countTruncated', { n: items.length, total: bagTotal })
+      : t('bag.count', { pages: groups.size, n: items.length });
     if (!items.length) {
       setHTML(elBagList, `<div class="bempty">${t('bag.empty')}</div>`);
       return;
@@ -184,10 +186,15 @@ export function initBag(ctx) {
 
   // Broker id → accordion entry id: re-rendered rows keep their identity via
   // data-id, so note edits survive the list refresh that follows.
+  let bagTruncated = false;
+  let bagTotal = 0;
   async function refresh() {
     const res = await conn.requestBagList();
     if (res.ok) {
-      items = Array.isArray(res.result && res.result.items) ? res.result.items.slice() : [];
+      const r = res.result || {};
+      items = Array.isArray(r.items) ? r.items.slice() : [];
+      bagTruncated = r.truncated === true;
+      bagTotal = typeof r.total === 'number' ? r.total : items.length;
       // remember open pages that still exist
       const keys = new Set(items.map(pageKey));
       for (const k of [...openPages]) if (!keys.has(k)) openPages.delete(k);

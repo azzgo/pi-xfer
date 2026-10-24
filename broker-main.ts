@@ -594,9 +594,26 @@ function handleAnnotationStage(connection: WsConnection, frame: Frame): void {
   console.log(`[bag] staged ${entry.id} [tab ${entry.tabId}] ${entry.pick.selector} (bag: ${bag.length})`);
 }
 
-/** bag.list — full Bag snapshot; the picker's only source of truth after reconnect. */
+/**
+ * bag.list — Bag snapshot, newest first. The reply is capped at
+ * BAG_LIST_MAX_ITEMS: a list frame past MAX_FRAME_BYTES would make
+ * ws-server teardown the connection (encodeFrame throws → connection.send
+ * tears down), which is how a few hundred staged markers turned into a
+ * silent reconnect loop. `total`/`truncated` tell the picker there is more
+ * than the snapshot shows.
+ */
+const BAG_LIST_MAX_ITEMS = 100;
+
 function handleBagList(connection: WsConnection, frame: Frame): void {
-  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { items: bag } });
+  const ordered = bag.slice().reverse();
+  const truncated = ordered.length > BAG_LIST_MAX_ITEMS;
+  const items = truncated ? ordered.slice(0, BAG_LIST_MAX_ITEMS) : ordered;
+  connection.send({
+    v: PROTOCOL_VERSION,
+    type: WIRE_ACK,
+    id: frameId(frame),
+    result: { items, total: bag.length, truncated },
+  });
 }
 
 /** Shared validation of bag.submit's {prompt, target}; null → error already sent. */

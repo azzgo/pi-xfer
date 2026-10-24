@@ -195,6 +195,8 @@ describe("staging bag", () => {
     const listed = await sendAndAck(tab, { v: 0, type: "bag.list", id: "l1" });
     const items = (listed.result as { items?: Array<Record<string, unknown>> }).items!;
     assert.equal(items.length, 2);
+    assert.equal((listed.result as { truncated?: boolean }).truncated, false);
+    assert.equal((listed.result as { total?: number }).total, 2);
     assert.deepEqual(items.map((i) => i.id).sort(), [firstId, (second.result as { id?: string }).id].sort());
     assert.equal(items[0]!.tabId, "tab-1");
     assert.equal(items[0]!.url, "https://a.example.com/cart");
@@ -264,6 +266,26 @@ describe("staging bag", () => {
     // Sending consumes the bag (glossary) — a fresh list is empty.
     const listed = await sendAndAck(tab, { v: 0, type: "bag.list", id: "l2" });
     assert.equal((listed.result as { items?: unknown[] }).items!.length, 0);
+  });
+
+  it("bag.list caps the snapshot at 100 newest entries and reports total/truncated", async () => {
+    const daemon = await startTestBroker();
+    const tab = await RawWs.connect(daemon.port);
+    await welcome(tab, "tab-1");
+
+    let lastId = "";
+    for (let i = 0; i < 103; i++) {
+      const ack = await sendAndAck(tab, stageFrame("s" + i, "tab-1", "https://a.example.com/p" + (i % 3), "Page " + (i % 3)));
+      assert.equal(ack.type, "ack");
+      lastId = (ack.result as { id?: string }).id ?? lastId;
+    }
+    const listed = await sendAndAck(tab, { v: 0, type: "bag.list", id: "l1" });
+    const items = (listed.result as { items?: Array<Record<string, unknown>> }).items!;
+    assert.equal(items.length, 100);
+    assert.equal((listed.result as { total?: number }).total, 103);
+    assert.equal((listed.result as { truncated?: boolean }).truncated, true);
+    // newest first: the last staged id is the first item
+    assert.equal((items[0] as { id?: string }).id, lastId);
   });
 
   it("bag.submit to a missing target → target_not_found; the bag is kept for retry", async () => {

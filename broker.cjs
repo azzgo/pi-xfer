@@ -1304,8 +1304,17 @@ function handleAnnotationStage(connection, frame) {
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { id: entry.id, count: bag.length } });
   console.log(`[bag] staged ${entry.id} [tab ${entry.tabId}] ${entry.pick.selector} (bag: ${bag.length})`);
 }
+var BAG_LIST_MAX_ITEMS = 100;
 function handleBagList(connection, frame) {
-  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { items: bag } });
+  const ordered = bag.slice().reverse();
+  const truncated = ordered.length > BAG_LIST_MAX_ITEMS;
+  const items = truncated ? ordered.slice(0, BAG_LIST_MAX_ITEMS) : ordered;
+  connection.send({
+    v: PROTOCOL_VERSION,
+    type: WIRE_ACK,
+    id: frameId(frame),
+    result: { items, total: bag.length, truncated }
+  });
 }
 function parseBagSubmitTarget(connection, frame) {
   const prompt = frame.prompt;

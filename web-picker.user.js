@@ -1130,6 +1130,7 @@
     "bag.entry": { en: "Bag", zh: "暂存袋" },
     "bag.entry.title": { en: "Cross-page staging bag (requires broker connection)", zh: "跨页暂存袋（需要连接 broker）" },
     "bag.title": { en: "Staging bag", zh: "暂存袋" },
+    "bag.countTruncated": { en: "{n} of {total} markers (sending covers all)", zh: "显示 {n} / 共 {total} 条（发送覆盖全部）" },
     "bag.count": { en: "{pages} pages · {n} markers", zh: "{pages} 页 · {n} 条" },
     "bag.empty": { en: "Bag is empty — on any connected page use ▾ → Stage to broker", zh: "暂存袋是空的 — 在已连接的页面用 ▾ → 暂存到 broker" },
     "bag.sendLabel": { en: "Send whole bag (multi-page provenance in one handoff)", zh: "整袋发送（多页 provenance 合成一只 handoff）" },
@@ -3208,7 +3209,6 @@
       toast(t("bag.staged", { n: ok }));
       ctx.clearBatch();
       ctx.renderPanel();
-      if (ctx.refreshBag) void ctx.refreshBag();
     }
     elStage.addEventListener("click", stageToBroker);
     window.addEventListener("pointerdown", (e) => {
@@ -3485,7 +3485,7 @@
     function render() {
       if (!bagOpen) return;
       const groups = groupByPage(items);
-      elBagCount.textContent = t("bag.count", { pages: groups.size, n: items.length });
+      elBagCount.textContent = bagTruncated ? t("bag.countTruncated", { n: items.length, total: bagTotal }) : t("bag.count", { pages: groups.size, n: items.length });
       if (!items.length) {
         setHTML(elBagList, `<div class="bempty">${t("bag.empty")}</div>`);
         return;
@@ -3500,10 +3500,15 @@
       const p = m.pick || {};
       return '<div class="item" data-id="' + escapeHtml(m.id) + '"><div class="psel">' + escapeHtml(p.selector || "") + "</div>" + (p.textPreview ? '<div class="pprev">' + escapeHtml(p.textPreview) + "</div>" : "") + '<textarea data-note placeholder="' + t("note.placeholder") + '">' + escapeHtml(p.note || "") + '</textarea><div class="prow"><span class="pts">' + (p.ts ? new Date(p.ts).toLocaleTimeString() : "") + '</span><button class="del">' + t("btn.delete") + "</button></div></div>";
     }
+    let bagTruncated = false;
+    let bagTotal = 0;
     async function refresh() {
       const res = await conn.requestBagList();
       if (res.ok) {
-        items = Array.isArray(res.result && res.result.items) ? res.result.items.slice() : [];
+        const r = res.result || {};
+        items = Array.isArray(r.items) ? r.items.slice() : [];
+        bagTruncated = r.truncated === true;
+        bagTotal = typeof r.total === "number" ? r.total : items.length;
         const keys = new Set(items.map(pageKey));
         for (const k of [...openPages]) if (!keys.has(k)) openPages.delete(k);
       }
