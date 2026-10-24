@@ -34,7 +34,8 @@ Full walkthrough in [`docs/guides/quickstart.md`](docs/guides/quickstart.md) · 
 | Capability | What it does |
 |---|---|
 | **Local transport** | Unix-socket peers at `~/.pi/xfer/<name>.sock`; `/xfer list`, zombie GC (`/xfer gc`), metadata files, install self-check (`/xfer doctor`); `/xfer broker start|status|stop|logs` daemon for the web picker |
-| **Mesh transport** | Opt-in cross-machine delivery over [RivetKit](https://rivet.dev) (`/xfer mesh status/up/down/list`, with a per-node delivery verdict and a pre-send check); one in-process actor per instance, engine-side discovery, durable queue, bundle + on-demand native runtime (see `docs/adr/0013`) |
+| **Mesh transport** | Opt-in cross-machine delivery over [RivetKit](https://rivet.dev) (`/xfer mesh status/up/down/list`, with a per-node delivery verdict and a pre-send check); one in-process actor per instance, engine-side discovery, durable queue, bundle + on-demand native runtime (see `docs/adr/0013`). **This is the primary cross-machine transport.** |
+| **SSH Link** | A supplementary point-to-point path for when you do not want to stand up a mesh engine: `/xfer ssh up <host>` carries one `ssh -N` with both directions (`-L` per remote peer at probe time, `-R` for this pi), and the tunnel dies with the pi process. No discovery, no routing, no buffering — it borrows the existing local socket scan. **Needs passwordless ssh (key or agent): the spawned ssh has no TTY, so a password prompt cannot be answered.** Not a replacement for the mesh; see `docs/adr/0021` |
 | **Node descriptions** | Self-declared capability note per mesh node (`/xfer desc <text>`, no text clears); stored on the node's actor, read per node and attached to the broker's `targets` listing so a picker user can pick by fit. Unverified self-declaration — routing stays with the consumer |
 | **Handoff outcome** | Both `xfer_to` and `xfer_mesh_to` report where the handoff landed — `delivered` / `queued` / `unknown` / `not-delivered` — as far as each transport can honestly tell. Never "was it read": `unknown` is a real answer and is never a reason to resend (see `docs/adr/0020`) |
 | **Board** | Machine-local async collaboration cards (`/xfer board`); append-only entries, human-cleaned (see `docs/adr/0014`) |
@@ -47,12 +48,15 @@ Install the userscript straight from the raw URL (the `.user.js` suffix triggers
 
 pi-xfer covers **heavy-context handoff**: structured documents, cross-machine transport, and browser capture. For lightweight same-machine notes ("check this file", quick questions), [pi-intercom](https://github.com/nicobailon/pi-intercom) is the better fit — the two coexist naturally.
 
+Cross-machine has two paths, in this order: the **mesh** is the intended one (discovery, durable queue, works while the other side is asleep), and **SSH Link** is a small supplement for point-to-point cases where standing up an engine is not worth it. Link assumes two machines that already trust each other over ssh, and nothing more — no engine, no registry, no offline buffer.
+
 ## Docs
 
 **User guides**
 
 - [Quickstart](docs/guides/quickstart.md) — your first handoff in five minutes
-- [Mesh setup](docs/guides/mesh-setup.md) — cross-machine transport with RivetKit
+- [Mesh setup](docs/guides/mesh-setup.md) — cross-machine transport with RivetKit (the primary path)
+- [SSH Link](docs/adr/0021-ssh-link-peer-to-peer-transport.md) — the supplementary point-to-point path (design and limits)
 - [Agent host setup](docs/guides/agent-host-setup.md) — wiring a non-pi bot (adapter daemon, Feishu notes)
 - [Serverless Cloudflare node](docs/guides/cf-serverless-node.md) — a mesh node on Cloudflare that exists only while there is work
 - [MCP gateway](docs/guides/mcp-gateway.md) — typed xfer tools for an MCP host, over stdio
