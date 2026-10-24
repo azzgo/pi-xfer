@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { listLinks, sshDown, sshUp } from "../ssh-link.ts";
+import { listLinks, listOwnLinks, sshDown, sshUp } from "../ssh-link.ts";
 import { encodeAgentName } from "../utils.ts";
 
 const assert = (cond: unknown, what: string): void => {
@@ -37,8 +37,7 @@ await new Promise<void>(resolve => remoteServer.listen(path.join(remoteDir, "rem
 console.log(`fake remote node listening at ${remoteDir}/remote-alpha.sock`);
 
 const baseOpts = { xferDir: localDir, myName: "self" as const, keyPath: path.join(os.homedir(), ".ssh", "id_ed25519_smoke") };
-const opts = { ...baseOpts, direction: "out" as const };
-const optsIn = { ...baseOpts, direction: "in" as const };
+const opts = { ...baseOpts, direction: "in" as const, names: ["remote-alpha"] };
 const childEnvSet = process.env.XFER_DIR;
 // The remote env cannot cross ssh (AcceptEnv), so stage it in the remote
 // user's home via the existing localhost connection — smoke-only mechanism.
@@ -47,14 +46,14 @@ fs.writeFileSync(path.join(os.homedir(), ".pi/xfer-ssh-env"), `export XFER_DIR=$
 try {
   const result = await sshUp("localhost", opts);
   console.log("sshUp:", result);
-  assert(result.forwardNames.includes("remote-alpha"), "probe found remote-alpha");
+  assert(result.names.includes("remote-alpha"), "in imported remote-alpha");
   assert(fs.existsSync(path.join(localDir, "remote-alpha.sock")), "-L landing socket created locally");
-  assert(!fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "no self ledger entry in -L only mode");
-  assert(!fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "-L only leaves no -R landing on the remote");
+  assert(!fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "in writes no self ledger entry");
+  assert(!fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "in leaves no -R landing on the remote");
 
-  const links = listLinks(baseOpts);
-  assert(links.length === 1 && links[0].host === "localhost", "ledger lists exactly the -L entry");
-  assert(decodeURIComponent(links[0].name) === "remote-alpha", "ledger entry names the remote node");
+  const links = listOwnLinks(baseOpts);
+  assert(links.length === 1 && links[0].host === "localhost", "ledger lists exactly the imported entry");
+  assert(links[0].name === "remote-alpha", "ledger entry names the remote node");
 
   await new Promise<void>((resolve, reject) => {
     const conn = net.connect({ path: path.join(localDir, "remote-alpha.sock") });
@@ -68,23 +67,41 @@ try {
   assert(down.length === 1, "sshDown tears down the -L entry");
   assert(!fs.existsSync(path.join(localDir, "remote-alpha.json")), "ledger json removed");
 
-  // ── direction: in (-R only) ──
-  const inResult = await sshUp("localhost", optsIn);
+  // ── direction: in (import a remote node) ──
+  const inResult = await sshUp("localhost", { ...baseOpts, direction: "in", names: ["remote-alpha"] });
   console.log("sshUp(in):", inResult);
-  assert(inResult.forwardNames.length === 0, "in mode forwards no remote nodes");
-  assert(!fs.existsSync(path.join(localDir, "remote-alpha.sock")), "in mode creates no local landing sock");
-  assert(fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "in mode lands self on the remote");
-  const inLinks = listLinks(baseOpts);
-  assert(inLinks.length === 1 && decodeURIComponent(inLinks[0].name) === "self", "ledger lists only self for in mode");
-  const inDown = sshDown("localhost", baseOpts);
-  assert(inDown.length === 1, "in mode Link tears down");
-  // StreamLocalBindUnlink is bind-time cleanup, NOT exit-time: the -R sock is
-  // EXPECTED to linger after ssh dies; the remote's own gc reaps it as an
-  // orphan-sock (ECONNREFUSED) — the designed path, not a failure.
-  const remoteSelf = path.join(remoteDir, encodeAgentName("self") + ".sock");
-  console.log(fs.existsSync(remoteSelf)
-    ? "(remote -R sock lingers after exit — expected; the remote's gc owns it as an orphan)"
-    : "(remote -R sock already gone)");
+  assert(inResult.names[0] === "remote-alpha", "in imported the named remote node");
+  assert(fs.existsSync(path.join(localDir, "remote-alpha.sock")), "in created the local landing sock");
+  assert(!fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "in writes no self entry");
+  const inLinks = listOwnLinks(baseOpts);
+  assert(inLinks.length === 1 && inLinks[0].name === "remote-alpha", "ledger lists the imported node");
+  assert(sshDown("localhost", baseOpts).length === 1, "in Link tears down");
+
+  // ── direction: out (export this pi) ──
+  const outResult = await sshUp("localhost", { ...baseOpts, direction: "out" });
+  console.log("sshUp(out):", outResult);
+  assert(outResult.names[0] === "self", "out exported this pi under its own name");
+  assert(fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "out landed self.sock on the remote");
+  assert(!fs.existsSync(path.join(localDir, "remote-alpha.sock")), "out imports nothing");
+  const outLinks = listOwnLinks(baseOpts);
+  assert(outLinks.length === 1 && outLinks[0].direction === "out", "ledger records the out direction");
+  assert(sshDown("localhost", baseOpts).length === 1, "out Link tears down");
+
+  // ── in rejects an unknown remote name, naming what exists ──
+  let rejected = "";
+  try {
+    await sshUp("localhost", { ...baseOpts, direction: "in", names: ["nope"] });
+  } catch (err) {
+    rejected = err instanceof Error ? err.message : String(err);
+  }
+  assert(/not found on localhost: nope/.test(rejected) && /remote-alpha/.test(rejected),
+    "in rejects an unknown remote name and lists the real ones");
+
+  // ── a foreign pi's Link is not ours to tear down ──
+  fs.writeFileSync(path.join(localDir, "foreign.json"), JSON.stringify({ via: "ssh", host: "localhost", pid: 999999, owner: 999999, direction: "in" }));
+  assert(sshDown(undefined, baseOpts).length === 0, "sshDown leaves a foreign Link alone");
+  assert(listLinks(baseOpts).length === 1, "the foreign Link record survives");
+  fs.unlinkSync(path.join(localDir, "foreign.json"));
   console.log("\nALL PASS");
 } finally {
   if (childEnvSet === undefined) delete process.env.XFER_DIR; else process.env.XFER_DIR = childEnvSet;

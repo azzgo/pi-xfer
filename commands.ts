@@ -16,7 +16,7 @@ import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTa
 import { loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
-import { listLinks, planSshUp, probeRemote, sshDown, sshUp, type LinkDirection, type LinkInfo, type SshLinkOptions, type SshUpPlan, type SshUpResult } from "./ssh-link.ts";
+import { linkStatus, listLinks, listOwnLinks, planSshUp, probeRemote, sshDown, sshUp, type LinkDirection, type LinkInfo, type SshLinkOptions, type SshUpPlan, type SshUpResult } from "./ssh-link.ts";
 
 /** Options for `registerXferCommand`. */
 export interface XferCommandOptions {
@@ -40,12 +40,16 @@ export interface XferCommandOptions {
 
 /** What `/xfer ssh` needs from the link layer — tests stub this instead of spawning real ssh. */
 export interface SshLinkOperations {
+  /** Every Link in the xfer dir, whoever owns it. */
   list(): LinkInfo[];
-  up(host: string, direction: LinkDirection): Promise<SshUpResult>;
+  /** Only the Links this pi process created — what `down` acts on. */
+  own(): LinkInfo[];
+  up(host: string, direction: LinkDirection, names?: string[]): Promise<SshUpResult>;
   down(host: string | undefined): LinkInfo[];
-  plan(host: string): Promise<SshUpPlan>;
-  /** Read-only remote probe for `list <host>`: no tunnel is created. */
+  plan(host: string, direction: LinkDirection, names?: string[]): Promise<SshUpPlan>;
+  /** Read-only remote probe (the `in` candidate list): creates no tunnel. */
   probe(host: string): Promise<{ dir: string; names: string[] }>;
+  status(link: LinkInfo): "up" | "dead" | "foreign";
 }
 
 /** Decode a Link's socket-file stem back into its remote node name. */
@@ -95,13 +99,16 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
   const xferDir = options.xferDir ?? XFER_DIR;
   const meshConfigPath = options.meshConfigPath ?? MESH_CONFIG_PATH;
   const sshOps: SshLinkOperations = options.sshLink ?? (() => {
-    const sshOpts = (direction?: LinkDirection): SshLinkOptions => ({ xferDir, myName: controller.state.identity?.name ?? "", direction });
+    const sshOpts = (direction?: LinkDirection, names?: string[]): SshLinkOptions =>
+      ({ xferDir, myName: controller.state.identity?.name ?? "", direction, names });
     return {
       list: () => listLinks(sshOpts()),
-      up: (host, direction) => sshUp(host, sshOpts(direction)),
+      own: () => listOwnLinks(sshOpts()),
+      up: (host, direction, names) => sshUp(host, sshOpts(direction, names)),
       down: (host) => sshDown(host, sshOpts()),
-      plan: (host) => planSshUp(host, sshOpts()),
+      plan: (host, direction, names) => planSshUp(host, sshOpts(direction, names)),
       probe: (host) => probeRemote(host),
+      status: (link) => linkStatus(link),
     };
   })();
   const board = registerBoard(pi, { boardDir: options.boardDir, getAuthor: () => controller.state.identity?.name ?? "unknown" });
@@ -151,10 +158,11 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         const subPrefix = prefix.slice("ssh ".length).replace(/^\s+/, "");
         const items: AutocompleteItem[] = [
-          { value: "ssh in", label: "in", description: "-R only: <host> can send to this pi — /xfer ssh in <host>" },
-          { value: "ssh out", label: "out", description: "-L only: this pi can send to the host's nodes — /xfer ssh out <host>" },
-          { value: "ssh list", label: "list", description: "Active Links, or probe a host read-only: /xfer ssh list [host]" },
-          { value: "ssh down", label: "down", description: "Tear down Links: /xfer ssh down [host]" },
+          { value: "ssh in", label: "in", description: "Import remote nodes (-L): /xfer ssh in <host> <name...>" },
+          { value: "ssh out", label: "out", description: "Export this pi (-R): /xfer ssh out <host> [name]" },
+          { value: "ssh list", label: "list", description: "Read-only probe of a host: /xfer ssh list <host>" },
+          { value: "ssh status", label: "status", description: "Links this pi maintains, with liveness" },
+          { value: "ssh down", label: "down", description: "Tear down this pi's Links: /xfer ssh down [host]" },
         ].filter(i => i.label.startsWith(subPrefix));
         return items.length > 0 ? items : null;
       }
@@ -185,7 +193,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "doctor", label: "doctor", description: "Self-check the install: socket dir / peers / broker / admin / mesh" },
         { value: "status", label: "status", description: "Show listener status" },
         { value: "mesh", label: "mesh", description: "Mesh transport: status / up / down / list / <name> <request>" },
-        { value: "ssh", label: "ssh", description: "SSH Link transport: in <host> / out <host> / list [host] / down [host]" },
+        { value: "ssh", label: "ssh", description: "SSH Link: in <host> <name...> / out <host> [name] / list <host> / status / down [host]" },
         ...peers.map(peer => ({
           value: peer.xferName,
           label: peer.xferName,
@@ -213,7 +221,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
           "   /xfer mesh [<status|up|down|list|setup|name> <request>] — mesh transport\n" +
-          "   /xfer ssh in <host> | out <host> | list [host] | down [host] — ssh Link to one remote machine\n" +
+          "   /xfer ssh in <host> <name...> | out <host> [name] | list <host> | status | down — ssh Link\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
           "   /xfer doctor             — self-check the install and print fix hints\n" +
 
@@ -245,49 +253,51 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         return;
       }
 
-      // ── /xfer ssh in|out|list|down — ssh Link transport (ADR-0021) ──
+      // ── /xfer ssh in|out|list|status|down — ssh Link transport (ADR-0021) ──
       if (cmd === "ssh") {
         const sub = parts[1];
         const host = parts[2];
-        const usage = "Usage: /xfer ssh <in <host> | out <host> | list [host] | down [host]>";
+        const rest = parts.slice(2).filter(Boolean);
+        const usage =
+          "Usage: /xfer ssh in <host> <name...>   — import remote nodes (-L)\n" +
+          "       /xfer ssh out <host> [name]     — export this pi (-R)\n" +
+          "       /xfer ssh list <host>           — what <host> can offer (read-only probe)\n" +
+          "       /xfer ssh status                — Links this pi maintains, with liveness\n" +
+          "       /xfer ssh down [host]           — tear down this pi's Links";
 
         if (!sub || sub === "help") {
           ctx.ui.notify(
-            "🔗 /xfer ssh                     — this help\n" +
-            "   /xfer ssh in <host>           — -R only: <host> can send to this pi (nothing of theirs appears here)\n" +
-            "   /xfer ssh out <host>          — -L only: this pi can send to the host's nodes (they cannot start a send back)\n" +
-            "   /xfer ssh list                — active Links\n" +
-            "   /xfer ssh list <host>         — read-only probe: the host's xfer dir and node names, no tunnel\n" +
-            "   /xfer ssh down [host]         — tear down Links (all when no host given)\n" +
-            "\nThe direction is always explicit — a half tunnel is a real choice, not a default.\n" +
-            "Life follows this pi process: exit tears the tunnel down. Name collisions are refused, never renamed.",
+            "🔗 /xfer ssh                       — ssh Link transport\n\n" +
+            "   /xfer ssh in <host> <name...>    — import those remote nodes into here (-L);\n" +
+            "                                      they become reachable with /xfer <name>\n" +
+            "   /xfer ssh out <host> [name]      — export THIS pi to <host> (-R); the remote\n" +
+            "                                      reaches you by name (default: your xfer name)\n" +
+            "   /xfer ssh list <host>            — read-only: <host>'s xfer dir and its sockets\n" +
+            "   /xfer ssh status                 — the Links this pi maintains (+ liveness)\n" +
+            "   /xfer ssh down [host]            — tear down Links THIS pi started\n\n" +
+            "Direction is always explicit: in needs remote names, out only needs this pi.\n" +
+            "A Link dies with the pi that created it; other pis' Links are untouchable here.",
             "info",
           );
           return;
         }
 
         if (sub === "list") {
-          const links = sshOps.list();
-          const linkLines = links.length
-            ? links.map(l => `  ${decodeLinkName(l.name)} — via ${l.host} (pid ${l.pid})`).join("\n")
-            : "  (none)";
-          if (!host) {
-            ctx.ui.notify(`🔗 ssh Links:\n${linkLines}\n\nAdd a host to probe it without opening a tunnel: /xfer ssh list <host>`, "info");
-            return;
-          }
-          if (parts.length > 3) {
-            ctx.ui.notify(usage, "error");
+          if (!host || rest.length > 0) {
+            ctx.ui.notify("Usage: /xfer ssh list <host> — read-only probe of that machine's xfer dir", "error");
             return;
           }
           try {
             const remote = await sshOps.probe(host);
-            const active = new Set(links.filter(l => l.host === host).map(l => decodeLinkName(l.name)));
+            const linked = new Set(sshOps.list().filter(l => l.host === host).map(l => l.name));
             const nodes = remote.names.length
-              ? remote.names.map(n => `  ${n}${active.has(n) ? "  ← already linked" : ""}`).join("\n")
-              : "  (no nodes)";
+              ? remote.names.map(n => `  ${n}${linked.has(n) ? "   (already linked)" : ""}`).join("\n")
+              : "  (no sockets)";
             ctx.ui.notify(
-              `🔗 ${host} — remote dir ${remote.dir}\n${nodes}\n\n` +
-              `Active Links:\n${linkLines}`,
+              `🔗 ${host} — xfer dir ${remote.dir}\n${nodes}\n\n` +
+              (remote.names.length
+                ? `Import any of them with: /xfer ssh in ${host} ${remote.names[0]}`
+                : `Nothing to import yet — an agent must be running there with a socket up.`),
               "info",
             );
           } catch (err) {
@@ -296,9 +306,36 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           return;
         }
 
-        if (sub === "in" || sub === "out") {
-          if (!host || parts.length > 3) {
-            ctx.ui.notify(`Usage: /xfer ssh ${sub} <host>`, "error");
+        if (sub === "status") {
+          if (rest.length > 0) {
+            ctx.ui.notify("Usage: /xfer ssh status — the Links this pi maintains", "error");
+            return;
+          }
+          const all = sshOps.list();
+          const mine = sshOps.own();
+          const others = all.filter(l => !mine.some(m => m.name === l.name && m.host === l.host));
+          const line = (l: LinkInfo, tag: string) => {
+            const state = sshOps.status(l);
+            const dot = state === "up" ? "🟢" : state === "dead" ? "⚫" : "⚪";
+            return `  ${dot} ${l.name} ${l.direction === "in" ? "←" : "→"} ${l.host} (ssh pid ${l.pid})${tag}`;
+          };
+          const sections = [
+            mine.length ? `this pi:\n${mine.map(l => line(l, "")).join("\n")}` : "this pi: (none)",
+            others.length
+              ? `other pi processes (not yours to tear down):\n${others.map(l => line(l, " — foreign")).join("\n")}`
+              : "",
+          ].filter(Boolean);
+          ctx.ui.notify(`🔗 ssh Links\n${sections.join("\n")}`, "info");
+          return;
+        }
+
+        if (sub === "in") {
+          if (!host || rest.length === 0) {
+            ctx.ui.notify(
+              `Usage: /xfer ssh in <host> <name...> — the remote names to import.\n` +
+              `Check what is there first: /xfer ssh list <host>`,
+              "error",
+            );
             return;
           }
           if (!state.identity) {
@@ -306,24 +343,36 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             return;
           }
           try {
-            const result = await sshOps.up(host, sub);
-            const rebuiltNote = result.rebuilt.length > 0 ? ` (rebuilt: ${result.rebuilt.join(", ")})` : "";
-            if (sub === "in") {
-              ctx.ui.notify(
-                `🟢 Link to ${host} up, -R only (pid ${result.pid})${rebuiltNote}\n` +
-                `that machine can send to "this pi" as "${state.identity.name}"; its own nodes are not visible here`,
-                "info",
-              );
-            } else {
-              const names = result.forwardNames.length > 0
-                ? `\nremote nodes reachable: ${result.forwardNames.join(", ")}`
-                : "\nno remote nodes found at probe time — rerun after they start";
-              ctx.ui.notify(
-                `🟢 Link to ${host} up, -L only (pid ${result.pid})${rebuiltNote}${names}\n` +
-                `they cannot send to "${state.identity.name}" — those nodes have no route back (use /xfer ssh in there)`,
-                "info",
-              );
-            }
+            const result = await sshOps.up(host, "in", rest);
+            const rebuilt = result.rebuilt.length > 0 ? ` (rebuilt: ${result.rebuilt.join(", ")})` : "";
+            ctx.ui.notify(
+              `🟢 imported from ${host} (pid ${result.pid})${rebuilt}\n` +
+              `now reachable here: ${result.names.join(", ")}`,
+              "info",
+            );
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
+
+        if (sub === "out") {
+          if (!host || rest.length > 1) {
+            ctx.ui.notify("Usage: /xfer ssh out <host> [name] — export this pi (name defaults to your xfer name)", "error");
+            return;
+          }
+          if (!state.identity) {
+            ctx.ui.notify("❌ Xfer is not initialised", "error");
+            return;
+          }
+          try {
+            const result = await sshOps.up(host, "out");
+            const rebuilt = result.rebuilt.length > 0 ? ` (rebuilt: ${result.rebuilt.join(", ")})` : "";
+            ctx.ui.notify(
+              `🟢 exported this pi to ${host} as "${result.names[0]}" (pid ${result.pid})${rebuilt}\n` +
+              `that machine can now send to "${result.names[0]}"`,
+              "info",
+            );
           } catch (err) {
             ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
           }
@@ -331,15 +380,19 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
 
         if (sub === "down") {
-          if (parts.length > 3) {
-            ctx.ui.notify(usage, "error");
+          if (rest.length > 1) {
+            ctx.ui.notify("Usage: /xfer ssh down [host]", "error");
             return;
           }
           const torn = sshOps.down(host);
+          const others = sshOps.list().filter(l => host === undefined || l.host === host);
+          const foreignNote = others.length > 0
+            ? `\n${others.length} Link(s) belong to another pi process — left alone`
+            : "";
           ctx.ui.notify(
             torn.length
-              ? `🛑 Tore down ${torn.length} Link(s): ${torn.map(l => `${decodeLinkName(l.name)} (${l.host})`).join(", ")}`
-              : host ? `⭕ No Link to ${host}` : "⭕ No ssh Links",
+              ? `🛑 Tore down ${torn.length} of our Link(s): ${torn.map(l => `${l.name} (${l.host})`).join(", ")}${foreignNote}`
+              : host ? `⭕ No Link of ours to ${host}${foreignNote}` : `⭕ No ssh Links of ours${foreignNote}`,
             "info",
           );
           return;

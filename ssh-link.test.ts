@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { after, describe, it } from "node:test";
 import { spawnSync } from "node:child_process";
 import { planGc } from "./gc.js";
-import { listLinks, sshDown, type SshLinkOptions } from "./ssh-link.js";
+import { linkStatus, listLinks, listOwnLinks, sshDown, type SshLinkOptions } from "./ssh-link.js";
 
 const tmpDirs: string[] = [];
 after(() => {
@@ -31,8 +31,8 @@ function deadPid(): number {
   return r.pid;
 }
 
-function writeLink(dir: string, name: string, host: string, pid: number): void {
-  fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({ via: "ssh", host, pid }, null, 2));
+function writeLink(dir: string, name: string, host: string, pid: number, owner = process.pid, direction = "in"): void {
+  fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({ via: "ssh", host, pid, owner, direction }, null, 2));
   fs.writeFileSync(path.join(dir, `${name}.sock`), "");
 }
 
@@ -50,11 +50,30 @@ describe("ssh-link: listLinks", () => {
 
     const links = listLinks(opts(dir));
     assert.equal(links.length, 1);
-    assert.deepEqual(links[0], { name: "remote-a", host: "a@host1", pid: 123 });
+    assert.equal(links[0].name, "remote-a");
+    assert.equal(links[0].host, "a@host1");
+    assert.equal(links[0].pid, 123);
   });
 
   it("returns [] for a missing directory", () => {
     assert.deepEqual(listLinks(opts(path.join(tmpXferDir(), "nope"))), []);
+  });
+});
+
+describe("ssh-link: ownership", () => {
+  it("listOwnLinks separates this process's Links from another pi's", () => {
+    const dir = tmpXferDir();
+    writeLink(dir, "mine", "h1", process.pid, process.pid);
+    writeLink(dir, "theirs", "h2", process.pid + 999999, process.pid + 999999);
+    assert.deepEqual(listOwnLinks(opts(dir)).map(l => l.name), ["mine"]);
+    assert.equal(listLinks(opts(dir)).length, 2);
+    assert.equal(linkStatus(listOwnLinks(opts(dir))[0]), "up");
+  });
+
+  it("reports a Link whose ssh process is gone as dead", () => {
+    const dir = tmpXferDir();
+    writeLink(dir, "gone", "h1", deadPid(), process.pid);
+    assert.equal(linkStatus(listOwnLinks(opts(dir))[0]), "dead");
   });
 });
 
@@ -79,6 +98,14 @@ describe("ssh-link: sshDown", () => {
     const dir = tmpXferDir();
     writeLink(dir, "remote-a", "a@host1", deadPid());
     assert.equal(sshDown("a@host1", opts(dir)).length, 1);
+  });
+
+  it("never touches a Link another pi process owns", () => {
+    const dir = tmpXferDir();
+    writeLink(dir, "theirs", "a@host1", process.pid + 999999, process.pid + 999999);
+    assert.equal(sshDown(undefined, opts(dir)).length, 0);
+    assert.equal(fs.existsSync(path.join(dir, "theirs.sock")), true);
+    assert.equal(fs.existsSync(path.join(dir, "theirs.json")), true);
   });
 });
 

@@ -16,11 +16,12 @@ import { senderCwdStampFor, stampDocument } from "./sender-cwd-stamp.ts";
 import { stampHandoffKind } from "./handoff-kind.ts";
 import { registerXferCommand } from "./commands.ts";
 import { XferController } from "./controller.ts";
-import { MESH_CONFIG_PATH } from "./constants.ts";
+import { MESH_CONFIG_PATH, XFER_DIR } from "./constants.ts";
 import { MeshNode } from "./mesh.ts";
 import type { XferNotifyOutcome } from "./types.ts";
 import { XferState } from "./state.ts";
 import { listPeers, msgId } from "./utils.ts";
+import { sshDown } from "./ssh-link.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag("xfer", {
@@ -231,6 +232,10 @@ export default function (pi: ExtensionAPI) {
 
   // ── Cleanup ──
   pi.on("session_shutdown", async () => {
+    // ssh children are detached from the session's lifetime by design (they
+    // must survive a turn), so exiting pi does NOT reap them: tear our own
+    // Links down explicitly. Links other pi processes own are left alone.
+    try { sshDown(undefined, { xferDir: XFER_DIR, myName: state.identity?.name ?? "" }); } catch { /* best effort */ }
     await mesh.shutdown();
     controller.shutdown();
   });
