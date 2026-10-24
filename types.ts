@@ -54,12 +54,15 @@ export interface XferNotifyMessage {
    * The receiver checks it against the bytes it actually wrote, so either side
    * can tell "landed intact" from "landed altered".
    *
-   * **What it does not prove.** The digest covers the payload the sender had
-   * when it hashed, not the payload the sender meant. If the runtime rewrites
-   * outbound text (a secret redaction, say) BEFORE this hash is taken, the
-   * check passes and the loss is invisible. So `verified` means only "the wire
-   * changed nothing" — never "the text is what the human wrote". Do not treat
-   * a matching hash as evidence that a redaction did not happen.
+   * **It guards a time interval, not a document.** The digest brackets
+   *
+   *     [ sender hashes ] ---- wire / frame ---- [ receiver writes + compares ]
+   *
+   * Anything changed inside that span is caught. Anything changed BEFORE it
+   * (a runtime rewriting outbound text, e.g. secret redaction) or AFTER it
+   * (receiver-side processing) is invisible: the hash matches because it was
+   * taken after the rewrite. So `verified` means "nothing touched this on the
+   * way" — never "the text is what the human wrote".
    *
    * Absent for path-only frames (local peers): there is no travelling body.
    */

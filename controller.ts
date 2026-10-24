@@ -66,10 +66,10 @@ export class XferController {
         // altered between send and write — the receiver still has the content,
         // so it delivers, but it says so.
         //
-        // A match proves only that: it cannot detect a rewrite that happened
-        // before the sender hashed (a runtime redacting outbound text, for
-        // instance). See XferNotifyMessage.docSha256 — the limit is deliberate
-        // and must not be read as "the payload was never touched".
+        // A match proves only that this span was clean: [sender hashed] ->
+        // [we wrote it]. A rewrite before the sender hashed (a runtime
+        // redacting outbound text) still hashes consistently and stays
+        // invisible. See XferNotifyMessage.docSha256 — the limit is by design.
         if (msg.docSha256) {
           const actual = createHash("sha256").update(msg.document, "utf-8").digest("hex");
           this.lastIntegrity = actual === msg.docSha256 ? "verified" : "mismatch";
