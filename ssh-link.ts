@@ -71,6 +71,8 @@ export interface SshUpResult {
   reverseAs: string;
   /** Names that this run added to an existing Link (kept alive, no rebuild). */
   added: string[];
+  /** Every socket the remote had at probe time (for completion caches). */
+  remoteNames: string[];
 }
 
 function ledgerPath(host: string, opts: SshLinkOptions): string {
@@ -242,6 +244,12 @@ export interface SshUpPlan {
   added: string[];
   /** The existing Link this run extends, when there is one. */
   existing?: LinkInfo;
+  /**
+   * Every socket the remote had at probe time (not just the imported subset).
+   * Returned so callers can refresh completion caches from a probe they already
+   * paid for, instead of showing a stale list until the next explicit `list`.
+   */
+  remoteNames: string[];
 }
 
 /**
@@ -299,6 +307,7 @@ export async function planSshUp(host: string, opts: SshLinkOptions): Promise<Ssh
     names,
     reverseAs,
     added,
+    remoteNames: remote.names,
     ...(existing ? { existing } : {}),
   };
 }
@@ -336,7 +345,14 @@ export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpRe
   writeLedger(plan, child.pid!, opts);
   await writeReverseMarker(plan, opts);
 
-  return { host, pid: child.pid!, names: plan.names, reverseAs: plan.reverseAs, added: plan.added };
+  return {
+    host,
+    pid: child.pid!,
+    names: plan.names,
+    reverseAs: plan.reverseAs,
+    added: plan.added,
+    remoteNames: plan.remoteNames,
+  };
 }
 
 function spawnSsh(host: string, args: string[], keyPath?: string) {

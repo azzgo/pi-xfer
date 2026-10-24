@@ -766,7 +766,7 @@ function stubSshLink(overrides: Partial<import("./commands.js").SshLinkOperation
     own: () => [],
     up: async (host, names) => {
       calls.push(`up ${host} ${(names ?? []).join(",")}`.trim());
-      return { host, pid: 4242, names: names ?? ["self"], reverseAs: "me", added: names ?? [] };
+      return { host, pid: 4242, names: names ?? ["self"], reverseAs: "me", added: names ?? [], remoteNames: ["alpha", "beta"] };
     },
     down: async (ident) => { calls.push(`down ${ident ?? "*"}`); return { torn: [] }; },
     plan: async (host, names) => ({ host, remoteDir: "/remote", names: names ?? [], reverseAs: "me", added: names ?? [] }),
@@ -795,6 +795,28 @@ describe("xfer command: /xfer ssh argument parsing", () => {
     await h.handler("ssh in pi-xfer alpha beta");
     assert.equal(h.notifications[0].type, "info");
     assert.deepEqual(ssh.calls, ["up pi-xfer alpha,beta"]);
+  });
+
+  it("refreshes the completion cache from the probe it already paid for", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-ssh-refresh-"));
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops, xferDir: dir });
+    const { cachedRemoteNames } = await import("./ssh-hosts.js");
+    assert.deepEqual(cachedRemoteNames(dir, "pi-xfer"), [], "nothing cached yet");
+
+    await h.handler("ssh list pi-xfer");
+    assert.deepEqual(cachedRemoteNames(dir, "pi-xfer"), ["alpha", "beta"], "list refreshed the cache");
+  });
+
+  it("refreshes the cache on `in` too, without a second ssh round trip", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-ssh-refresh-"));
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops, xferDir: dir });
+    const { cachedRemoteNames } = await import("./ssh-hosts.js");
+
+    await h.handler("ssh in pi-xfer");
+    assert.deepEqual(cachedRemoteNames(dir, "pi-xfer"), ["alpha", "beta"], "in refreshed the cache");
+    assert.deepEqual(ssh.calls, ["up pi-xfer"], "exactly one up call, no extra probe");
   });
 
   it("in without names lets the link layer keep the existing set", async () => {

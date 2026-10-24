@@ -338,6 +338,9 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           }
           try {
             const remote = await sshOps.probe(host);
+            // Refresh the completion cache: it is only ever a snapshot, and a
+            // probe is exactly the moment we know the truth.
+            rememberRemoteNames(xferDir, host, remote.names);
             const linked = new Set(sshOps.list().find(l => l.host === host)?.names ?? []);
             const nodes = remote.names.length
               ? remote.names.map(n => `  ${n}${linked.has(n) ? "   (already imported)" : ""}`).join("\n")
@@ -396,6 +399,9 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           }
           try {
             const result = await sshOps.up(host, rest.length > 0 ? rest : undefined);
+            // `in` already probed the host, so the completion cache is refreshed
+            // from that same answer — no extra ssh round trip.
+            if (result.remoteNames) rememberRemoteNames(xferDir, host, result.remoteNames);
             const added = result.added.length > 0 ? `\nadded: ${result.added.join(", ")}` : "";
             ctx.ui.notify(
               `🟢 Link to ${host} up (pid ${result.pid})${added}\n` +
