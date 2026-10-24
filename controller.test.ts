@@ -8,6 +8,7 @@
  * `os.tmpdir()` sandbox.
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -240,5 +241,34 @@ describe("inbound: ssh Link is bidirectional by construction", () => {
     const text = sent.at(-1)!.content;
     assert.match(text, /kind: task/);
     assert.match(text, /asks you for output/);
+  });
+});
+
+describe("inbound: document integrity against the sender's hash", () => {
+  const body = "# Handoff\n\npayload\n";
+  const sha = (t: string) => createHash("sha256").update(t, "utf-8").digest("hex");
+
+  it("records `verified` when the body matches the sender's hash", () => {
+    const c = controller();
+    c.deliverInbound({
+      type: "xfer-notify", msg_id: "i1", from: "remote", document: body,
+      summary: "s", via: "ssh", docSha256: sha(body),
+    }, "ssh");
+    assert.equal(c.lastIntegrity, "verified");
+  });
+
+  it("records `mismatch` when the body was altered in flight", () => {
+    const c = controller();
+    c.deliverInbound({
+      type: "xfer-notify", msg_id: "i2", from: "remote", document: body,
+      summary: "s", via: "ssh", docSha256: sha("something else entirely"),
+    }, "ssh");
+    assert.equal(c.lastIntegrity, "mismatch");
+  });
+
+  it("stays undefined for a frame that carried no hash", () => {
+    const c = controller();
+    c.deliverInbound({ type: "xfer-notify", msg_id: "i3", from: "remote", document: body, summary: "s" }, "ssh");
+    assert.equal(c.lastIntegrity, undefined);
   });
 });

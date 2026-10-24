@@ -95,3 +95,44 @@ describe("listenServer (unix regression)", () => {
     }
   });
 });
+
+describe("ack reports payload integrity", () => {
+  const roundTrip = async (integrity?: "verified" | "mismatch"): Promise<Record<string, unknown>> => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-ack-test-"));
+    const sockPath = path.join(dir, "agent.sock");
+    const server = createServer({ deliver: () => {}, integrity: () => integrity });
+    const frame = makeFrame("integrity");
+    try {
+      await listenServer({ server, path: sockPath, name: "a", ...NOOP_CALLBACKS });
+      const client = net.connect({ path: sockPath });
+      try {
+        await once(client, "connect");
+        client.write(JSON.stringify(frame) + "\n");
+        return JSON.parse(await readLine(client));
+      } finally {
+        client.destroy();
+      }
+    } finally {
+      await closeServer(server);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("says corrupt when the body did not match the sender's hash", async () => {
+    const ack = await roundTrip("mismatch");
+    assert.equal(ack.outcome, "corrupt");
+    assert.equal(ack.integrity, "mismatch");
+  });
+
+  it("says delivered when the body matched", async () => {
+    const ack = await roundTrip("verified");
+    assert.equal(ack.outcome, "delivered");
+    assert.equal(ack.integrity, "verified");
+  });
+
+  it("says delivered with no integrity field when nothing was checked", async () => {
+    const ack = await roundTrip();
+    assert.equal(ack.outcome, "delivered");
+    assert.equal(ack.integrity, undefined);
+  });
+});

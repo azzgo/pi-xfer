@@ -9,6 +9,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { sendNotify } from "./client.ts";
@@ -139,7 +140,16 @@ export default function (pi: ExtensionAPI) {
           msg_id: mid,
           from: senderName,
           file: linkTarget ? undefined : tmpFile,
-          ...(linkTarget ? { document, via: "ssh" } : {}),
+          ...(linkTarget
+            ? {
+                document,
+                via: "ssh",
+                // Hashed here, before the frame exists, so the receiver can tell
+                // whether what arrived is what was sent — including whether an
+                // outbound redaction rewrote the body.
+                docSha256: createHash("sha256").update(document, "utf-8").digest("hex"),
+              }
+            : {}),
           kind,
           summary,
         });

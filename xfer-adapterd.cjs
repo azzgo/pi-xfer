@@ -49458,7 +49458,10 @@ function sendNotify(target2, msg, xferDir) {
         }
         const ack = response;
         if (ack.type === "ack" && ack.msg_id === msg.msg_id) {
-          finish(void 0, ack.outcome === "delivered" ? "delivered" : "unknown");
+          finish(
+            void 0,
+            ack.outcome === "delivered" ? "delivered" : ack.outcome === "corrupt" ? "corrupt" : "unknown"
+          );
           return;
         }
       }
@@ -49899,8 +49902,14 @@ function createServer2(delivery) {
         }
         if (msg.type === "xfer-notify" && typeof msg.msg_id === "string") {
           delivery.deliver(msg);
+          const integrity = delivery.integrity?.();
           socket.write(
-            JSON.stringify({ type: "ack", msg_id: msg.msg_id, outcome: "delivered" }) + "\n"
+            JSON.stringify({
+              type: "ack",
+              msg_id: msg.msg_id,
+              outcome: integrity === "mismatch" ? "corrupt" : "delivered",
+              ...integrity ? { integrity } : {}
+            }) + "\n"
           );
         }
       }

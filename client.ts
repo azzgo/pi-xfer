@@ -89,7 +89,14 @@ export function sendNotify(
         if (ack.type === "ack" && ack.msg_id === msg.msg_id) {
           // An ack without the field came from an older receiver: `unknown`, never
           // `delivered`. The claim has to be earned, not inferred from the ack itself.
-          finish(undefined, ack.outcome === "delivered" ? "delivered" : "unknown");
+          // `corrupt` is a positive claim (the body arrived altered), so it passes
+          // through; anything unrecognised stays `unknown`.
+          finish(
+            undefined,
+            ack.outcome === "delivered" ? "delivered"
+              : ack.outcome === "corrupt" ? "corrupt"
+              : "unknown",
+          );
           return;
         }
       }

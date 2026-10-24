@@ -49,6 +49,14 @@ export interface XferNotifyMessage {
   /** Set when the socket itself is an ssh Link. Both halves are always open,
    *  so this only tells the receiver the document travelled inline. */
   via?: "ssh";
+  /**
+   * sha256 of `document`, computed by the sender before the frame was built.
+   * The receiver checks it against the bytes it actually wrote, which is the
+   * only way either side can know the payload survived the wire — and, where
+   * a runtime redacts secrets out of outbound text, whether that redaction
+   * touched the body. Absent for path-only frames (local peers).
+   */
+  docSha256?: string;
 }
 
 
@@ -62,7 +70,19 @@ export interface XferNotifyMessage {
  * say `delivered`. `unknown` must never be presented as a reason to retry — a second
  * send is what turns an ambiguity into a real duplicate.
  */
-export type XferNotifyOutcome = "queued" | "delivered" | "unknown" | "not-delivered";
+export type XferNotifyOutcome =
+  | "queued"
+  | "delivered"
+  /**
+   * The frame arrived but its body did not match the sender's `docSha256`.
+   * The handoff reached a session with different bytes than were sent — most
+   * likely an outbound redaction rewrote it. Distinct from `delivered` because
+   * the sender must be able to tell "it landed intact" from "it landed altered";
+   * folding this into `delivered` would repeat the mistake ADR-0020 fixed.
+   */
+  | "corrupt"
+  | "unknown"
+  | "not-delivered";
 
 /** This agent's identity for the current session. */
 export interface Identity {

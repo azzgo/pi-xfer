@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import type * as net from "node:net";
 import * as os from "node:os";
@@ -32,6 +33,12 @@ function sshLinkNote(sender: string): string {
 export class XferController {
   private readonly pi: ExtensionAPI;
   readonly state: XferState;
+  /**
+   * Result of the last inbound document's hash check: `verified` when the body
+   * matched the sender's `docSha256`, `mismatch` when it did not, `undefined`
+   * when the frame carried no hash. Read by the inbound server to shape its ack.
+   */
+  lastIntegrity?: "verified" | "mismatch";
 
   constructor(pi: ExtensionAPI, state: XferState) {
     this.pi = pi;
@@ -47,11 +54,21 @@ export class XferController {
    */
   deliverInbound(msg: XferNotifyMessage, transport?: "mesh" | "ssh"): void {
     const { pi, state } = this;
+    /** Set when the frame's body did not match the sender's own hash. */
+    this.lastIntegrity = undefined;
     if (msg.document !== undefined && !msg.file) {
       const local = path.join(os.tmpdir(), `pi-xfer-${msg.msg_id}.md`);
       try {
         fs.writeFileSync(local, msg.document, { encoding: "utf-8", mode: 0o600 });
         msg = { ...msg, file: local };
+        // The sender hashed the body before building the frame; compare it with
+        // the bytes actually written here. A mismatch means the payload was
+        // altered in flight (an outbound redaction rewriting text, say) — the
+        // receiver still has the content, so it delivers, but it says so.
+        if (msg.docSha256) {
+          const actual = createHash("sha256").update(msg.document, "utf-8").digest("hex");
+          this.lastIntegrity = actual === msg.docSha256 ? "verified" : "mismatch";
+        }
       } catch { /* fall through: the body is still quoted below */ }
     }
     msg = { ...msg, file: msg.file ?? "" };
@@ -110,7 +127,13 @@ export class XferController {
 
   /** Inbound socket server that routes `xfer-notify` into the session. */
   private createInboundServer(): net.Server {
-    return createServer({ deliver: (msg) => this.deliverInbound(msg, msg.via === "ssh" ? "ssh" : undefined) });
+    return createServer({
+      deliver: (msg) => {
+        this.lastIntegrity = undefined;
+        this.deliverInbound(msg, msg.via === "ssh" ? "ssh" : undefined);
+      },
+      integrity: () => this.lastIntegrity,
+    });
   }
 
   private async listen(ctx: ExtensionContext): Promise<void> {

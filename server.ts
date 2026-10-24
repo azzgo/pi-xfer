@@ -6,6 +6,14 @@ import type { XferNotifyMessage } from "./types.ts";
 /** Routes an incoming handoff into the user's session (ack is sent after). */
 export interface InboundDelivery {
   deliver(msg: XferNotifyMessage): void;
+  /**
+   * What the delivery learned about the payload's integrity, when the frame
+   * carried a sender-side hash: `mismatch` means the bytes that arrived are not
+   * the bytes that were sent. Reported in the ack so the SENDER learns it —
+   * a receiver-only verdict would leave the sender believing `delivered` meant
+   * "intact", which is exactly the ambiguity ADR-0020 removed elsewhere.
+   */
+  integrity?(): "verified" | "mismatch" | undefined;
 }
 
 /** Inbound socket server: parses JSON-lines frames, delegates `xfer-notify`, acks. */
@@ -39,8 +47,14 @@ export function createServer(delivery: InboundDelivery): net.Server {
           // timeout resolves to `unknown`. The claim is "handed to this session", never
           // "read" — `pi.sendMessage` returns void (ADR-0020).
           delivery.deliver(msg as XferNotifyMessage);
+          const integrity = delivery.integrity?.();
           socket.write(
-            JSON.stringify({ type: "ack", msg_id: msg.msg_id, outcome: "delivered" }) + "\n",
+            JSON.stringify({
+              type: "ack",
+              msg_id: msg.msg_id,
+              outcome: integrity === "mismatch" ? "corrupt" : "delivered",
+              ...(integrity ? { integrity } : {}),
+            }) + "\n",
           );
         }
       }
