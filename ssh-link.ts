@@ -19,6 +19,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { encodeAgentName, metadataForName } from "./utils.ts";
 
+/** Which half of the tunnel to open. Always explicit — a half tunnel is a real choice. */
+export type LinkDirection = "in" | "out";
+
 /** Options read by every ssh-link operation (tests inject these). */
 export interface SshLinkOptions {
   /** Local xfer dir holding the Link sockets; defaults to XFER_DIR via the caller. */
@@ -27,6 +30,12 @@ export interface SshLinkOptions {
   myName: string;
   /** Optional identity file passed to every ssh invocation (-i). */
   keyPath?: string;
+  /**
+   * Required by `sshUp`, ignored by `listLinks`/`sshDown`. `in` is -R only: the
+   * remote can reach this pi, but its nodes do not appear locally. `out` is -L
+   * only: this pi reaches the remote's nodes, but none can initiate a send back.
+   */
+  direction?: LinkDirection;
 }
 
 /** One live ssh Link, as recorded in its `<name>.json`. */
@@ -75,11 +84,6 @@ function killLink(link: LinkInfo, opts: SshLinkOptions): void {
 
 function decodeStem(stem: string): string {
   try { return decodeURIComponent(stem); } catch { return stem; }
-}
-
-/** Which existing Link occupies `name` (alive only); dead ones are swept by gc, not here. */
-function findLink(name: string, opts: SshLinkOptions): LinkInfo | undefined {
-  return listLinks(opts).find(l => l.name === name);
 }
 
 /**
@@ -162,10 +166,11 @@ export async function planSshUp(host: string, opts: SshLinkOptions): Promise<Ssh
   if (names.includes(opts.myName)) {
     throw new Error(`remote ${host} already has a node named "${opts.myName}" — rename one side before linking`);
   }
-  if (existingStems.has(opts.myName) && !findLink(opts.myName, opts)) {
-    throw new Error(`local name "${opts.myName}" would collide with an existing local socket — rename one side before linking`);
-  }
+  // NB: no check against this pi's own local socket. -R lands on the REMOTE
+  // (`remote/<myName>.sock` forward to `local/<myName>.sock`), so the local
+  // file is the forwarding TARGET and must exist — it is this pi's listener.
   for (const name of names) {
+    if (opts.direction === "in") break; // no -L, so remote nodes never land locally
     const existingLink = existingLinks.find(l => l.name === encodeAgentName(name));
     if (existingStems.has(name) && !existingLink) {
       throw new Error(`remote node "${name}" collides with an existing local socket — rename one side before linking`);
@@ -189,11 +194,17 @@ export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpRe
   const remoteSock = (name: string) => `${plan.remoteDir}/${encodeAgentName(name)}.sock`;
   const localSock = (name: string) => path.join(opts.xferDir, `${encodeAgentName(name)}.sock`);
 
+  const direction = opts.direction;
+  if (!direction) throw new Error("sshUp requires an explicit direction (in | out)");
   const forwards: string[] = [];
-  for (const name of plan.remoteNames) {
-    forwards.push("-L", `${localSock(name)}:${remoteSock(name)}`);
+  if (direction !== "in") {
+    for (const name of plan.remoteNames) {
+      forwards.push("-L", `${localSock(name)}:${remoteSock(name)}`);
+    }
   }
-  forwards.push("-R", `${remoteSock(opts.myName)}:${localSock(opts.myName)}`);
+  if (direction !== "out") {
+    forwards.push("-R", `${remoteSock(opts.myName)}:${localSock(opts.myName)}`);
+  }
 
   const child = spawnSsh(host, [
     "-N",
@@ -207,16 +218,23 @@ export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpRe
   // for the -R landing to actually materialize on the remote: sshd creates it
   // asynchronously, and a peer scanning the remote dir before it lands would
   // see this node flap between present and absent.
-  await waitForSockets(child, plan.remoteNames.map(localSock), host);
-  await waitForRemoteSock(host, remoteSock(opts.myName), opts.keyPath);
-
-  for (const name of plan.remoteNames) {
-    writeLinkJson(name, host, child.pid!, opts);
+  await waitForSockets(child, direction === "in" ? [] : plan.remoteNames.map(localSock), host);
+  if (direction !== "out") {
+    await waitForRemoteSock(host, remoteSock(opts.myName), opts.keyPath);
   }
-  // Self is on the other end of the -R, but the ledger entry belongs here so
-  // `down` can find and kill its own ssh process.
-  writeLinkJson(opts.myName, host, child.pid!, opts);
-  return { host, pid: child.pid!, forwardNames: plan.remoteNames, rebuilt };
+
+  // The ledger carries exactly the names that resolve through this tunnel: the
+  // remote nodes only when -L exists, and self only when -R does. A `down`
+  // then kills the same ssh pid from any entry.
+  if (direction !== "in") {
+    for (const name of plan.remoteNames) {
+      writeLinkJson(name, host, child.pid!, opts);
+    }
+  }
+  if (direction !== "out") {
+    writeLinkJson(opts.myName, host, child.pid!, opts);
+  }
+  return { host, pid: child.pid!, forwardNames: direction === "in" ? [] : plan.remoteNames, rebuilt };
 }
 
 function spawnSsh(host: string, args: string[], keyPath?: string) {

@@ -36,7 +36,9 @@ const remoteServer = net.createServer(() => {});
 await new Promise<void>(resolve => remoteServer.listen(path.join(remoteDir, "remote-alpha.sock"), resolve));
 console.log(`fake remote node listening at ${remoteDir}/remote-alpha.sock`);
 
-const opts = { xferDir: localDir, myName: "self", keyPath: path.join(os.homedir(), ".ssh", "id_ed25519_smoke") };
+const baseOpts = { xferDir: localDir, myName: "self" as const, keyPath: path.join(os.homedir(), ".ssh", "id_ed25519_smoke") };
+const opts = { ...baseOpts, direction: "out" as const };
+const optsIn = { ...baseOpts, direction: "in" as const };
 const childEnvSet = process.env.XFER_DIR;
 // The remote env cannot cross ssh (AcceptEnv), so stage it in the remote
 // user's home via the existing localhost connection — smoke-only mechanism.
@@ -47,13 +49,12 @@ try {
   console.log("sshUp:", result);
   assert(result.forwardNames.includes("remote-alpha"), "probe found remote-alpha");
   assert(fs.existsSync(path.join(localDir, "remote-alpha.sock")), "-L landing socket created locally");
-  assert(fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "self Link json written");
-  assert(fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "-R landed self.sock on the remote");
+  assert(!fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "no self ledger entry in -L only mode");
+  assert(!fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "-L only leaves no -R landing on the remote");
 
-  const links = listLinks(opts);
-  // remote-alpha (-L) plus self (-R) — both ledger entries share one ssh pid.
-  assert(links.length === 2 && links.every(l => l.host === "localhost"), "ledger lists both Link entries");
-  assert(links[0].pid === links[1].pid, "both entries share the ssh pid");
+  const links = listLinks(baseOpts);
+  assert(links.length === 1 && links[0].host === "localhost", "ledger lists exactly the -L entry");
+  assert(decodeURIComponent(links[0].name) === "remote-alpha", "ledger entry names the remote node");
 
   await new Promise<void>((resolve, reject) => {
     const conn = net.connect({ path: path.join(localDir, "remote-alpha.sock") });
@@ -63,9 +64,20 @@ try {
   });
   assert(true, "-L tunnel connects end to end (local -> ssh -> remote listener)");
 
-  const down = sshDown("localhost", opts);
-  assert(down.length === 2, "sshDown tears down both Link entries");
+  const down = sshDown("localhost", baseOpts);
+  assert(down.length === 1, "sshDown tears down the -L entry");
   assert(!fs.existsSync(path.join(localDir, "remote-alpha.json")), "ledger json removed");
+
+  // ── direction: in (-R only) ──
+  const inResult = await sshUp("localhost", optsIn);
+  console.log("sshUp(in):", inResult);
+  assert(inResult.forwardNames.length === 0, "in mode forwards no remote nodes");
+  assert(!fs.existsSync(path.join(localDir, "remote-alpha.sock")), "in mode creates no local landing sock");
+  assert(fs.existsSync(path.join(remoteDir, encodeAgentName("self") + ".sock")), "in mode lands self on the remote");
+  const inLinks = listLinks(baseOpts);
+  assert(inLinks.length === 1 && decodeURIComponent(inLinks[0].name) === "self", "ledger lists only self for in mode");
+  const inDown = sshDown("localhost", baseOpts);
+  assert(inDown.length === 1, "in mode Link tears down");
   // StreamLocalBindUnlink is bind-time cleanup, NOT exit-time: the -R sock is
   // EXPECTED to linger after ssh dies; the remote's own gc reaps it as an
   // orphan-sock (ECONNREFUSED) — the designed path, not a failure.
@@ -78,6 +90,6 @@ try {
   if (childEnvSet === undefined) delete process.env.XFER_DIR; else process.env.XFER_DIR = childEnvSet;
   fs.rmSync(path.join(os.homedir(), ".pi/xfer-ssh-env"), { force: true });
   remoteServer.close();
-  sshDown("localhost", opts); // leave nothing behind on failure paths
+  sshDown("localhost", baseOpts); // leave nothing behind on failure paths
   console.log(`(artifacts left at ${base} for inspection)`);
 }
