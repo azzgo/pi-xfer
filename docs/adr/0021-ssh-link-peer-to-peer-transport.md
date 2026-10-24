@@ -33,7 +33,10 @@ Mesh（ADR 0013）为跨机 handoff 提供了注册/发现/路由/离线缓冲�
 - **所有权写进账本**：每条 Link 的 `.json` 记 `owner`（创建它的 pi 进程 pid）。`down` 与 `session_shutdown` 只拆 `owner === 自己` 的；别人的 Link 由别人的 pi 负责，它死了以后由 gc 按 dead-link 收尾。
 - **退出必须显式拆**：ssh 子进程 `unref` 后**不会**随父进程死（会被 init 收养），所以"autodispose"靠 `session_shutdown` 里显式 `sshDown`，不是靠进程树。
 - **两处记录，两种角色**：本机用 `.link.<host>.json`（host/pid/owner/names/reverseAs）作为该 host 的 Link 账本——**以 host 为键**，因为一个 ssh 进程不可能拆成多条；对端则收到一条 `<本机名>.json`，标 `role: "reverse"`、`via: "ssh"`，**故意不带 pid**（那会是本机的进程号，在对端毫无意义且会让 gc 判错）。没有这条远端标记，对端会把 Link 端点当成普通本地 Peer，文档只给路径——原本的 bug 会从反方向重演。
-- **gc 管文件，in/out/down 管进程**：gc 的 Link 分支只判 pid（不做 listener 探测——ssh 本地端永远 accept，探测无意义）；死 → 删 sock+json 并提示 `/xfer ssh in|out` 重建。gc 不 kill 进程。
+- **gc 与 Link 的所有权边界**（本条的初版判断有误，实测后收窄）：
+  - **本机 `.link.<host>.json`**：有本机 ssh pid，判据确定。死 → **先 SIGTERM 该 pid，再删账本与它声明的所有 socket**。只删文件不杀进程会把隧道变成两头都没人认领的孤儿——这比不清理更糟，所以"删账本"和"杀进程"是同一个操作的两半，不能只做一半。gc 仍然只杀账本里点名的那个 pid，不做 listener 探测、不碰不认识的进程；`/xfer doctor` 只调 `planGc`，因此只读自检永远不杀东西。
+  - **对端 `<myName>.json`（`role: "reverse"`）**：**gc 永不删除，只报告**。它由另一台机器上的 pi 经 ssh 写入，本机无法观测那个 pi 的死活——隧道抖动时该端点会时而应答、时而拒绝、时而挂着。曾有一次本机 gc 据此判定死亡并删除记录，结果那条 Link 其实还活着：`isLinkTarget` 随即把它当成本地 Peer，后续 handoff 又回到"给一个对方读不到的路径"。清理责任在写入者，它在 `down`/`session_shutdown` 时主动 ssh 删除。
+  - 一句话：**本机拥有的记录，gc 连进程一起收；别人的记录，gc 只报告。**
 
 ## 单向隧道对 handoff 的两条硬约束
 
