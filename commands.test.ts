@@ -837,3 +837,44 @@ describe("xfer command: /xfer ssh argument parsing", () => {
     assert.deepEqual(ssh.calls, ["down pi-xfer"]);
   });
 });
+
+describe("xfer command: /xfer ssh completion", () => {
+  it("offers subcommands at the first token", () => {
+    const h = harness({ sshLink: stubSshLink().ops });
+    const items = h.completions("ssh ");
+    assert.ok(items && items.some(i => i.label === "in"));
+    assert.ok(items && items.some(i => i.label === "status"));
+  });
+
+  it("offers ssh config host aliases for a host slot", async () => {
+    const { parseSshConfigHosts } = await import("./ssh-hosts.js");
+    assert.deepEqual(parseSshConfigHosts("Host pi-nas\nHost mac-mini"), ["pi-nas", "mac-mini"]);
+    const h = harness({ sshLink: stubSshLink().ops });
+    // Whatever ~/.ssh/config holds, the shape must be "ssh <sub> <host>".
+    for (const item of h.completions("ssh in ") ?? []) {
+      assert.match(item.value, /^ssh in \S+$/);
+    }
+  });
+
+  it("offers cached remote names for in, and points at list when empty", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-ssh-comp-"));
+    const { rememberRemoteNames } = await import("./ssh-hosts.js");
+    rememberRemoteNames(dir, "pi-nas", ["alpha", "beta"]);
+    const h = harness({ sshLink: stubSshLink().ops, xferDir: dir });
+
+    const items = h.completions("ssh in pi-nas ") ?? [];
+    assert.deepEqual(items.map(i => i.value), ["ssh in pi-nas alpha", "ssh in pi-nas beta"]);
+
+    const none = h.completions("ssh in unknown-host ") ?? [];
+    assert.equal(none.length, 1);
+    assert.match(none[0].label, /probe unknown-host/);
+  });
+
+  it("does not offer names for out", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-ssh-comp-"));
+    const h = harness({ sshLink: stubSshLink().ops, xferDir: dir });
+    const { rememberRemoteNames } = await import("./ssh-hosts.js") as unknown as { rememberRemoteNames: (d: string, h: string, n: string[]) => void };
+    rememberRemoteNames(dir, "pi-nas", ["alpha"]);
+    assert.equal(h.completions("ssh out pi-nas "), null);
+  });
+});

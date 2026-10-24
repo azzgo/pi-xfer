@@ -17,6 +17,7 @@ import { loadMeshConfig, resolveMeshConfig } from "./mesh-config.ts";
 import { XFER_DIR } from "./constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./utils.ts";
 import { linkStatus, listLinks, listOwnLinks, planSshUp, probeRemote, sshDown, sshUp, type LinkDirection, type LinkInfo, type SshLinkOptions, type SshUpPlan, type SshUpResult } from "./ssh-link.ts";
+import { cachedHosts, cachedRemoteNames, listSshHosts, rememberRemoteNames } from "./ssh-hosts.ts";
 
 /** Options for `registerXferCommand`. */
 export interface XferCommandOptions {
@@ -151,20 +152,49 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         return items.length > 0 ? items : null;
       }
 
-      // `/xfer ssh <TAB>` completes the ssh subcommand group.
+      // `/xfer ssh <TAB>` completes the subcommand, then host aliases from
+      // ~/.ssh/config, then that host's remote names (from the probe cache —
+      // completion is synchronous and must never run ssh).
       if (prefix.startsWith("ssh ") || prefix === "ssh") {
         if (prefix === "ssh") {
-          return [{ value: "ssh", label: "ssh", description: "SSH Link transport (ADR-0021): in / out / list / down" }];
+          return [{ value: "ssh", label: "ssh", description: "SSH Link transport (ADR-0021): in / out / list / status / down" }];
         }
-        const subPrefix = prefix.slice("ssh ".length).replace(/^\s+/, "");
-        const items: AutocompleteItem[] = [
+        const tokens = prefix.slice("ssh ".length).split(/\s+/);
+        const sub = tokens[0];
+        const subs: AutocompleteItem[] = [
           { value: "ssh in", label: "in", description: "Import remote nodes (-L): /xfer ssh in <host> <name...>" },
           { value: "ssh out", label: "out", description: "Export this pi (-R): /xfer ssh out <host> [name]" },
           { value: "ssh list", label: "list", description: "Read-only probe of a host: /xfer ssh list <host>" },
           { value: "ssh status", label: "status", description: "Links this pi maintains, with liveness" },
           { value: "ssh down", label: "down", description: "Tear down this pi's Links: /xfer ssh down [host]" },
-        ].filter(i => i.label.startsWith(subPrefix));
-        return items.length > 0 ? items : null;
+        ];
+
+        if (tokens.length === 1) {
+          const items = subs.filter(i => i.label.startsWith(sub));
+          return items.length > 0 ? items : null;
+        }
+
+        const hostToken = tokens[1] ?? "";
+        const hosts = [...new Set([...listSshHosts(), ...cachedHosts(xferDir)])];
+        if (tokens.length === 2) {
+          // No host yet: `down` accepts none, the others need one.
+          const items = hosts
+            .filter(h => h.startsWith(hostToken))
+            .map(h => ({ value: `ssh ${sub} ${h}`, label: h, description: "ssh host" }));
+          return items.length > 0 ? items : null;
+        }
+
+        // Third token onwards: only `in` takes remote names.
+        if (sub !== "in") return null;
+        const host = hostToken;
+        const namePrefix = tokens[tokens.length - 1] ?? "";
+        const linked = new Set(listOwnLinks({ xferDir, myName: controller.state.identity?.name ?? "" }).map(l => l.name));
+        const items = cachedRemoteNames(xferDir, host)
+          .filter(n => n.startsWith(namePrefix) && !linked.has(n))
+          .map(n => ({ value: `ssh in ${host} ${n}`, label: n, description: `remote node on ${host}` }));
+        return items.length > 0
+          ? items
+          : [{ value: `ssh list ${host}`, label: `(probe ${host})`, description: "No cached names yet — run this to fetch them" }];
       }
       const peers = listPeers(controller.state.identity?.name ?? "", xferDir);
       // `/xfer mesh <TAB>` completes the mesh subcommand group.
@@ -291,6 +321,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           }
           try {
             const remote = await sshOps.probe(host);
+            rememberRemoteNames(xferDir, host, remote.names);
             const linked = new Set(sshOps.list().filter(l => l.host === host).map(l => l.name));
             const nodes = remote.names.length
               ? remote.names.map(n => `  ${n}${linked.has(n) ? "   (already linked)" : ""}`).join("\n")
