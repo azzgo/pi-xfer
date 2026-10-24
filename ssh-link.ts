@@ -53,6 +53,12 @@ export interface LinkInfo {
   names: string[];
   /** This pi's name on the remote — the one -R landing. */
   reverseAs: string;
+  /**
+   * The remote's xfer dir, recorded so teardown can remove the reverse marker
+   * it wrote there. Without it, a clean exit would leave that marker behind on
+   * the other machine and only its gc could ever clear it.
+   */
+  remoteDir: string;
 }
 
 /** Result of a successful link-up. */
@@ -89,6 +95,7 @@ function readLedger(file: string, host: string): LinkInfo | null {
       owner: raw.owner,
       names,
       reverseAs: typeof raw.reverseAs === "string" ? raw.reverseAs : "",
+      remoteDir: typeof raw.remoteDir === "string" ? raw.remoteDir : "",
     };
   } catch {
     return null;
@@ -142,6 +149,24 @@ function killLink(link: LinkInfo, opts: SshLinkOptions): void {
     try { fs.unlinkSync(localSock(name, opts)); } catch { /* best effort */ }
   }
   try { fs.unlinkSync(ledgerPath(link.host, opts)); } catch { /* best effort */ }
+}
+
+/**
+ * Remove the reverse marker this Link wrote on the remote.
+ *
+ * The marker belongs to this pi — it was created by this pi over ssh — so it is
+ * this pi's to remove. Leaving it behind makes the remote believe a live Link
+ * endpoint exists: it would inline documents for a node that is gone and report
+ * `unknown` instead of an honest `not-delivered`. Best effort by design: the
+ * ssh channel may already be closing, and a failure only restores the old
+ * "the remote's gc will get it" fallback.
+ */
+async function removeReverseMarker(link: LinkInfo, opts: SshLinkOptions): Promise<void> {
+  if (!link.reverseAs || !link.remoteDir) return;
+  const target = `${link.remoteDir}/${encodeAgentName(link.reverseAs)}.json`;
+  try {
+    await sshCapture(link.host, `rm -f ${JSON.stringify(target)}`, opts.keyPath);
+  } catch { /* the remote's gc is the fallback */ }
 }
 
 /**
@@ -381,6 +406,7 @@ function writeLedger(plan: SshUpPlan, pid: number, opts: SshLinkOptions): void {
     owner: opts.ownerPid ?? process.pid,
     names: plan.names,
     reverseAs: plan.reverseAs,
+    remoteDir: plan.remoteDir,
   }, null, 2)}\n`;
   const temp = `${file}.tmp-${process.pid}`;
   try {
@@ -427,11 +453,14 @@ async function writeReverseMarker(plan: SshUpPlan, opts: SshLinkOptions): Promis
  * A Link another pi started is never ours to kill: it dies with its own owner,
  * and gc reaps the leftovers if that owner already exited.
  */
-export function sshDown(ident: string | undefined, opts: SshLinkOptions): { torn: LinkInfo[] } {
+export async function sshDown(ident: string | undefined, opts: SshLinkOptions): Promise<{ torn: LinkInfo[] }> {
   const own = listOwnLinks(opts);
   const targets = ident === undefined
     ? own
     : own.filter(l => l.host === ident || l.names.includes(ident));
+  // Remove each reverse marker BEFORE killing the ssh process: once the tunnel
+  // is gone the marker can only be cleaned by the remote's own gc.
+  await Promise.all(targets.map(link => removeReverseMarker(link, opts)));
   for (const link of targets) killLink(link, opts);
   return { torn: targets };
 }

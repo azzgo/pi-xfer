@@ -768,7 +768,7 @@ function stubSshLink(overrides: Partial<import("./commands.js").SshLinkOperation
       calls.push(`up ${host} ${(names ?? []).join(",")}`.trim());
       return { host, pid: 4242, names: names ?? ["self"], reverseAs: "me", added: names ?? [] };
     },
-    down: (ident) => { calls.push(`down ${ident ?? "*"}`); return { torn: [] }; },
+    down: async (ident) => { calls.push(`down ${ident ?? "*"}`); return { torn: [] }; },
     plan: async (host, names) => ({ host, remoteDir: "/remote", names: names ?? [], reverseAs: "me", added: names ?? [] }),
     probe: async (host) => { calls.push(`probe ${host}`); return { dir: "/remote/.pi/xfer", names: ["alpha", "beta"] }; },
     status: () => "up",

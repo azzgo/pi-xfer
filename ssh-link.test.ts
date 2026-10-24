@@ -95,11 +95,11 @@ describe("ssh-link: ownership", () => {
 });
 
 describe("ssh-link: sshDown", () => {
-  it("kills the ssh process, removes every imported socket and the ledger", () => {
+  it("kills the ssh process, removes every imported socket and the ledger", async () => {
     const dir = tmpXferDir();
     writeLink(dir, "pi-nas", deadPid(), ["alpha", "beta"]);
     // The recorded pid is a real process here, so let SIGTERM land harmlessly.
-    const result = sshDown("pi-nas", opts(dir));
+    const result = await sshDown("pi-nas", opts(dir));
     assert.equal(result.torn.length, 1);
     assert.deepEqual(result.torn[0].names, ["alpha", "beta"]);
     assert.equal(fs.existsSync(path.join(dir, "alpha.sock")), false);
@@ -107,22 +107,22 @@ describe("ssh-link: sshDown", () => {
     assert.equal(fs.existsSync(path.join(dir, ".link.pi-nas.json")), false);
   });
 
-  it("matches a forward name to its whole host Link", () => {
+  it("matches a forward name to its whole host Link", async () => {
     const dir = tmpXferDir();
     writeLink(dir, "pi-nas", deadPid(), ["alpha", "beta"]);
     writeLink(dir, "other", deadPid(), ["gamma"]);
-    const result = sshDown("alpha", opts(dir));
+    const result = await sshDown("alpha", opts(dir));
     assert.equal(result.torn.length, 1, "one host Link tears down as a unit");
     assert.equal(result.torn[0].host, "pi-nas");
     assert.equal(fs.existsSync(path.join(dir, "gamma.sock")), true, "the other host survives");
   });
 
-  it("bare down tears down every Link this pi owns, and never another pi's", () => {
+  it("bare down tears down every Link this pi owns, and never another pi's", async () => {
     const dir = tmpXferDir();
     // A dead pid: sshDown SIGTERMs it, which must never be our own process.
     writeLink(dir, "h1", deadPid(), ["a"], process.pid);
     writeLink(dir, "h2", deadPid(), ["b"], process.pid + 999999);
-    assert.equal(sshDown(undefined, opts(dir)).torn.length, 1);
+    assert.equal((await sshDown(undefined, opts(dir))).torn.length, 1);
     assert.equal(fs.existsSync(path.join(dir, ".link.h2.json")), true);
     assert.equal(fs.existsSync(path.join(dir, "b.sock")), true);
   });

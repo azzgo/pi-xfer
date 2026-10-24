@@ -47,7 +47,7 @@ export interface SshLinkOperations {
   own(): LinkInfo[];
   /** Bring a host's Link up (or extend it with more imported names). */
   up(host: string, names?: string[]): Promise<SshUpResult>;
-  down(ident: string | undefined): { torn: LinkInfo[] };
+  down(ident: string | undefined): Promise<{ torn: LinkInfo[] }>;
   plan(host: string, names?: string[]): Promise<SshUpPlan>;
   /** Read-only remote probe (the `in` candidate list): creates no tunnel. */
   probe(host: string): Promise<{ dir: string; names: string[] }>;
@@ -419,7 +419,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             ctx.ui.notify("⭕ No ssh Links of ours — nothing to tear down", "info");
             return;
           }
-          const { torn } = sshOps.down(ident);
+          const { torn } = await sshOps.down(ident);
           const foreign = sshOps.list().filter(l => !sshOps.own().some(o => o.host === l.host));
           const notes = [
             foreign.length > 0 ? `${foreign.length} Link(s) belong to another pi process — left alone` : "",

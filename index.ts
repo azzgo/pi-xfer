@@ -262,7 +262,9 @@ export default function (pi: ExtensionAPI) {
     // ssh children are detached from the session's lifetime by design (they
     // must survive a turn), so exiting pi does NOT reap them: tear our own
     // Links down explicitly. Links other pi processes own are left alone.
-    try { sshDown(undefined, { xferDir: XFER_DIR, myName: state.identity?.name ?? "" }); } catch { /* best effort */ }
+    try {
+      await sshDown(undefined, { xferDir: XFER_DIR, myName: state.identity?.name ?? "" });
+    } catch { /* best effort: a dying session must not block on ssh */ }
     await mesh.shutdown();
     controller.shutdown();
   });

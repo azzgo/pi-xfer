@@ -87,17 +87,21 @@ try {
   assert(third.names.sort().join(",") === "alpha,beta", "a bare re-run preserves the imported set");
 
   // ── teardown is per host ──
-  const down = sshDown("alpha", opts).torn;
+  const down = (await sshDown("alpha", opts)).torn;
   assert(down.length === 1, "naming one forward tears down its whole host Link");
   assert(!fs.existsSync(path.join(localDir, "alpha.sock")), "alpha landing removed");
   assert(!fs.existsSync(path.join(localDir, "beta.sock")), "beta landing removed with it");
   assert(!fs.existsSync(path.join(localDir, ".link.localhost.json")), "ledger removed");
   assert(listLinks(opts).length === 0, "no Links left");
 
+  // The reverse marker on the remote belonged to this pi, so it is gone too —
+  // a clean exit must not leave the other machine believing a dead Link lives.
+  assert(!fs.existsSync(path.join(remoteDir, "mac-xfer.json")), "remote reverse marker removed on teardown");
+
   console.log("\nALL PASS");
 } finally {
   fs.rmSync(path.join(os.homedir(), ".pi/xfer-ssh-env"), { force: true });
   for (const s of servers) s.close();
-  sshDown(undefined, opts);
+  await sshDown(undefined, opts);
   console.log(`(artifacts left at ${base} for inspection)`);
 }
