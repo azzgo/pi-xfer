@@ -148,7 +148,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
         const subPrefix = prefix.slice("ssh ".length).replace(/^\s+/, "");
         const items: AutocompleteItem[] = [
-          { value: "ssh up", label: "up", description: "Open a bidirectional Link: /xfer ssh up <user@host>" },
+          { value: "ssh up", label: "up", description: "Open a bidirectional Link: /xfer ssh up <host>" },
           { value: "ssh list", label: "list", description: "List active ssh Links" },
           { value: "ssh down", label: "down", description: "Tear down Links: /xfer ssh down [host]" },
         ].filter(i => i.label.startsWith(subPrefix));
@@ -181,7 +181,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         { value: "doctor", label: "doctor", description: "Self-check the install: socket dir / peers / broker / admin / mesh" },
         { value: "status", label: "status", description: "Show listener status" },
         { value: "mesh", label: "mesh", description: "Mesh transport: status / up / down / list / <name> <request>" },
-        { value: "ssh", label: "ssh", description: "SSH Link transport: up <user@host> / list / down [host]" },
+        { value: "ssh", label: "ssh", description: "SSH Link transport: up <host> / list / down [host]" },
         ...peers.map(peer => ({
           value: peer.xferName,
           label: peer.xferName,
@@ -209,7 +209,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
           "   /xfer mesh [<status|up|down|list|setup|name> <request>] — mesh transport\n" +
-          "   /xfer ssh up <user@host> | list | down [host] — ssh Link to one remote machine\n" +
+          "   /xfer ssh up <host> | list | down [host] — ssh Link to one remote machine\n" +
           "   /xfer gc                 — reap zombie peer sockets\n" +
           "   /xfer doctor             — self-check the install and print fix hints\n" +
 
@@ -241,13 +241,13 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         return;
       }
 
-      // ── /xfer ssh up <user@host> | list | down [host] — ssh Link transport (ADR-0021) ──
+      // ── /xfer ssh up <host> | list | down [host] — ssh Link transport (ADR-0021) ──
       if (cmd === "ssh") {
         const sub = parts[1];
         if (!sub || sub === "help") {
           ctx.ui.notify(
             "🔗 /xfer ssh                — this help\n" +
-            "   /xfer ssh up <user@host>  — open a bidirectional Link (snapshot of the remote's nodes; rerun to refresh)\n" +
+            "   /xfer ssh up <host>  — open a bidirectional Link (snapshot of the remote's nodes; rerun to refresh)\n" +
             "   /xfer ssh list           — active Links\n" +
             "   /xfer ssh down [host]    — tear down Links (all when no host given)\n" +
             "\nLife follows this pi process: exit tears the tunnel down. Name collisions are refused, never renamed.",
@@ -260,7 +260,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           ctx.ui.notify(
             links.length
               ? `🔗 ssh Links:\n${links.map(l => `  ${decodeLinkName(l.name)} — via ${l.host} (pid ${l.pid})`).join("\n")}`
-              : "🔗 No ssh Links — /xfer ssh up <user@host>",
+              : "🔗 No ssh Links — /xfer ssh up <host>",
             "info",
           );
           return;
@@ -268,7 +268,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         if (sub === "up") {
           const host = parts[2];
           if (!host || parts.length > 3) {
-            ctx.ui.notify("Usage: /xfer ssh up <user@host>", "error");
+            ctx.ui.notify("Usage: /xfer ssh up <host>", "error");
             return;
           }
           if (!state.identity) {
@@ -300,7 +300,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           );
           return;
         }
-        ctx.ui.notify("Usage: /xfer ssh <up <user@host>|list|down [host]>", "error");
+        ctx.ui.notify("Usage: /xfer ssh <up <host>|list|down [host]>", "error");
         return;
       }
 

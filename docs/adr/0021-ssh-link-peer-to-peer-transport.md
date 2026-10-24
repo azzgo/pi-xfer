@@ -8,9 +8,10 @@ Mesh（ADR 0013）为跨机 handoff 提供了注册/发现/路由/离线缓冲�
 
 ## Decision
 
-新增 `/xfer ssh up <user@host>` / `down <host>`，由 pi 扩展 spawn 一条 `ssh -N` 建立双向 **Link**：
+新增 `/xfer ssh up <host>` / `down <host>`，由 pi 扩展 spawn 一条 `ssh -N` 建立双向 **Link**（`<host>` 是任何 ssh 目标：`~/.ssh/config` 的别名、主机名，或 `user@host`）：
 
 - **一条命令，内建双向**：`-L` 为远端每个现有 sock 各建一条（`up` 时刻快照，重跑刷新），`-R` 为本机 pi 建一条（落点 = 本机真名，进对端顶层目录）。单向转发没有价值——发得过去回不来。
+- **无 TTY，因此必须免密**：spawn 的 ssh 带 `BatchMode=yes`，交互式密码提示不可能被回答（pi 的 stdin 归 TUI）。支持密钥与 ssh-agent；认证失败时把 ssh 的 stderr 翻成可执行的建议（放公钥 / ssh-add），而不是一个裸退出码。
 - **生命周期 = pi 进程**：ssh 是扩展子进程，pi 退出即拆。这正是 ADR 0013 "上线单元 = 连接单元 = pi 实例" 的同一哲学——不出现"隧道活着但 pi 死了"的判死歧义。`ExitOnForwardFailure=yes` 写死；`StreamLocalBindUnlink=yes` 是**绑定时的**清理（下次 `up` 不被远端残留 sock 阻塞），不是退出时的——死掉的 ssh 会在远端留下 `-R` 落点，由**对端的 gc** 按 orphan-sock 规则（ECONNREFUSED）收走，这是设计的清理路径而非失败。远端落点的出现也是异步的（sshd 建它晚于 ssh 就绪），`up` 会显式等待它落地后才报成功，否则对端发现会闪断。
 - **名字冲突拒绝**：落点撞本机真名或已有 Link 名，`up` 直接拒绝。同 ADR 0013 的"先查后占、拒绝而非自动改名"；跨机名字唯一性是用户的账。
 - **Link 是一等词汇，不是 Peer**：`<name>.json` 写 `{ via: "ssh", host, pid }`——json 即账本，不另建注册表；`/xfer list` 显示瘦条目（`· via ssh host`，无 cwd/model）。`up` 探测远端用 `ssh host 'echo ${XFER_DIR:-$HOME/.pi/xfer}'`，一次往返拿目录+快照。

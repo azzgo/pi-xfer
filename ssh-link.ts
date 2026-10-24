@@ -82,17 +82,42 @@ function findLink(name: string, opts: SshLinkOptions): LinkInfo | undefined {
   return listLinks(opts).find(l => l.name === name);
 }
 
+/**
+ * Build the ssh argv common to probe and tunnel. `BatchMode=yes` is mandatory:
+ * the spawned ssh has no TTY, so an interactive password prompt can only hang
+ * or fail. Key/agent auth is the supported path; a failure now reports ssh's
+ * own stderr instead of a bare exit code.
+ */
+function sshBaseArgs(keyPath?: string): string[] {
+  return [
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=10",
+    ...(keyPath ? ["-i", keyPath] : []),
+  ];
+}
+
+/** Turn ssh's stderr into one line of advice a user can act on. */
+function explainSshFailure(host: string, stderr: string): string {
+  const text = stderr.trim();
+  if (/Permission denied|publickey/i.test(text)) {
+    return `ssh ${host}: authentication failed — this runs without a TTY, so it needs key-based auth ` +
+      `(put your public key in the remote's ~/.ssh/authorized_keys, or start ssh-agent and ssh-add). ` +
+      `A password prompt cannot be answered from here.`;
+  }
+  if (/Could not resolve hostname|Name or service not known/i.test(text)) {
+    return `ssh ${host}: host not found — check the Host alias in ~/.ssh/config or the hostname`;
+  }
+  if (/Connection refused|timed out|No route to host/i.test(text)) {
+    return `ssh ${host}: cannot reach the host — ${text.split("\n")[0]}`;
+  }
+  return text ? `ssh ${host}: ${text.split("\n").slice(-3).join(" ")}` : `ssh ${host}: failed (no stderr)`;
+}
+
 /** `ssh <host>` one-shot command, stdout captured, 15s cap. */
 function sshCapture(host: string, remoteCommand: string, keyPath?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("ssh", [
-      "-o", "BatchMode=yes",
-      "-o", "ConnectTimeout=10",
-      ...(keyPath ? ["-i", keyPath] : []),
-      host,
-      remoteCommand,
-    ], { timeout: 15_000 }, (err, stdout) => {
-      if (err) reject(err instanceof Error ? err : new Error(String(err)));
+    execFile("ssh", [...sshBaseArgs(keyPath), host, remoteCommand], { timeout: 15_000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(explainSshFailure(host, stderr)));
       else resolve(stdout);
     });
   });
@@ -195,16 +220,22 @@ export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpRe
 }
 
 function spawnSsh(host: string, args: string[], keyPath?: string) {
-  const child = spawn("ssh", ["-o", "BatchMode=yes", ...(keyPath ? ["-i", keyPath] : []), ...args, host], { stdio: "ignore" });
+  const child = spawn("ssh", [...sshBaseArgs(keyPath), ...args, host], { stdio: ["ignore", "ignore", "pipe"] });
   child.unref();
   return child;
 }
 
-function waitForSockets(child: { pid?: number; on(ev: string, fn: () => void): void }, sockPaths: string[], host: string): Promise<void> {
+function waitForSockets(
+  child: { pid?: number; stderr?: NodeJS.ReadableStream | null; on(ev: string, fn: (arg?: any) => void): void; off(ev: string, fn: (arg?: any) => void): void },
+  sockPaths: string[],
+  host: string,
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
     const fail = (why: string) => { cleanup(); reject(new Error(why)); };
-    const exitFn = (code: number | null) => fail(`ssh ${host} exited early (code ${code}) — check forward targets and remote dir`);
-    const errFn = () => fail(`ssh ${host} failed to start`);
+    const exitFn = (code: number | null) => fail(stderr.trim() ? explainSshFailure(host, stderr) : `ssh ${host} exited early (code ${code})`);
+    const errFn = () => fail(`ssh ${host} could not be started — is the ssh client installed and on PATH?`);
     const timer = setTimeout(() => {
       const missing = sockPaths.filter(p => !fs.existsSync(p));
       if (missing.length > 0) fail(`ssh ${host}: forward sockets did not appear: ${missing.join(", ")}`);
