@@ -63,5 +63,8 @@
   "devDependencies": {
     "esbuild": "0.28.2",
     "husky": "^9.1.7"
+  },
+  "overrides": {
+    "undici": "^8.12.3"
   }
 }

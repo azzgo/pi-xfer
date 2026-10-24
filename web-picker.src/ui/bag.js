@@ -51,7 +51,7 @@ export function initBag(ctx) {
     combo.append(input, drop);
     row1.append(lbl2, combo);
     const row2 = document.createElement('div'); row2.className = 'brow2';
-    const send = document.createElement('button'); send.className = 'ghost'; send.id = 'bagsend'; send.textContent = t('bag.send');
+    const send = document.createElement('button'); send.className = 'primary'; send.id = 'bagsend'; send.textContent = t('bag.send');
     const copy = document.createElement('button'); copy.className = 'ghost'; copy.id = 'bagcopy'; copy.textContent = t('copyprompt');
     row2.append(send, copy);
     box.append(lbl1, prompt, row1, row2);
@@ -108,11 +108,16 @@ export function initBag(ctx) {
     #bagdrawer textarea { resize: vertical; min-height: 40px; }
     #bagdrawer textarea:focus, #bagdrawer input:focus { border-color: var(--wp-accent); box-shadow: 0 0 0 3px rgba(79,140,255,.14); }
     #bagdrawer .brow { display: flex; gap: 6px; align-items: center; }
-    #bagdrawer .brow2 { display: flex; gap: 8px; }
-    #bagdrawer button.ghost { flex: 1; background: #f1f5f9; color: var(--wp-muted); border: none; border-radius: 8px;
-      padding: 7px 14px; font: 600 12px var(--wp-font); cursor: pointer; }
+    #bagdrawer .brow2 { display: flex; gap: 8px; justify-content: flex-end; }
+    /* 与右侧面板的「清空 / 发送」同一规格：固定内边距、不拉伸、不换行 */
+    #bagdrawer button.ghost { flex: 0 0 auto; background: #f1f5f9; color: var(--wp-muted); border: none; border-radius: 8px;
+      padding: 7px 14px; font: 600 12px var(--wp-font); cursor: pointer; white-space: nowrap; }
     #bagdrawer button.ghost:hover { background: #e2e8f0; color: #475569; }
-    #bagdrawer button.primary { background: var(--wp-accent); color: #fff; }
+    #bagdrawer button.primary { flex: 0 0 auto; background: var(--wp-accent); color: #fff; border: none; border-radius: 8px;
+      padding: 7px 14px; font: 600 12px var(--wp-font); cursor: pointer; white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(79,140,255,.45); }
+    #bagdrawer button.primary:hover { background: var(--wp-accent-deep); }
+    #bagdrawer button.primary:disabled { background: #c4d5f7; box-shadow: none; cursor: not-allowed; }
     #bagcombo { position: relative; flex: 1; min-width: 0; }
     #bagtdrop { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
       background: #fff; border: 1px solid var(--wp-line); border-radius: 10px;
