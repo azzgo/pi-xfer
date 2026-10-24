@@ -43,13 +43,19 @@ export default function (pi: ExtensionAPI) {
    * behind it is not: its filesystem is unreachable, so the document must ride
    * inside the frame, and its reverse channel may not exist at all (ADR-0021).
    */
-  function targetKind(target: string): { link: boolean; alive: boolean } {
+  function targetKind(target: string): { link: boolean; alive: boolean; direction?: "in" | "out" } {
     const meta = readPeerMetadata(target);
     let alive = false;
     if (meta.pid !== undefined) {
       try { process.kill(meta.pid, 0); alive = true; } catch { alive = false; }
     }
-    return { link: meta.via === "ssh", alive };
+    return {
+      link: meta.via === "ssh",
+      alive,
+      ...(meta.via === "ssh" && (meta.direction === "in" || meta.direction === "out")
+        ? { direction: meta.direction }
+        : {}),
+    };
   }
 
   /**
@@ -57,12 +63,25 @@ export default function (pi: ExtensionAPI) {
    * mirror. Nothing on this machine can tell which, so a `task` sent over a
    * Link may be delivered into a session that has no route back.
    */
-  function linkTaskWarning(target: string): string {
+  /**
+   * Whether a reply from `target` can reach this machine, judged from which
+   * half of the tunnel created this Link. `out` means we exported our socket
+   * to them, so they have a path back. `in` means we imported theirs: our
+   * socket was never registered over there, so a reply has no route unless the
+   * other side opened a mirror.
+   */
+  function linkReverseChannelNote(target: string, direction?: "in" | "out"): string {
+    if (direction === "out") {
+      return (
+        `\n\nThis target is an ssh Link you opened with \`out\`: your socket lives on ` +
+        `their machine, so a reply from "${target}" can reach you.`
+      );
+    }
     return (
-      `"${target}" is an ssh Link. The tunnel was opened in one direction, so this ` +
-      `agent cannot prove the target can send back: a \`task\` may be answered into ` +
-      `the void. Prefer \`kind: "notification"\` unless you have confirmed the reverse ` +
-      `Link exists (on that machine: /xfer ssh status, or /xfer ssh out <this-host>).`
+      `\n\n⚠️ "${target}" is an ssh Link opened with \`in\`: their socket now exists here, ` +
+      `but yours was never exported to them, so a reply has **no route back** and will fail ` +
+      `with "peer not found". Send \`notification\` unless you have confirmed the other side ` +
+      `opened a mirror (\`/xfer ssh out <this-host>\` there, or \`/xfer ssh in <this-host>\` here).`
     );
   }
 
@@ -159,6 +178,7 @@ export default function (pi: ExtensionAPI) {
           from: senderName,
           file: linkTarget ? undefined : tmpFile,
           ...(linkTarget ? { document, via: "ssh" } : {}),
+          kind,
           summary,
         });
       } catch (err: any) {
@@ -184,12 +204,10 @@ export default function (pi: ExtensionAPI) {
       }
 
       // 3. done, return immediately (no wait)
-      const linkNote =
-        linkTarget && kind === "task"
-          ? `\n\n⚠️ ${linkTaskWarning(target)}`
-          : linkTarget
-            ? `\n\nThis target is an ssh Link: the document travelled inline (the target cannot read this machine's files), and no reverse channel is assumed.`
-            : "";
+      const linkNote = linkTarget
+        ? linkReverseChannelNote(target, kindOf.direction) +
+          `\nThe document travelled inline (the target cannot read this machine's files).`
+        : "";
       const docLine = linkTarget
         ? `Doc: delivered inline (local copy at ${tmpFile})`
         : `Doc: ${tmpFile}`;

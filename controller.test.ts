@@ -27,10 +27,11 @@ let sent: Sent[];
 before(() => { sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-controller-test-")); });
 after(() => { fs.rmSync(sandbox, { recursive: true, force: true }); });
 
-function controller(): XferController {
+/** Fresh controller whose peer dir is the sandbox — never the real ~/.pi/xfer. */
+function controller(xferDir = sandbox): XferController {
   sent = [];
   const pi = { sendMessage: (message: Sent) => sent.push(message) };
-  return new XferController(pi as never, new XferState());
+  return new XferController(pi as never, new XferState(), xferDir);
 }
 
 let docSeq = 0;
@@ -186,5 +187,57 @@ describe("inbound: ssh Link frames carry their document inline", () => {
     );
     const text = sent.at(-1)!.content;
     assert.doesNotMatch(text, /make all file edits here/);
+  });
+});
+
+describe("inbound: the envelope's kind wins over the body", () => {
+  it("honours a task declared in the frame even when the doc is missing", () => {
+    controller().deliverInbound(
+      { type: "xfer-notify", msg_id: "k1", from: "remote-alpha", document: "", summary: "do it", kind: "task", via: "ssh" },
+      "ssh",
+    );
+    const text = sent.at(-1)!.content;
+    assert.match(text, /kind: task/);
+    assert.match(text, /asks you for output/);
+  });
+
+  it("says plainly when no document arrived, and forbids hunting for it", () => {
+    controller().deliverInbound(
+      { type: "xfer-notify", msg_id: "k2", from: "remote-alpha", summary: "just this", kind: "notification", via: "ssh" },
+      "ssh",
+    );
+    const text = sent.at(-1)!.content;
+    assert.match(text, /\(none — the sender's document did not arrive\)/);
+    assert.match(text, /Do not search this machine/);
+    assert.doesNotMatch(text, /undefined/);
+  });
+
+  it("still reads the body's line for senders that predate the field", () => {
+    const file = doc(senderCwdStampFor("/srv/app", os.hostname()), "task");
+    const text = deliver(notify(file));
+    assert.match(text, /kind: task/);
+  });
+});
+
+describe("inbound: ssh Link return-channel verdict", () => {
+  it("says a reply is possible when the sender's socket is here", () => {
+    fs.writeFileSync(path.join(sandbox, "remote-alpha.sock"), "");
+    controller().deliverInbound(
+      { type: "xfer-notify", msg_id: "r1", from: "remote-alpha", document: "# x\n", summary: "s", kind: "task", via: "ssh" },
+      "ssh",
+    );
+    const text = sent.at(-1)!.content;
+    assert.match(text, /return channel exists/);
+    assert.doesNotMatch(text, /no verified return channel/);
+  });
+
+  it("says plainly that no route exists when the sender has no socket here", () => {
+    controller().deliverInbound(
+      { type: "xfer-notify", msg_id: "r2", from: "ghost", document: "# x\n", summary: "s", kind: "task", via: "ssh" },
+      "ssh",
+    );
+    const text = sent.at(-1)!.content;
+    assert.match(text, /no verified return channel/);
+    assert.match(text, /Do not search this machine for a route/);
   });
 });

@@ -14,16 +14,41 @@ import { deriveName, endpointForName, metadataForName } from "./utils.ts";
 import { FROM_WEB_PICKER } from "./wire.ts";
 
 /**
+ * Tell a Link receiver whether a reply can physically reach the sender.
+ *
+ * The answer is decided locally: the sender's `out` Link landed a socket named
+ * after it in THIS machine's xfer dir, and a reply is just a connect to that
+ * socket. No socket ⇒ no route, and saying so up front is what stops an agent
+ * from hunting for a return path that does not exist. A wrong guess here is
+ * cheap to correct; a silent one sends conclusions into the void.
+ */
+function sshReturnChannelNote(sender: string, xferDir: string): string {
+  const reachable = fs.existsSync(endpointForName(sender, xferDir));
+  return reachable
+    ? `\n\nThis arrived over an **ssh Link**. The return channel exists: this machine has ` +
+      `\`${sender}.sock\`, so \`xfer_to\` with target \`${sender}\` reaches the sender.`
+    : `\n\nThis arrived over an **ssh Link**, and **there is no verified return channel**: ` +
+      `this machine has no \`${sender}.sock\`, so \`xfer_to\` to \`${sender}\` will most likely ` +
+      `fail with "peer not found". That is the tunnel's shape (the sender opened \`in\` only), not the ` +
+      `sender disappearing. Do not search this machine for a route and do not retry xfer_to: ` +
+      `report the conclusion in your own session, or ask the human to open the reverse Link ` +
+      `(\`/xfer ssh out\` on the other machine, or \`/xfer ssh in\` here).`;
+}
+
+/**
  * Orchestrates the xfer listener lifecycle: session start, rename,
  * and shutdown. Owns the inbound socket + its delivery into the session.
  */
 export class XferController {
   private readonly pi: ExtensionAPI;
   readonly state: XferState;
+  /** Where peer sockets live; overridable so tests never touch the real dir. */
+  private readonly xferDir: string;
 
-  constructor(pi: ExtensionAPI, state: XferState) {
+  constructor(pi: ExtensionAPI, state: XferState, xferDir: string = XFER_DIR) {
     this.pi = pi;
     this.state = state;
+    this.xferDir = xferDir;
   }
 
   /** Route one inbound frame into the session. */
@@ -51,12 +76,22 @@ export class XferController {
     const stamp = msg.from === FROM_WEB_PICKER || !msg.file ? null : readSenderCwdStamp(msg.file);
     const isLocalSender = stamp !== null && transportLabel === undefined && stamp.machine === os.hostname();
     const cwdLine = stamp ? `\n${senderCwdInstruction(stamp, { local: isLocalSender })}\n` : "";
-    const kind = msg.file ? readHandoffKind(msg.file) : DEFAULT_HANDOFF_KIND;
+    // The envelope's own declaration wins: the body may not have survived
+    // (a Link without an inline document, a missing file), and "the sender
+    // said nothing" is not the same claim as "the sender said notification".
+    const kind = msg.kind ?? (msg.file ? readHandoffKind(msg.file) : DEFAULT_HANDOFF_KIND);
+    // Never print an empty path or the literal "undefined": a receiver that
+    // sees no doc must be told so plainly, or it starts hunting the filesystem
+    // for something that was never here (ADR-0021).
+    const docLine = msg.file
+      ? `**Doc**: \`${msg.file}\`\n${cwdLine}\nRead the doc and handle the request.`
+      : `**Doc**: (none — the sender's document did not arrive)\n\n` +
+        `Handle the request from the summary above. Do not search this machine for the ` +
+        `document: it was never written here.`;
     const body =
       `**Handoff**: \`${msg.msg_id}\` — kind: ${kind}\n\n` +
       `**Request**: ${msg.summary}\n\n` +
-      `**Doc**: \`${msg.file}\`\n${cwdLine}\n` +
-      "Read the doc and handle the request.";
+      docLine;
     const content =
       msg.from === FROM_WEB_PICKER
         ? (
@@ -75,11 +110,7 @@ export class XferController {
             (kind === "task"
               ? `\n\nThis handoff is a **Task**: it asks you for output. Send exactly one reverse handoff to \`${msg.from}\` once you have a conclusion, and declare its kind deliberately — \`notification\` when it carries that conclusion, which closes the exchange, or \`task\` when you are blocked and need something further from \`${msg.from}\`. A bare acknowledgement is not a conclusion.`
               : `\n\nThis handoff is a **Notification**: it asks you for nothing. Do not reply. Send a reverse handoff only if you are missing information you need, or if the document conflicts with fact — declare it \`task\` when you need something back.`) +
-            (transportLabel === "ssh"
-              ? `\n\nThis arrived over an **ssh Link**, which was opened in one direction only. ` +
-                `A reply may fail with "peer not found": that is the tunnel's shape, not the sender disappearing. ` +
-                `Check with \`/xfer ssh status\` before concluding anything is broken.`
-              : "")
+            (transportLabel === "ssh" ? sshReturnChannelNote(msg.from, this.xferDir) : "")
           );
     pi.sendMessage({
       customType: "xfer-inbound",

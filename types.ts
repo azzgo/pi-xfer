@@ -14,6 +14,8 @@ export interface PeerInfo {
   /** SSH Link marker (ADR-0021): present only on a Link's `.json`, never on a Peer's. */
   via?: "ssh";
   host?: string;
+  /** Which half of the tunnel this Link is — decides whether a reply has a route. */
+  direction?: "in" | "out";
 }
 
 /** `xfer-notify` frame sent over the peer socket (one-way handoff). */
@@ -30,6 +32,13 @@ export interface XferNotifyMessage {
   /** Inline document body, used when `file` is not a valid receiver-side path. */
   document?: string;
   summary: string;
+  /**
+   * The sender's declaration, carried in the envelope rather than only in the
+   * document body. Reading it back off the body silently downgraded every
+   * handoff whose document did not survive (ADR-0021): a lost `kind: task` line
+   * is not the same claim as a sender who never said task.
+   */
+  kind?: "task" | "notification";
   /** Set when the socket itself is an ssh Link, so the receiver knows the
    *  reverse channel may not exist. */
   via?: "ssh";

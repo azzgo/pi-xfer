@@ -72,7 +72,13 @@ export function readPeerMetadata(xferName: string, xferDir: string = XFER_DIR): 
       ...(typeof value.status === "string" ? { status: value.status } : {}),
       ...(typeof value.pid === "number" ? { pid: value.pid } : {}),
       ...(typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {}),
-      ...(value.via === "ssh" ? { via: "ssh" as const, host: typeof value.host === "string" ? value.host : "" } : {}),
+      ...(value.via === "ssh"
+        ? {
+            via: "ssh" as const,
+            host: typeof value.host === "string" ? value.host : "",
+            ...(value.direction === "in" || value.direction === "out" ? { direction: value.direction } : {}),
+          }
+        : {}),
     };
   } catch {
     return {};
