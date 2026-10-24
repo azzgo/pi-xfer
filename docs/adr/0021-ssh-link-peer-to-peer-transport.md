@@ -4,6 +4,13 @@ Status: accepted
 
 ## Context
 
+> **验证状态（2026-10-24）**：已在真实双机环境（macOS `yswen-osx-5.local` ↔
+> Linux `pi-nas`）通过端到端验收——Link 建立、双向 inline 落盘、token 回环、
+> `integrity: verified`、正常退出清理。验收时的判据与陷阱见文末"实施教训"，
+> 三行检查单在 `docs/dev/ssh-link-verification.md`。
+
+## Context
+
 Mesh（ADR 0013）为跨机 handoff 提供了注册/发现/路由/离线缓冲，但它需要一台常驻引擎。点对点场景——两台互信机器、临时连通、用完即拆——不应该要求起引擎。ssh 本身就是互信通道：它自带认证、加密和 unix socket 转发（`-L`/`-R`），而本地发现（`listPeers`）只扫描 `XFER_DIR` 顶层的 `.sock` 文件——ssh 创建的转发落点天然落入该扫描，零注册代码。
 
 ## Decision
@@ -62,6 +69,23 @@ Link 的 socket 是本地的，但 socket 后面的人不在本机。ADR 0013 �
 
 以下五条压缩成的三步检查单在 `docs/dev/ssh-link-verification.md`——
 排查时先跑那三行，比读完这一节更快。
+
+**最终验收记录（2026-10-24 双机实测）**：
+
+```
+mac → pi-nas   mvmawy1b-uwrs9l  落盘 /tmp/pi-xfer-mvmawy1b-uwrs9l.md (1175B)
+               token VERIFY-ALPHA-BRAVO-CHARLIE-FOXTROT 在内容中 ✓
+               sha256 a947bb24…
+pi-nas → mac   mvmax5dp-brei2e  发送端返回 "Doc: delivered inline (local copy at …)" ✓
+               （新发送端文案；旧代码只会给裸路径）
+双向           信封正确出现 "· ssh" 与 "the tunnel is bidirectional" 提示 ✓
+```
+
+值得留意的边界（非缺陷）：`-R` 落点 socket 由 sshd 持有，mac 侧 pi 退出后
+**socket 文件可能残留一段时间**（sshd 等 TCP 关闭），connect 返回
+ECONNREFUSED、发送方得到 `unknown`——这是"对端 gc 回收"设计的预期行为，
+不是清理失败。孤儿 ssh（PPID=1）需在 mac 侧手动 kill；给 ssh 加
+`ServerAliveInterval` 让孤儿更快暴露是后续可选项。
 
 这一轮双机联调暴露的问题，几乎全部不是"逻辑写错"，而是**判据用错了对象**。
 记录下来，因为这些错误会让任何一次跨机排查重演：
