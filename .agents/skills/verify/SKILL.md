@@ -87,6 +87,73 @@ Rules:
   verifying starts with `/xfer mesh`, it will reach the engine in
   `~/.pi/xfer/mesh.config.json` — read the next section before typing it.
 
+## Judging results across two machines (cross-machine verification)
+
+The tmux channel verifies one machine. Verifying a **Link** (or any cross-machine
+transport) adds a failure class that has nothing to do with the code under test:
+**checking the wrong object**. The first two-machine run spent five rounds on
+three such mistakes, all committed to `docs/dev/ssh-link-verification.md`. The
+three-line checklist there is the tool; this section is when to reach for it.
+
+### Rule 1 — a running process never picks up new code
+
+`pi -ne -e ./` snapshots the extension at startup. `git pull` afterwards changes
+nothing for a session that is already running, and `/reload` loads the
+**installed** package (`npm:pi-xfer`), not the working tree — a fresh `npm`
+publish is needed before `/reload` can ever see new code.
+
+Judge with three values, never with one:
+
+```bash
+A = ps -o pid,lstart -p <pid>     # when the process started
+B = the working-tree HEAD at A    # which code it loaded
+C = git log --oneline -1          # what the working tree has now
+B == C → the process runs current code
+B != C → everything between B and C is invisible to it
+```
+
+Also note `/reload` keeps the same OS process (`lstart` unchanged) while the
+extension's `startedAt` (in `<name>.json`) refreshes — so `lstart` alone cannot
+tell you which extension code is loaded. The behaviour of a new-only command or
+field is the authority.
+
+### Rule 2 — assert on the filesystem that should hold the file
+
+`os.tmpdir()` differs (`/var/folders/…` on macOS, `/tmp` on Linux) and machines
+differ in `TMPDIR` anyway. "The doc did not land" must be checked **on the
+machine that was supposed to write it, using that machine's tmpdir** — never
+by listing your own `/tmp` and concluding about theirs.
+
+### Rule 3 — verify your own receipt, never the other side's implementation
+
+The interlock that cost the most rounds: A judges B's sender, B judges A's
+receiver, while both run stale code. Every conclusion then contradicts the next
+one, and neither side can tell whose view is stale.
+
+The fix is symmetric self-checks. Each side records the `msg_id` it **sent** and
+checks that `msg_id`'s file exists **on its own machine**; the reverse handoff
+is checked the same way by the other side. Results never require trusting the
+other's report, and a contradiction localises to one end immediately.
+
+### Rule 4 — attribute the channel before trusting a delivery
+
+When both mesh and a Link exist between the same two machines, their landing
+files share one name (`pi-xfer-<msg_id>.md`). "A file appeared" therefore does
+not say which transport carried it — a mesh delivery was twice mistaken for a
+Link verification. Attribute first:
+
+```bash
+grep -c "<msg_id>" ~/.pi/xfer/mesh.log   # >0 = mesh; 0 = the ssh Link
+```
+
+### Rule 5 — do not validate content with short strings
+
+A runtime may redact outbound text (observed as `{{SECRET_…}}` placeholders),
+which permanently defeats token comparison — and grepping your own `/tmp` hits
+your own copy, a false positive that reads like success. Compare whole-document
+sha256 (the sender's `docSha256` against the written file); even that only
+covers the wire, not a rewrite that happened before the sender hashed.
+
 ## Never verify against a live deployment
 
 Verification is **local, always**. The machine's `~/.pi/xfer/mesh.config.json`
