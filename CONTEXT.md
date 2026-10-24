@@ -109,3 +109,17 @@ _Avoid_: FYI, broadcast (handoffs are point-to-point by name)
 **Task**:
 A Handoff Kind that asks for output. A receiver always sends a reverse Handoff once it has a conclusion — done, blocked, or needing input.
 _Avoid_: request, job, ticket (implies lifecycle)
+
+## Staging Bag (web picker cross-page staging)
+
+**Bag**:
+The broker-held session-level staging area for Staged markers — one default Bag per broker, in memory only. Sending (bag.submit) consumes it: the Bag clears on send, with no keep-copy option. Not persisted across broker restarts; loss is cheap because each entry carries full Provenance.
+_Avoid_: staging area, cart, pool, snapshot
+
+**Staged marker**:
+A Marker stored in the Bag via `annotation.stage`. Never deduplicated — repeated staging creates independent entries, the user prunes by hand. The broker assigns entry ids; the picker rebuilds its view from a full `bag.list` after reconnect.
+_Avoid_: pending pick, staged pick, draft
+
+**Provenance**:
+The origin facts a Staged marker carries: tabId + origin + url + title + capture time. The Bag's UI groups by page (url+title); page-tool routes per-marker follow-ups by tabId. tabId is page-lifetime (sessionStorage), so Provenance names the tab that captured the marker, not a live session.
+_Avoid_: source info, metadata, context
