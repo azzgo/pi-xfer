@@ -298,6 +298,23 @@
       ...ok ? { text: payload } : { error: payload }
     });
   }
+  function frameStage(id, pick) {
+    return frame(WIRE.KIND_STAGE, {
+      id,
+      pick,
+      page: { tabId: pageTabId(), origin: location.origin, url: location.href, title: document.title, ts: Date.now() }
+    });
+  }
+  function frameBagList(id) {
+    return frame(WIRE.KIND_BAG_LIST, { id });
+  }
+  function frameBagSubmit(id, prompt, targetName) {
+    return frame(WIRE.KIND_BAG_SUBMIT, {
+      id,
+      prompt,
+      target: { namespace: WIRE.NS_LOCAL, name: targetName }
+    });
+  }
 
   // web-picker.src/json-safe.js
   var JSON_SAFE_CAPS = { maxDepth: 5, maxStr: 1e5, maxArray: 500, maxKeys: 200 };
@@ -1108,6 +1125,24 @@
     "sendmore.title": { en: "More actions", zh: "更多操作" },
     "copyprompt": { en: "⧉ Copy handoff prompt", zh: "⧉ 复制 handoff prompt" },
     "copyprompt.sub": { en: "broker composes the full handoff doc → clipboard (send to any agent with bash)", zh: "broker 拼好完整 handoff 文档 → 剪贴板（发给任意有 bash 的 agent）" },
+    "bag.stageMenu": { en: "↑ Stage to broker", zh: "↑ 暂存到 broker" },
+    "bag.stageMenu.sub": { en: "move this page's picks into the cross-page staging bag (clears this page)", zh: "把本页的标注移入跨页暂存袋（本页清空）" },
+    "bag.entry": { en: "Bag", zh: "暂存袋" },
+    "bag.entry.title": { en: "Cross-page staging bag (requires broker connection)", zh: "跨页暂存袋（需要连接 broker）" },
+    "bag.title": { en: "Staging bag", zh: "暂存袋" },
+    "bag.count": { en: "{pages} pages · {n} markers", zh: "{pages} 页 · {n} 条" },
+    "bag.empty": { en: "Bag is empty — on any connected page use ▾ → Stage to broker", zh: "暂存袋是空的 — 在已连接的页面用 ▾ → 暂存到 broker" },
+    "bag.sendLabel": { en: "Send whole bag (multi-page provenance in one handoff)", zh: "整袋发送（多页 provenance 合成一只 handoff）" },
+    "bag.promptPlaceholder": { en: "Note for the agent about this bag…", zh: "关于这批标注的说明…" },
+    "bag.targetLabel": { en: "Target", zh: "发送目标" },
+    "bag.send": { en: "Send bag", zh: "发送整袋" },
+    "bag.delivered": { en: "Bag delivered (handoff {id}) — bag cleared", zh: "整袋已送达（handoff {id}）— 已清空" },
+    "bag.emptyCannotSend": { en: "Bag is empty", zh: "暂存袋是空的" },
+    "bag.copyHint": { en: "The bag lives on the broker — send it with Send bag; Copy prompt only covers this tab's picks", zh: "袋在 broker 上 — 用「发送整袋」；复制 prompt 只覆盖本页的标注" },
+    "bag.noteReadonly": { en: "Bag entries are broker-owned — notes are fixed at staging time", zh: "袋条目由 broker 持有 — 备注以暂存时刻为准" },
+    "bag.staged": { en: "Staged to broker ({n} in bag)", zh: "已暂存到 broker（袋内 {n} 条）" },
+    "bag.stageFailed": { en: "Stage failed: {detail}", zh: "暂存失败: {detail}" },
+    "bag.deleteLocalOnly": { en: "Bag entries are managed on the broker — send the bag or restage to prune", zh: "袋条目由 broker 管理 — 发送整袋或重新暂存来整理" },
     // degraded-state button: deliberately short — the status line already says what
     // gets copied, and the full label overflowed the panel next to a long status.
     "copyprompt.offline": { en: "⧉ Copy", zh: "⧉ 复制" },
@@ -1339,7 +1374,7 @@
           return;
         }
         if (!f || typeof f.type !== "string") return;
-        if (f.type === WIRE.KIND_WELCOME) {
+        if (f.type === PROTOCOL.KIND_WELCOME) {
           setState("on");
           if (!silent) gm2.set(autoLinkKey(location.origin), true);
           gm2.set(policyBlockedKey(location.origin), false);
@@ -1353,7 +1388,7 @@
           if (deps.onWelcome) deps.onWelcome();
           return;
         }
-        if (f.type === WIRE.KIND_ACK) {
+        if (f.type === PROTOCOL.KIND_ACK) {
           const p = pending.get(f.id);
           if (p && p.kind === "submit") {
             pending.delete(f.id);
@@ -1364,7 +1399,7 @@
           }
           return;
         }
-        if (f.type === WIRE.KIND_ERROR) {
+        if (f.type === PROTOCOL.KIND_ERROR) {
           const p = pending.get(f.id);
           if (p) {
             pending.delete(f.id);
@@ -1374,7 +1409,7 @@
           }
           return;
         }
-        if (f.type === WIRE.KIND_TARGETS_RESULT) {
+        if (f.type === PROTOCOL.KIND_TARGETS_RESULT) {
           const p = pending.get(f.id);
           if (p && p.kind === "targets") {
             pending.delete(f.id);
@@ -1382,7 +1417,7 @@
           }
           return;
         }
-        if (f.type === WIRE.KIND_PAGE_REQUEST) {
+        if (f.type === PROTOCOL.KIND_PAGE_REQUEST) {
           debugLog2("page.request", f.id, f.tool && f.tool.op);
           onPageRequest(f);
           return;
@@ -1524,6 +1559,70 @@
         }, 5e3);
       });
     }
+    function stagePick(pick) {
+      return new Promise((resolve) => {
+        if (wsState !== "on") {
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          return;
+        }
+        const id = "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        pending.set(id, { kind: "stage", resolve });
+        if (!sendFrame(frameStage(id, pick))) {
+          pending.delete(id);
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          return;
+        }
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve({ ok: false, code: "timeout", message: t("conn.noResponse") });
+          }
+        }, 1e4);
+      });
+    }
+    function requestBagList() {
+      return new Promise((resolve) => {
+        if (wsState !== "on") {
+          resolve({ ok: false, code: "not_connected", items: [] });
+          return;
+        }
+        const id = "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        pending.set(id, { kind: "baglist", resolve });
+        if (!sendFrame(frameBagList(id))) {
+          pending.delete(id);
+          resolve({ ok: false, code: "not_connected", items: [] });
+          return;
+        }
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve({ ok: false, code: "timeout", items: [] });
+          }
+        }, 1e4);
+      });
+    }
+    function submitBag(prompt, targetName) {
+      return new Promise((resolve) => {
+        if (wsState !== "on") {
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          return;
+        }
+        const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        pending.set(id, { kind: "bagsubmit", resolve });
+        const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
+        if (!sendFrame(frameBagSubmit(id, promptText, targetName))) {
+          pending.delete(id);
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          return;
+        }
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve({ ok: false, code: "timeout", message: t("conn.noResponse") });
+          }
+        }, 1e4);
+      });
+    }
     return {
       brokerUrl,
       connect,
@@ -1536,7 +1635,10 @@
       maybeProbePolicyBlocked,
       submitToAgent,
       requestCompose,
-      requestTargets
+      requestTargets,
+      stagePick,
+      requestBagList,
+      submitBag
     };
   }
 
@@ -2032,7 +2134,7 @@
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>${t("panel.title")}</b><span class="cnt2" id="pcount"></span><button id="pclose" title="${t("panel.pclose.title")}">✕</button></div>
+      <div class="ph" id="ph"><b>${t("panel.title")}</b><span class="cnt2" id="pcount"></span><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t("bag.entry.title")}">${t("bag.entry")} ▾</button><button id="pclose" title="${t("panel.pclose.title")}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
         <div class="lbl">${t("send.label")}</div>
@@ -2053,6 +2155,7 @@
             <button class="primary" id="sendbtn">${t("sendbtn")}</button>
             <button class="primary more" id="sendmore" title="${t("sendmore.title")}">▾</button>
             <div id="sendmenu">
+              <div class="mitem" id="stagetobroker">${t("bag.stageMenu")}<div class="msub">${t("bag.stageMenu.sub")}</div></div>
               <div class="mitem" id="copyprompt">${t("copyprompt")}<div class="msub">${t("copyprompt.sub")}</div></div>
             </div>
           </div>
@@ -2081,7 +2184,7 @@
     </div>
   `);
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
     if (gm.get(GM_FAB_SIZE, "small") === "large") elFab.classList.add("large");
     let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
     try {
@@ -2142,6 +2245,7 @@
       elPlist,
       elPcount,
       elPclose,
+      elBagEntry,
       elPrompt,
       elTCombo,
       elTInput,
@@ -2153,6 +2257,7 @@
       elSendMore,
       elSendMenu,
       elCopyPrompt,
+      elStage,
       elConn,
       elConnText,
       elSettings,
@@ -2983,7 +3088,7 @@
   }
   function initSend(ctx) {
     const { els, toast } = ctx;
-    const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elConn, elConnText, elSendOffline } = els;
+    const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elStage, elConn, elConnText, elSendOffline } = els;
     const conn = ctx.conn;
     function composeOffline() {
       const prompt = elPrompt.value.trim() || DEFAULT_PROMPT;
@@ -3080,6 +3185,32 @@
     elCopyPrompt.addEventListener("click", copyHandoffPrompt);
     if (elSendOffline) elSendOffline.addEventListener("click", copyHandoffPrompt);
     ctx.copyHandoffPrompt = copyHandoffPrompt;
+    async function stageToBroker() {
+      ctx.closeSendMenu();
+      if (conn.getState() !== "on") {
+        toast(t("bag.stageFailed", { detail: t("conn.notConnected") }));
+        return;
+      }
+      const b = loadBatch();
+      if (!b.length) {
+        toast(t("send.needContent"));
+        return;
+      }
+      let ok = 0;
+      for (const pick of b) {
+        const res = await conn.stagePick(pick);
+        if (res.ok) ok++;
+        else {
+          toast(t("bag.stageFailed", { detail: res.code + (res.message ? " — " + res.message : "") }));
+          return;
+        }
+      }
+      toast(t("bag.staged", { n: ok }));
+      ctx.clearBatch();
+      ctx.renderPanel();
+      if (ctx.refreshBag) void ctx.refreshBag();
+    }
+    elStage.addEventListener("click", stageToBroker);
     window.addEventListener("pointerdown", (e) => {
       if (!sendMenuOpen) return;
       const path = e.composedPath ? e.composedPath() : [];
@@ -3109,8 +3240,11 @@
       const busy = s === "connecting";
       elSendGroup.style.display = linked || busy ? "" : "none";
       elSend.disabled = !linked;
+      elStage.style.opacity = linked ? "" : ".45";
+      elStage.style.pointerEvents = linked ? "" : "none";
       if (elSendOffline) elSendOffline.hidden = linked || busy;
       if (!linked) closeSendMenu();
+      if (ctx.renderBagAffordance) ctx.renderBagAffordance(s);
     }
     ctx.renderSendAffordance = renderSendAffordance;
     ctx.renderConnPill = (s) => {
@@ -3119,6 +3253,356 @@
       elConnText.textContent = s === "on" ? t("conn.on") : s === "connecting" ? t("conn.connecting") : s === "blocked" ? t("conn.blocked") : t("conn.off");
       renderSendAffordance(s);
     };
+  }
+
+  // web-picker.src/ui/bag.js
+  var PAGE_GROUP_MAX_OPEN = 50;
+  function initBag(ctx) {
+    const { root, els, toast } = ctx;
+    const conn = ctx.conn;
+    const drawer = document.createElement("div");
+    drawer.id = "bagdrawer";
+    buildDrawer(drawer);
+    root.querySelector("#panel").parentElement.appendChild(drawer);
+    function buildDrawer(el) {
+      const bh = document.createElement("div");
+      bh.className = "bh";
+      const title = document.createElement("b");
+      title.textContent = t("bag.title");
+      const count = document.createElement("span");
+      count.className = "cnt2";
+      count.id = "bagcount";
+      const close = document.createElement("button");
+      close.id = "bagclose";
+      close.textContent = "✕";
+      close.title = t("panel.pclose.title");
+      bh.append(title, count, close);
+      const list = document.createElement("div");
+      list.id = "baglist";
+      const box = document.createElement("div");
+      box.className = "bsendbox";
+      const lbl1 = document.createElement("div");
+      lbl1.className = "lbl";
+      lbl1.textContent = t("bag.sendLabel");
+      const prompt = document.createElement("textarea");
+      prompt.id = "bagprompt";
+      prompt.placeholder = t("bag.promptPlaceholder");
+      const row1 = document.createElement("div");
+      row1.className = "brow";
+      const lbl2 = document.createElement("span");
+      lbl2.className = "lbl";
+      lbl2.textContent = t("bag.targetLabel");
+      const combo = document.createElement("div");
+      combo.id = "bagcombo";
+      const input = document.createElement("input");
+      input.id = "bagtinput";
+      input.placeholder = t("tinput.placeholder");
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      const drop = document.createElement("div");
+      drop.id = "bagtdrop";
+      combo.append(input, drop);
+      row1.append(lbl2, combo);
+      const row2 = document.createElement("div");
+      row2.className = "brow2";
+      const send = document.createElement("button");
+      send.className = "ghost";
+      send.id = "bagsend";
+      send.textContent = t("bag.send");
+      const copy = document.createElement("button");
+      copy.className = "ghost";
+      copy.id = "bagcopy";
+      copy.textContent = t("copyprompt");
+      row2.append(send, copy);
+      box.append(lbl1, prompt, row1, row2);
+      el.append(bh, list, box);
+    }
+    const elBagPrompt = drawer.querySelector("#bagprompt");
+    const elBagSend = drawer.querySelector("#bagsend");
+    const elBagCopy = drawer.querySelector("#bagcopy");
+    const elBagCount = drawer.querySelector("#bagcount");
+    const elBagList = drawer.querySelector("#baglist");
+    const elBagInput = drawer.querySelector("#bagtinput");
+    const elBagDrop = drawer.querySelector("#bagtdrop");
+    const style = document.createElement("style");
+    style.textContent = `
+    #bagdrawer { position: fixed; top: 60px; right: 380px; width: 330px; max-height: 80vh;
+      display: none; flex-direction: column; background: #fff; border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(15,23,42,.35); color: var(--wp-ink); font: 13px/1.5 var(--wp-font);
+      z-index: 2147483647; pointer-events: auto; }
+    #bagdrawer .bh { display: flex; align-items: center; gap: 8px; padding: 11px 14px;
+      background: var(--wp-soft); border-bottom: 1px solid var(--wp-line); cursor: move; user-select: none;
+      border-radius: 12px 12px 0 0; }
+    #bagdrawer .bh b { flex: 1; font-size: 13px; font-weight: 600; }
+    #bagdrawer .cnt2 { color: var(--wp-muted); font-size: 11px; }
+    #bagdrawer .bh button { background: transparent; color: var(--wp-muted); border: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
+    #bagdrawer .bh button:hover { background: #e8edf3; color: #334155; }
+    #baglist { overflow-y: auto; padding: 10px; flex: 1; }
+    #baglist .bempty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 12px; }
+    #baglist .bpage { border: 1px solid var(--wp-line); border-radius: 10px; margin-bottom: 8px; overflow: hidden; background: #fff; }
+    #baglist .bphead { display: flex; align-items: center; gap: 8px; padding: 8px 9px; background: var(--wp-soft); cursor: pointer; }
+    #baglist .bphead .pt { flex: 1; min-width: 0; }
+    #baglist .bphead .pu { font: 600 11px/1.4 var(--wp-mono); color: var(--wp-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #baglist .bphead .ph2 { font: 10px/1.4 var(--wp-mono); color: var(--wp-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #baglist .bphead .n { font: 600 10px var(--wp-mono); background: #eaf1ff; color: var(--wp-accent-deep); border-radius: 999px; padding: 1px 8px; }
+    #baglist .bphead .arr { color: var(--wp-muted); font-size: 11px; }
+    #baglist .bitems { padding: 8px; }
+    #baglist .item { border: 1px solid var(--wp-line); border-radius: 8px; padding: 7px; margin-bottom: 7px; background: #fff; }
+    #baglist .item .psel { font: 11px/1.5 var(--wp-mono); color: #475569; background: var(--wp-soft);
+      border: 1px solid var(--wp-line); padding: 4px 7px; border-radius: 6px; word-break: break-all; max-height: 44px; overflow: auto; }
+    #baglist .item .pprev { color: #94a3b8; font-size: 11px; margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #baglist .item textarea { width: 100%; border: 1px solid var(--wp-line); border-radius: 6px; padding: 5px 8px;
+      font: 12px/1.5 var(--wp-font); min-height: 30px; resize: vertical; outline: none; }
+    #baglist .item textarea:focus { border-color: var(--wp-accent); }
+    #baglist .item .prow { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
+    #baglist .item .pts { color: #94a3b8; font-size: 10px; font-family: var(--wp-mono); }
+    #baglist .item .del { background: none; color: #ef4444; font-size: 11px; padding: 2px 8px; border-radius: 6px; border: none; cursor: pointer; }
+    #baglist .item .del:hover { background: #fef2f2; }
+    #bagdrawer .bsendbox { border-top: 1px solid var(--wp-line); padding: 11px 14px; display: flex;
+      flex-direction: column; gap: 7px; background: var(--wp-soft); border-radius: 0 0 12px 12px; }
+    #bagdrawer .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); letter-spacing: .02em; }
+    #bagdrawer textarea, #bagdrawer input { width: 100%; border: 1px solid var(--wp-line); border-radius: 8px; padding: 7px 10px;
+      font: 12.5px/1.5 var(--wp-font); background: #fff; color: var(--wp-ink); outline: none; box-sizing: border-box; }
+    #bagdrawer textarea { resize: vertical; min-height: 40px; }
+    #bagdrawer textarea:focus, #bagdrawer input:focus { border-color: var(--wp-accent); box-shadow: 0 0 0 3px rgba(79,140,255,.14); }
+    #bagdrawer .brow { display: flex; gap: 6px; align-items: center; }
+    #bagdrawer .brow2 { display: flex; gap: 8px; }
+    #bagdrawer button.ghost { flex: 1; background: #f1f5f9; color: var(--wp-muted); border: none; border-radius: 8px;
+      padding: 7px 14px; font: 600 12px var(--wp-font); cursor: pointer; }
+    #bagdrawer button.ghost:hover { background: #e2e8f0; color: #475569; }
+    #bagdrawer button.primary { background: var(--wp-accent); color: #fff; }
+    #bagcombo { position: relative; flex: 1; min-width: 0; }
+    #bagtdrop { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 10;
+      background: #fff; border: 1px solid var(--wp-line); border-radius: 10px;
+      box-shadow: var(--wp-shadow); padding: 4px; max-height: 224px; overflow-y: auto; display: none; }
+    #bagtdrop.open { display: block; }
+    #bagtdrop .titem { padding: 6px 9px; border-radius: 7px; cursor: pointer; }
+    #bagtdrop .titem.hl { background: #eaf1ff; }
+    #bagtdrop .tname { font: 600 12px/1.45 var(--wp-mono); color: var(--wp-ink); word-break: break-all; }
+    #bagtdrop .tsub { font: 10.5px/1.45 var(--wp-mono); color: var(--wp-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #bagtdrop .tempty { padding: 12px 8px; text-align: center; color: #94a3b8; font-size: 12px; }
+  `;
+    root.appendChild(style);
+    let bagOpen = false;
+    let items = [];
+    const openPages = /* @__PURE__ */ new Set();
+    let bagTargetSel = "";
+    let bagComboSel = "";
+    let bagComboFilter = "";
+    let bagComboHl = 0;
+    let comboTargets = [];
+    ctx.getBagOpen = () => bagOpen;
+    function hostOf(url) {
+      try {
+        return new URL(url).host;
+      } catch (e) {
+        return url;
+      }
+    }
+    function pageKey(m) {
+      return (m.url || "") + "|" + (m.title || "");
+    }
+    function groupByPage(list) {
+      const groups = /* @__PURE__ */ new Map();
+      for (const m of list) {
+        if (!groups.has(pageKey(m))) groups.set(pageKey(m), []);
+        groups.get(pageKey(m)).push(m);
+      }
+      return groups;
+    }
+    function render() {
+      if (!bagOpen) return;
+      const groups = groupByPage(items);
+      elBagCount.textContent = t("bag.count", { pages: groups.size, n: items.length });
+      if (!items.length) {
+        setHTML(elBagList, `<div class="bempty">${t("bag.empty")}</div>`);
+        return;
+      }
+      setHTML(elBagList, [...groups.entries()].map(([key, ms]) => {
+        const isOpen = openPages.has(key);
+        const first = ms[0];
+        return '<div class="bpage" data-pgkey="' + escapeHtml(key) + '"><div class="bphead" data-toggle><div class="pt"><div class="pu">' + escapeHtml(first.title || first.url) + '</div><div class="ph2">' + escapeHtml(hostOf(first.url)) + " · tab " + escapeHtml(first.tabId) + '</div></div><span class="n">' + ms.length + '</span><span class="arr">' + (isOpen ? "▾" : "▸") + "</span></div>" + (isOpen ? '<div class="bitems">' + ms.map(itemHtml).join("") + "</div>" : "") + "</div>";
+      }).join(""));
+    }
+    function itemHtml(m) {
+      const p = m.pick || {};
+      return '<div class="item" data-id="' + escapeHtml(m.id) + '"><div class="psel">' + escapeHtml(p.selector || "") + "</div>" + (p.textPreview ? '<div class="pprev">' + escapeHtml(p.textPreview) + "</div>" : "") + '<textarea data-note placeholder="' + t("note.placeholder") + '">' + escapeHtml(p.note || "") + '</textarea><div class="prow"><span class="pts">' + (p.ts ? new Date(p.ts).toLocaleTimeString() : "") + '</span><button class="del">' + t("btn.delete") + "</button></div></div>";
+    }
+    async function refresh() {
+      const res = await conn.requestBagList();
+      if (res.ok) {
+        items = Array.isArray(res.result && res.result.items) ? res.result.items.slice() : [];
+        const keys = new Set(items.map(pageKey));
+        for (const k of [...openPages]) if (!keys.has(k)) openPages.delete(k);
+      }
+      render();
+      return res;
+    }
+    ctx.refreshBag = refresh;
+    function openDrawer() {
+      if (bagOpen) return;
+      bagOpen = true;
+      drawer.style.display = "flex";
+      if (ctx.els.elPanel && !ctx.getPanelOpen()) ctx.togglePanel();
+      render();
+      void refresh();
+      if (conn.getState() === "on" && ctx.refreshTargets) void ctx.refreshTargets();
+      renderBagCombo();
+    }
+    function closeDrawer() {
+      bagOpen = false;
+      drawer.style.display = "none";
+      closeBagDrop();
+    }
+    ctx.closeBag = closeDrawer;
+    function toggleBag() {
+      if (bagOpen) closeDrawer();
+      else openDrawer();
+    }
+    ctx.toggleBag = toggleBag;
+    ctx.renderBagAffordance = (s) => {
+      if (elBagEntry) elBagEntry.style.display = s === "on" ? "" : "none";
+      if (s !== "on" && bagOpen) closeDrawer();
+      if (s === "on" && bagOpen) void refresh();
+    };
+    let elBagEntry = null;
+    ctx.setBagEntry = (el) => {
+      elBagEntry = el;
+      elBagEntry.addEventListener("click", toggleBag);
+    };
+    drawer.querySelector("#bagclose").addEventListener("click", closeDrawer);
+    elBagList.addEventListener("click", (e) => {
+      const del = e.target && e.target.closest ? e.target.closest(".del") : null;
+      if (del) {
+        const item = del.closest(".item");
+        const id = item && item.getAttribute("data-id");
+        toast(t("bag.deleteLocalOnly"));
+        return;
+      }
+      const toggle = e.target && e.target.closest ? e.target.closest("[data-toggle]") : null;
+      if (toggle) {
+        const key = toggle.closest(".bpage").getAttribute("data-pgkey");
+        if (openPages.has(key)) openPages.delete(key);
+        else {
+          openPages.add(key);
+          if (openPages.size > PAGE_GROUP_MAX_OPEN) openPages.delete(openPages.values().next().value);
+        }
+        render();
+      }
+    });
+    elBagList.addEventListener("change", (e) => {
+      if (e.target && e.target.matches && e.target.matches("[data-note]")) {
+        e.target.disabled = true;
+        toast(t("bag.noteReadonly"));
+        setTimeout(() => {
+          e.target.disabled = false;
+        }, 800);
+      }
+    });
+    elBagSend.addEventListener("click", async () => {
+      const target = bagComboSel || ctx.getComboSel() || gm.get(GM_TARGET, "");
+      if (!target) {
+        toast(t("send.noTarget"));
+        return;
+      }
+      if (!items.length) {
+        toast(t("bag.emptyCannotSend"));
+        return;
+      }
+      elBagSend.disabled = true;
+      elBagSend.textContent = t("send.sending");
+      const res = await conn.submitBag(elBagPrompt.value, target);
+      elBagSend.disabled = false;
+      elBagSend.textContent = t("bag.send");
+      if (res.ok) {
+        gm.set(GM_TARGET, target);
+        elBagPrompt.value = "";
+        toast(t("bag.delivered", { id: res.result && res.result.handoff_id ? res.result.handoff_id : "?" }));
+        items = [];
+        openPages.clear();
+        render();
+      } else {
+        toast(t("send.failed", { detail: res.code + (res.message ? " — " + res.message : "") }));
+      }
+    });
+    elBagCopy.addEventListener("click", () => {
+      toast(t("bag.copyHint"));
+    });
+    function bagComboList() {
+      const q = bagComboFilter.trim().toLowerCase();
+      if (!q) return comboTargets.slice();
+      return comboTargets.filter((tg) => ((tg.name || "") + " " + (tg.cwd || "") + " " + (tg.status || "")).toLowerCase().includes(q));
+    }
+    function renderBagDrop() {
+      const list = bagComboList();
+      if (bagComboHl >= list.length) bagComboHl = list.length - 1;
+      if (bagComboHl < 0) bagComboHl = 0;
+      if (!list.length) {
+        setHTML(elBagDrop, `<div class="tempty">${t("combo.noSessions")}</div>`);
+        return;
+      }
+      setHTML(elBagDrop, list.map((tg, i) => {
+        const sub = (tg.cwd || "?") + (tg.status ? " · " + tg.status : "");
+        return '<div class="titem' + (i === bagComboHl ? " hl" : "") + '" data-name="' + escapeHtml(tg.name) + '"><div class="tname">' + escapeHtml(tg.name) + (tg.name === bagComboSel ? ' <span style="color:var(--wp-green)">✓</span>' : "") + '</div><div class="tsub">' + escapeHtml(sub) + "</div></div>";
+      }).join(""));
+    }
+    function closeBagDrop() {
+      elBagDrop.classList.remove("open");
+    }
+    function renderBagCombo() {
+      comboTargets = ctx.getTargets ? ctx.getTargets() : [];
+      bagComboSel = bagComboSel || ctx.getComboSel() || gm.get(GM_TARGET, "") || "";
+      elBagInput.value = bagComboSel;
+      renderBagDrop();
+    }
+    ctx.renderBagCombo = renderBagCombo;
+    elBagInput.addEventListener("focus", () => {
+      bagComboFilter = "";
+      renderBagDrop();
+      elBagDrop.classList.add("open");
+    });
+    elBagInput.addEventListener("input", () => {
+      bagComboSel = "";
+      bagComboFilter = elBagInput.value;
+      bagComboHl = 0;
+      renderBagDrop();
+      elBagDrop.classList.add("open");
+    });
+    elBagInput.addEventListener("keydown", (e) => {
+      const list = bagComboList();
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        bagComboHl = Math.min(bagComboHl + 1, list.length - 1);
+        renderBagDrop();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        bagComboHl = Math.max(bagComboHl - 1, 0);
+        renderBagDrop();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (list[bagComboHl]) {
+          bagComboSel = list[bagComboHl].name;
+          elBagInput.value = bagComboSel;
+          closeBagDrop();
+        }
+      } else if (e.key === "Escape") {
+        closeBagDrop();
+      }
+    });
+    elBagDrop.addEventListener("click", (e) => {
+      const item = e.target && e.target.closest ? e.target.closest(".titem") : null;
+      if (!item) return;
+      bagComboSel = item.getAttribute("data-name");
+      elBagInput.value = bagComboSel;
+      closeBagDrop();
+    });
+    window.addEventListener("pointerdown", (e) => {
+      if (!elBagDrop.classList.contains("open")) return;
+      const path = e.composedPath ? e.composedPath() : [];
+      if (path.indexOf(drawer) >= 0) return;
+      closeBagDrop();
+    }, true);
   }
 
   // web-picker.src/ui/settings.js
@@ -3790,6 +4274,8 @@
       initPick(ctx);
       initCombo(ctx);
       initSend(ctx);
+      initBag(ctx);
+      ctx.setBagEntry(ctx.els.elBagEntry);
       initSettings(ctx);
       initFab(ctx);
       ctx.consoleRing = consoleRing;

@@ -301,7 +301,7 @@ export function buildUI() {
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>${t('panel.title')}</b><span class="cnt2" id="pcount"></span><button id="pclose" title="${t('panel.pclose.title')}">✕</button></div>
+      <div class="ph" id="ph"><b>${t('panel.title')}</b><span class="cnt2" id="pcount"></span><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t('bag.entry.title')}">${t('bag.entry')} ▾</button><button id="pclose" title="${t('panel.pclose.title')}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
         <div class="lbl">${t('send.label')}</div>
@@ -322,6 +322,7 @@ export function buildUI() {
             <button class="primary" id="sendbtn">${t('sendbtn')}</button>
             <button class="primary more" id="sendmore" title="${t('sendmore.title')}">▾</button>
             <div id="sendmenu">
+              <div class="mitem" id="stagetobroker">${t('bag.stageMenu')}<div class="msub">${t('bag.stageMenu.sub')}</div></div>
               <div class="mitem" id="copyprompt">${t('copyprompt')}<div class="msub">${t('copyprompt.sub')}</div></div>
             </div>
           </div>
@@ -358,10 +359,11 @@ export function buildUI() {
         elRecStop = $('recstop'), elRecDiscard = $('recdiscard'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
         elPanel = $('panel'), elPH = $('ph'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
+        elBagEntry = $('bagentry'),
         elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
         elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
-        elSendGroup = $('sendgroup'), elSendMore = $('sendmore'), elSendMenu = $('sendmenu'), elCopyPrompt = $('copyprompt'),
+        elSendGroup = $('sendgroup'), elSendMore = $('sendmore'), elSendMenu = $('sendmenu'), elCopyPrompt = $('copyprompt'), elStage = $('stagetobroker'),
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'), elSendOffline = $('sendoffline'),
         elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops'),
         elSAuto = $('sauto'), elSWrite = $('swrite');
@@ -397,9 +399,9 @@ export function buildUI() {
   const els = { elHL, elGWrap, elBadge, elInfo, elBar, elGH, elGCLEAR, elEscX,
     elRecBar, elRecCount, elRecBadge, elRecStop, elRecDiscard,
     elFab, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
-    elPanel, elPH, elPlist, elPcount, elPclose, elPrompt, elTCombo, elTInput,
+    elPanel, elPH, elPlist, elPcount, elPclose, elBagEntry, elPrompt, elTCombo, elTInput,
     elTDrop, elTRefresh, elSend, elClear, elSendGroup, elSendMore, elSendMenu,
-    elCopyPrompt, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite,
+    elCopyPrompt, elStage, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite,
     elSendOffline };
 
   // ---------- trigger 重注入 ----------

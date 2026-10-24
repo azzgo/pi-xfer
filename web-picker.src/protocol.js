@@ -65,3 +65,26 @@ export function framePageResponse(id, ok, payload) {
     ...(ok ? { text: payload } : { error: payload }),
   });
 }
+
+// Staging bag（跨页暂存）：stage 把本页一条 pick 带完整 Provenance 入袋；
+// list 全量对账（重连后重建视图的唯一来源）；submit 整袋投递并清袋。
+// page 携带本 tab 的 pageTabId —— broker 按它做 page-tool 定向路由。
+export function frameStage(id, pick) {
+  return frame(PROTOCOL.KIND_STAGE, {
+    id,
+    pick,
+    page: { tabId: pageTabId(), origin: location.origin, url: location.href, title: document.title, ts: Date.now() },
+  });
+}
+
+export function frameBagList(id) {
+  return frame(PROTOCOL.KIND_BAG_LIST, { id });
+}
+
+export function frameBagSubmit(id, prompt, targetName) {
+  return frame(PROTOCOL.KIND_BAG_SUBMIT, {
+    id,
+    prompt,
+    target: { namespace: PROTOCOL.NS_LOCAL, name: targetName },
+  });
+}

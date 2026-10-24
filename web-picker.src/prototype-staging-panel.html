@@ -1,0 +1,481 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway, not part of the build. 原型问题：跨页暂存的标注面板 UI 怎么做？
+     三个结构不同的方案，?variant=A|B|C 切换（浮动切换条 / ← → 键）。
+     直接用浏览器打开本文件即可，无构建、无依赖、无持久化。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE — staging bag panel</title>
+<style>
+  :root {
+    --wp-accent: #4f8cff; --wp-accent-deep: #3b76e8; --wp-ink: #1e293b;
+    --wp-muted: #64748b; --wp-soft: #f6f8fb; --wp-line: #e2e8f0;
+    --wp-green: #22c55e; --wp-mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --wp-font: system-ui, sans-serif;
+    --wp-shadow: 0 1px 2px rgba(15,23,42,.05), 0 16px 40px -12px rgba(15,23,42,.25);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.6 var(--wp-font); color: var(--wp-ink); background: #fff; }
+  /* 假页面：让面板有真实密度可对照 */
+  .page { max-width: 760px; margin: 0 auto; padding: 48px 24px 200px; }
+  .page h1 { font-size: 26px; margin: 0 0 8px; }
+  .page .crumb { color: var(--wp-muted); font-size: 12px; margin-bottom: 24px; }
+  .page p { color: #475569; }
+  .page .btn-row { display: flex; gap: 10px; margin: 28px 0; }
+  .page .btn-row button { padding: 8px 18px; border: 1px solid var(--wp-line); border-radius: 8px; background: #fff; font-weight: 600; }
+  .page .btn-row .pri { background: var(--wp-accent); border-color: var(--wp-accent); color: #fff; }
+  .pick-hl { outline: 2px solid #f59e0b; outline-offset: 2px; border-radius: 4px; }
+  .page code { font: 12px var(--wp-mono); background: var(--wp-soft); padding: 2px 6px; border-radius: 5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 12px 0; }
+  td, th { border: 1px solid var(--wp-line); padding: 6px 10px; text-align: left; }
+
+  /* ---- 面板公共件（贴近 shadow.js 的视觉语言）---- */
+  textarea, input { width: 100%; border: 1px solid var(--wp-line); border-radius: 8px; padding: 7px 10px;
+    font: 12.5px/1.5 var(--wp-font); background: #fff; color: var(--wp-ink); outline: none; }
+  textarea:focus, input:focus { border-color: var(--wp-accent); box-shadow: 0 0 0 3px rgba(79,140,255,.14); }
+  textarea { resize: vertical; min-height: 40px; }
+  button { font: 600 12px var(--wp-font); border: none; border-radius: 8px; cursor: pointer; padding: 7px 14px; }
+  button.primary { background: var(--wp-accent); color: #fff; box-shadow: 0 1px 3px rgba(79,140,255,.45); }
+  button.primary:disabled { background: #c4d5f7; box-shadow: none; cursor: not-allowed; }
+  button.ghost { background: #f1f5f9; color: var(--wp-muted); }
+  button.ghost:hover { background: #e2e8f0; color: #475569; }
+  button.danger { background: none; color: #ef4444; font-size: 11px; padding: 2px 8px; }
+  button.danger:hover { background: #fef2f2; }
+  .mono { font-family: var(--wp-mono); }
+
+  .panel { position: fixed; top: 56px; right: 16px; width: 356px; max-height: 84vh;
+    display: flex; flex-direction: column; background: #fff; border-radius: 14px;
+    box-shadow: var(--wp-shadow); border: 1px solid var(--wp-line); overflow: hidden; }
+  .ph { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--wp-soft);
+    border-bottom: 1px solid var(--wp-line); user-select: none; }
+  .ph b { flex: 1; font-size: 13px; }
+  .cnt2 { color: var(--wp-muted); font-size: 11px; }
+  .plist { overflow-y: auto; padding: 10px; flex: 1; }
+  .plist::-webkit-scrollbar { width: 8px; }
+  .plist::-webkit-scrollbar-thumb { background: #dde4ec; border-radius: 4px; }
+  .empty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 12px; }
+  .item { border: 1px solid var(--wp-line); border-radius: 10px; padding: 8px; margin-bottom: 8px; background: #fff; }
+  .item:hover { border-color: #c9d6ea; }
+  .psel { font: 11px/1.5 var(--wp-mono); color: #475569; background: var(--wp-soft);
+    border: 1px solid var(--wp-line); padding: 4px 7px; border-radius: 6px; word-break: break-all; }
+  .pprev { color: #94a3b8; font-size: 11px; margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+  .pts { color: #94a3b8; font-size: 10px; font-family: var(--wp-mono); }
+  .sendbox { border-top: 1px solid var(--wp-line); padding: 11px 14px; display: flex; flex-direction: column;
+    gap: 7px; background: var(--wp-soft); }
+  .lbl { font-size: 11px; font-weight: 600; color: var(--wp-muted); letter-spacing: .02em; }
+  .srow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--wp-muted); cursor: pointer; }
+  .conn .dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+  .conn.on .dot { background: var(--wp-green); box-shadow: 0 0 0 3px rgba(34,197,94,.18); }
+  .split { display: inline-flex; }
+  .split .primary:first-child { border-radius: 8px 0 0 8px; }
+  .split .more { border-radius: 0 8px 8px 0; border-left: 1px solid rgba(255,255,255,.35); padding: 7px 9px; }
+  .menu { position: absolute; bottom: calc(100% + 6px); right: 0; background: #fff; border: 1px solid var(--wp-line);
+    border-radius: 10px; box-shadow: var(--wp-shadow); padding: 4px; min-width: 220px; display: none; }
+  .menu.open { display: block; }
+  .mitem { padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 12px; }
+  .mitem:hover { background: #eaf1ff; }
+  .mitem .msub { color: #94a3b8; font-size: 10px; }
+  .mitem.disabled { opacity: .45; cursor: not-allowed; }
+  .pghead { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
+  .pghead .ttl { flex: 1; min-width: 0; }
+  .pghead .ttl .u { font: 600 11px/1.4 var(--wp-mono); color: var(--wp-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pghead .ttl .h { font: 10px/1.4 var(--wp-mono); color: var(--wp-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pghead .n { font: 600 10px var(--wp-mono); background: #eaf1ff; color: var(--wp-accent-deep);
+    border-radius: 999px; padding: 1px 8px; }
+  .toast { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); background: #1e293b; color: #fff;
+    padding: 8px 16px; border-radius: 10px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 99; }
+  .toast.show { opacity: 1; }
+
+  /* ---- 原型切换条（不属于被评审的设计）---- */
+  #switcher { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 9999;
+    display: flex; align-items: center; gap: 4px; background: #111827; color: #f9fafb; padding: 6px 8px;
+    border-radius: 999px; box-shadow: 0 8px 30px rgba(0,0,0,.4); font: 600 12px var(--wp-font); }
+  #switcher button { background: #374151; color: #f9fafb; border-radius: 50%; width: 26px; height: 26px; padding: 0; }
+  #switcher button:hover { background: #4b5563; }
+  #switcher .vname { padding: 0 10px; min-width: 240px; text-align: center; }
+  #switcher .vname small { display: block; font-weight: 400; color: #9ca3af; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <h1>结算中心 <span class="pick-hl">Checkout</span></h1>
+  <div class="crumb">商城 / 购物车 / <b>结算中心</b></div>
+  <p>这是假页面，用来给面板一个真实的密度参照。橙色描边的元素是「已拾取」的元素。</p>
+  <div class="btn-row">
+    <button class="pri pick-hl" data-sel="#checkout .btn-row .pri">提交订单</button>
+    <button>继续购物</button>
+  </div>
+  <table>
+    <tr><th>商品</th><th>数量</th><th>金额</th></tr>
+    <tr><td>机械键盘</td><td>1</td><td>¥699</td></tr>
+    <tr><td><span class="pick-hl" data-sel="table tr:nth-of-type(3) td:first-child">USB-C 扩展坞</span></td><td>2</td><td>¥358</td></tr>
+  </table>
+  <p>合计：<code class="pick-hl" data-sel="#total">¥1,415</code>（含运费）</p>
+  <p>未连接 Broker 时也可以照常拾取和写备注 —— 这是硬约束，所有方案都必须保住「本页」路径。</p>
+</div>
+
+<!-- ================= 方案挂载点 ================= -->
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<div id="switcher">
+  <button id="prev" title="←">←</button>
+  <div class="vname" id="vname"></div>
+  <button id="next" title="→">→</button>
+</div>
+
+<script>
+'use strict';
+// ---------- 模拟数据：一袋跨 3 页的暂存 marker（provenance 齐全） ----------
+const bag = [
+  { id: 1, tabId: 11, origin: 'https://shop.example.com', url: 'https://shop.example.com/cart', title: '购物车 — Shop Example',
+    selector: '#cart .item:nth-of-type(2) .qty', textPreview: '数量 2', note: '数量改了没刷新合计，怀疑 subtotal 没有重算', ts: Date.now() - 1000 * 60 * 12 },
+  { id: 2, tabId: 11, origin: 'https://shop.example.com', url: 'https://shop.example.com/cart', title: '购物车 — Shop Example',
+    selector: '#cart-coupon input', textPreview: '优惠码输入框', note: '', ts: Date.now() - 1000 * 60 * 10 },
+  { id: 3, tabId: 12, origin: 'https://shop.example.com', url: 'https://shop.example.com/checkout', title: '结算中心 — Shop Example',
+    selector: '#total', textPreview: '¥1,415', note: '这个合计和购物车页对不上', ts: Date.now() - 1000 * 60 * 4 },
+  { id: 4, tabId: 13, origin: 'https://docs.example.com', url: 'https://docs.example.com/api/orders', title: 'Orders API — Docs',
+    selector: '#api-orders .field-stock', textPreview: 'stock: number', note: '下单后库存字段是即时扣还是延迟扣？', ts: Date.now() - 1000 * 60 * 2 },
+];
+// 本页（checkout）未提交拾取
+const localPicks = [
+  { selector: 'table tr:nth-of-type(3) td:first-child', textPreview: 'USB-C 扩展坞', note: '这行在 900px 下会溢出', ts: Date.now() - 1000 * 30 },
+  { selector: '#checkout .btn-row .pri', textPreview: '提交订单', note: '双击会重复下单吗', ts: Date.now() - 1000 * 20 },
+];
+
+let connected = true;   // 点状态胶囊切换，看灰化行为
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const host = (u) => { try { return new URL(u).host; } catch (e) { return u; } };
+const pageKey = (m) => m.url + '|' + m.title;
+const time = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+// 公共渲染碎片
+function itemHtml(m, opts) {
+  opts = opts || {};
+  return '<div class="item" data-id="' + m.id + '">' +
+    '<div class="psel">' + esc(m.selector) + '</div>' +
+    (m.textPreview ? '<div class="pprev">' + esc(m.textPreview) + '</div>' : '') +
+    '<textarea data-note placeholder="备注…">' + esc(m.note || '') + '</textarea>' +
+    '<div class="prow"><span class="pts">' + (opts.showPage ? esc(host(m.origin)) + ' · ' : '') + time(m.ts) + '</span>' +
+    '<button class="danger" data-del>删除</button></div></div>';
+}
+function bindListEvents(root, onChange) {
+  root.addEventListener('input', (e) => {
+    if (e.target.matches('[data-note]')) {
+      const m = bag.find((x) => x.id === +e.target.closest('.item').dataset.id);
+      if (m) m.note = e.target.value.trim();
+    }
+  });
+  root.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-del]');
+    if (del) {
+      const id = +del.closest('.item').dataset.id;
+      const i = bag.findIndex((x) => x.id === id);
+      if (i >= 0) { bag.splice(i, 1); onChange(); toast('已删除 1 条'); }
+    }
+    const pgDel = e.target.closest('[data-pg-del]');
+    if (pgDel) {
+      const key = pgDel.closest('[data-pgkey]').dataset.pgkey;
+      for (let i = bag.length - 1; i >= 0; i--) if (pageKey(bag[i]) === key) bag.splice(i, 1);
+      onChange(); toast('已删除整页');
+    }
+    const pgSend = e.target.closest('[data-pg-send]');
+    if (pgSend) {
+      const key = pgSend.closest('[data-pgkey]').dataset.pgkey;
+      for (let i = bag.length - 1; i >= 0; i--) if (pageKey(bag[i]) === key) bag.splice(i, 1);
+      onChange(); toast('已发送该页 provenance → 清空该页组');
+    }
+  });
+}
+function connPillHtml() {
+  return '<span class="conn ' + (connected ? 'on' : '') + '" data-conn title="点击切换连接状态（模拟）">' +
+    '<span class="dot"></span>' + (connected ? '已连接 broker' : '未连接') + '</span>';
+}
+function sendButtonsHtml(idSend, idCopy) {
+  return '<div class="srow">' + connPillHtml() +
+    '<span style="flex:1"></span>' +
+    '<div style="position:relative" class="split">' +
+      '<button class="primary" id="' + idSend + '"' + (connected ? '' : ' disabled') + '>统一发送</button>' +
+      '<button class="primary more" id="' + idSend + '-more">▾</button>' +
+      '<div class="menu" id="' + idSend + '-menu">' +
+        '<div class="mitem" id="' + idCopy + '">复制 Prompt<div class="msub">本地剪贴板 · 离线可用</div></div>' +
+        '<div class="mitem' + (connected ? '' : ' disabled') + '">暂存到 Broker<div class="msub">进 staging bag · 需要连接</div></div>' +
+      '</div>' +
+    '</div></div>';
+}
+function bindSendMenu(root, after) {
+  const more = root.querySelector('[id$="-more"]');
+  const menu = root.querySelector('[id$="-menu"]');
+  more.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
+  document.addEventListener('click', () => menu.classList.remove('open'));
+  menu.addEventListener('click', (e) => {
+    const it = e.target.closest('.mitem');
+    if (!it || it.classList.contains('disabled')) return;
+    menu.classList.remove('open');
+    if (it.id.endsWith('-copy')) { toast('Prompt 已复制（含每页 provenance）'); return; }
+    bag.length = 0; after(); toast('已统一发送（按页 provenance）→ 袋已清空');
+  });
+  const conn = root.querySelector('[data-conn]');
+  conn.addEventListener('click', () => { connected = !connected; after(); });
+}
+
+// ========== 方案 A —— 顶栏两档（本页 | 暂存袋），档内布局 ≈ 现有面板 ==========
+function VariantA(root) {
+  root.innerHTML =
+    '<div class="panel"><div class="ph"><b>标注</b><span class="cnt2" id="a-count"></span><button class="ghost" id="a-close">✕</button></div>' +
+    '<div style="display:flex;border-bottom:1px solid var(--wp-line);background:var(--wp-soft);padding:0 8px">' +
+      '<button class="ghost" id="a-tab-local" style="border-radius:8px 8px 0 0;background:none;color:var(--wp-muted);box-shadow:none">本页 <span class="n"></span></button>' +
+      '<button class="ghost" id="a-tab-bag" style="border-radius:8px 8px 0 0;background:none;color:var(--wp-muted)">暂存袋 <span class="n"></span></button>' +
+    '</div>' +
+    '<div class="plist" id="a-list"></div>' +
+    '<div class="sendbox">' +
+      '<div class="lbl">发送</div>' +
+      '<textarea placeholder="要一起发给 agent 的说明…"></textarea>' +
+      sendButtonsHtml('a-send', 'a-copy') +
+    '</div></div>';
+  let tab = 'local';
+  const list = root.querySelector('#a-list');
+  function render() {
+    const badge = (el, n) => { el.querySelector('.n').textContent = n; el.style.fontWeight = n ? 700 : 400;
+      el.style.color = el.dataset.on === '1' ? 'var(--wp-accent-deep)' : 'var(--wp-muted)';
+      el.style.borderBottom = el.dataset.on === '1' ? '2px solid var(--wp-accent)' : '2px solid transparent'; };
+    const bl = root.querySelector('#a-tab-local'), bb = root.querySelector('#a-tab-bag');
+    bl.dataset.on = tab === 'local' ? '1' : '0'; bb.dataset.on = tab === 'bag' ? '1' : '0';
+    badge(bl, localPicks.length); badge(bb, bag.length);
+    root.querySelector('#a-count').textContent = '本页 ' + localPicks.length + ' · 袋 ' + bag.length;
+    if (tab === 'local') {
+      list.innerHTML = localPicks.length
+        ? localPicks.map((p, i) => itemHtml(p).replace('data-id="' + p.id + '"', 'data-id="' + p.id + '" data-local="' + i + '"')).join('')
+        : '<div class="empty">本页还没有拾取 · ⇧⌥P 开始</div>';
+    } else {
+      const groups = new Map();
+      bag.forEach((m) => { if (!groups.has(pageKey(m))) groups.set(pageKey(m), []); groups.get(pageKey(m)).push(m); });
+      list.innerHTML = groups.size
+        ? [...groups.entries()].map(([key, ms]) =>
+            '<div data-pgkey="' + esc(key) + '"><div class="pghead"><div class="ttl">' +
+            '<div class="u">' + esc(ms[0].title) + '</div><div class="h">' + esc(host(ms[0].origin)) + ' · tab ' + ms[0].tabId + '</div></div>' +
+            '<span class="n">' + ms.length + '</span>' +
+            '<button class="danger" data-pg-send>发送本页</button><button class="danger" data-pg-del>删页</button></div>' +
+            ms.map((m) => itemHtml(m)).join('') + '</div>').join('')
+        : '<div class="empty">暂存袋是空的 · 在已连页面点 ▾ → 暂存到 Broker</div>';
+    }
+  }
+  root.querySelector('#a-tab-local').onclick = () => { tab = 'local'; render(); };
+  root.querySelector('#a-tab-bag').onclick = () => { tab = 'bag'; render(); };
+  root.querySelector('#a-close').onclick = () => toast('（原型：关闭面板）');
+  bindListEvents(list, render);
+  bindSendMenu(root, render);
+  render();
+}
+
+// ========== 方案 B —— 双抽屉：本页面板不变，暂存袋是右侧独立 inbox（按页折叠） ==========
+function VariantB(root) {
+  root.innerHTML =
+    // 主面板 = 现状，几乎不动
+    '<div class="panel" style="width:340px"><div class="ph"><b>本页标注</b><span class="cnt2" id="b-count"></span>' +
+      '<button class="ghost" id="b-inbox-toggle">袋 ▾</button><button class="ghost" id="b-close">✕</button></div>' +
+    '<div class="plist" id="b-list"></div>' +
+    '<div class="sendbox">' +
+      '<div class="lbl">发送</div><textarea placeholder="要一起发给 agent 的说明…"></textarea>' +
+      sendButtonsHtml('b-send', 'b-copy') +
+    '</div></div>' +
+    // 暂存袋抽屉：贴在主面板左侧，按页折叠成手风琴；带自己的 prompt + peer 选择
+    '<div class="panel" id="b-inbox" style="right:372px;width:330px;display:none">' +
+      '<div class="ph"><b>暂存袋</b><span class="cnt2" id="b-icount"></span><button class="ghost" id="b-inbox-close">✕</button></div>' +
+      '<div class="plist" id="b-ilist"></div>' +
+      '<div class="sendbox">' +
+        '<div class="lbl">整袋发送 <span style="font-weight:400">（多页 provenance 一起写进 handoff）</span></div>' +
+        '<textarea id="b-iprompt" placeholder="要一起发给 agent 的说明…"></textarea>' +
+        '<div style="display:flex;gap:6px;align-items:center">' +
+          '<span class="lbl">Peer</span>' +
+          '<div style="position:relative;flex:1;min-width:0">' +
+            '<input id="b-peer" placeholder="选择 peer…" autocomplete="off" spellcheck="false" />' +
+            '<div class="menu" id="b-peer-drop" style="left:0;right:auto;width:100%;min-width:0"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="srow">' + connPillHtml().replace('data-conn', 'data-conn2') +
+          '<span style="flex:1"></span>' +
+          '<button class="primary" id="b-isend">统一发送</button>' +
+          '<button class="ghost" id="b-icopy">复制 Prompt</button>' +
+        '</div></div></div>';
+  const list = root.querySelector('#b-list'), inbox = root.querySelector('#b-inbox'), ilist = root.querySelector('#b-ilist');
+  const open = { pages: new Set() };
+  const PEERS = [
+    { name: 'agent-grok', sub: 'mesh · grok-bot-vm' },
+    { name: 'yama-bot', sub: '本机 · spool' },
+    { name: 'agent-local', sub: '本机 · session' },
+  ];
+  // peer 下拉：focus/type-to-filter/点选，形态对齐现有 target combo
+  const peerInput = root.querySelector('#b-peer'), peerDrop = root.querySelector('#b-peer-drop');
+  let peerSel = '';
+  function renderPeers(q) {
+    const f = (q || '').trim().toLowerCase();
+    const hits = PEERS.filter((p) => !f || (p.name + ' ' + p.sub).toLowerCase().includes(f));
+    peerDrop.innerHTML = hits.length
+      ? hits.map((p) => '<div class="mitem" data-peer="' + esc(p.name) + '"><b>' + esc(p.name) + '</b><div class="msub">' + esc(p.sub) + '</div></div>').join('')
+      : '<div style="padding:10px;text-align:center;color:#94a3b8;font-size:12px">无匹配</div>';
+  }
+  peerInput.addEventListener('focus', () => {
+    if (!connected) return;
+    renderPeers(peerInput.value === peerSel ? '' : peerInput.value);
+    peerDrop.classList.add('open');
+  });
+  peerInput.addEventListener('input', () => { peerSel = ''; renderPeers(peerInput.value); peerDrop.classList.add('open'); });
+  peerDrop.addEventListener('click', (e) => {
+    const it = e.target.closest('[data-peer]');
+    if (!it) return;
+    peerSel = it.dataset.peer;
+    peerInput.value = peerSel;
+    peerDrop.classList.remove('open');
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#b-peer') && !e.target.closest('#b-peer-drop')) peerDrop.classList.remove('open');
+  });
+  function render() {
+    root.querySelector('#b-count').textContent = localPicks.length + ' 条';
+    list.innerHTML = localPicks.length ? localPicks.map((p) => itemHtml(p)).join('') : '<div class="empty">本页还没有拾取 · ⇧⌥P 开始</div>';
+    const ip = root.querySelector('#b-iprompt'), isend = root.querySelector('#b-isend'), icopy = root.querySelector('#b-icopy');
+    if (!connected) {
+      // 未连 broker：袋数据拉不到 —— 入口按钮整个藏掉（含已打开的抽屉），面板回到纯本页形态
+      root.querySelector('#b-inbox-toggle').style.display = 'none';
+      inbox.style.display = 'none';
+      root.querySelector('#b-icount').textContent = '未连接';
+      ilist.innerHTML = '<div class="empty">未连接 broker · 暂存袋不可用<br><span style="font-size:11px">连上后这里会拉取暂存的标注；本页面板不受影响</span></div>';
+      ip.disabled = true; peerInput.disabled = true; isend.disabled = true; icopy.disabled = true;
+      return;
+    }
+    root.querySelector('#b-inbox-toggle').style.display = '';
+    ip.disabled = false; peerInput.disabled = false; icopy.disabled = false;
+    const groups = new Map();
+    bag.forEach((m) => { if (!groups.has(pageKey(m))) groups.set(pageKey(m), []); groups.get(pageKey(m)).push(m); });
+    root.querySelector('#b-icount').textContent = groups.size + ' 页 · ' + bag.length + ' 条';
+    ilist.innerHTML = groups.size
+      ? [...groups.entries()].map(([key, ms]) => {
+          const isOpen = open.pages.has(key);
+          return '<div data-pgkey="' + esc(key) + '" style="border:1px solid var(--wp-line);border-radius:10px;margin-bottom:8px;overflow:hidden">' +
+            '<div class="pghead" style="margin:0;padding:8px;background:var(--wp-soft);cursor:pointer" data-pg-toggle>' +
+              '<div class="ttl"><div class="u">' + esc(ms[0].title) + '</div>' +
+              '<div class="h">' + esc(host(ms[0].origin)) + ' · tab ' + ms[0].tabId + '</div></div>' +
+              '<span class="n">' + ms.length + '</span><span style="color:var(--wp-muted);font-size:11px">' + (isOpen ? '▾' : '▸') + '</span></div>' +
+            (isOpen
+              ? '<div style="padding:8px">' + ms.map((m) => itemHtml(m)).join('') +
+                '<div style="display:flex;gap:6px;justify-content:flex-end">' +
+                '<button class="danger" data-pg-send>发送本页</button><button class="danger" data-pg-del>删页</button></div></div>'
+              : '') + '</div>';
+        }).join('')
+      : '<div class="empty">暂存袋是空的</div>';
+  }
+  root.querySelector('#b-inbox-toggle').onclick = () => {
+    inbox.style.display = inbox.style.display === 'none' ? 'flex' : 'none';
+    render();
+  };
+  root.querySelector('#b-inbox-close').onclick = () => { inbox.style.display = 'none'; };
+  root.querySelector('#b-close').onclick = () => toast('（原型：关闭面板）');
+  ilist.addEventListener('click', (e) => {
+    const tg = e.target.closest('[data-pg-toggle]');
+    if (tg) {
+      const key = tg.closest('[data-pgkey]').dataset.pgkey;
+      open.pages.has(key) ? open.pages.delete(key) : open.pages.add(key);
+      render();
+    }
+  });
+  bindListEvents(list, render);
+  bindListEvents(ilist, render);
+  bindSendMenu(root, render);
+  root.querySelector('#b-isend').onclick = () => {
+    if (!connected) return;
+    bag.length = 0; render(); toast('已统一发送（按页 provenance）→ 袋已清空');
+  };
+  root.querySelector('#b-icopy').onclick = () => toast('Prompt 已复制（含每页 provenance）');
+  root.querySelector('[data-conn2]').addEventListener('click', () => { connected = !connected; render(); });
+  render();
+}
+
+// ========== 方案 C —— 单一时间线，无分档：暂存条目带 provenance 徽标内联混排，来源筛选 ==========
+function VariantC(root) {
+  root.innerHTML =
+    '<div class="panel" style="width:370px"><div class="ph"><b>标注</b><span class="cnt2" id="c-count"></span><button class="ghost" id="c-close">✕</button></div>' +
+    '<div style="display:flex;gap:6px;padding:8px 10px 0;flex-wrap:wrap" id="c-filters"></div>' +
+    '<div class="plist" id="c-list"></div>' +
+    '<div class="sendbox">' +
+      '<div class="lbl">发送 <span style="font-weight:400" id="c-scope"></span></div>' +
+      '<textarea placeholder="要一起发给 agent 的说明…"></textarea>' +
+      sendButtonsHtml('c-send', 'c-copy') +
+    '</div></div>';
+  let filter = 'all';   // all | local | origin:…
+  const list = root.querySelector('#c-list');
+  const LOCAL = 'local';
+  function render() {
+    const origins = [...new Set(bag.map((m) => host(m.origin)))];
+    const chips = [['all', '全部'], [LOCAL, '本页 (' + localPicks.length + ')']]
+      .concat(origins.map((o) => ['origin:' + o, host(o) + ' (' + bag.filter((m) => host(m.origin) === o).length + ')']));
+    root.querySelector('#c-filters').innerHTML = chips.map(([k, label]) =>
+      '<button class="ghost" data-f="' + esc(k) + '" style="padding:3px 10px;font-size:11px;' +
+      (filter === k ? 'background:#eaf1ff;color:var(--wp-accent-deep);font-weight:700' : '') + '">' + esc(label) + '</button>').join('');
+    let items = [];
+    if (filter === 'all') items = localPicks.map((p) => ({ ...p, _local: true })).concat(bag.map((m) => ({ ...m })));
+    else if (filter === LOCAL) items = localPicks.map((p) => ({ ...p, _local: true }));
+    else items = bag.filter((m) => host(m.origin) === filter.slice(7));
+    items.sort((a, b) => b.ts - a.ts);
+    root.querySelector('#c-count').textContent = '本页 ' + localPicks.length + ' · 袋 ' + bag.length;
+    root.querySelector('#c-scope').textContent = filter === 'all'
+      ? '（' + items.length + ' 条 · 含 ' + new Set(items.filter((i) => !i._local).map(pageKey)).size + ' 页 provenance）' : '';
+    list.innerHTML = items.length ? items.map((it) => {
+      if (it._local) return itemHtml(it).replace('class="item"', 'class="item" style="border-color:#fde68a;background:#fffdf5" data-local="1"')
+        .replace('<div class="psel">', '<div class="psel"></div><div class="pts" style="margin:2px 0;color:#b45309">本页 · 未提交</div><div class="psel">');
+      return itemHtml(it, { showPage: true }).replace('class="item"', 'class="item" data-id="' + it.id + '"')
+        .replace('<div class="psel">', '<div class="pts" style="margin:2px 0">' + esc(it.title) + ' · tab ' + it.tabId + '</div><div class="psel">');
+    }).join('') : '<div class="empty">这个筛选下没有条目</div>';
+  }
+  root.querySelector('#c-filters').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-f]');
+    if (b) { filter = b.dataset.f; render(); }
+  });
+  root.querySelector('#c-close').onclick = () => toast('（原型：关闭面板）');
+  bindListEvents(list, render);
+  bindSendMenu(root, render);
+  render();
+}
+
+// ---------- 切换条（原型基础设施，不属于被评审设计） ----------
+const VARIANTS = [
+  ['A', '顶栏两档', '本页 | 暂存袋 tab，档内沿用现有面板布局；改动最小'],
+  ['B', '双抽屉', '本页面板不动，暂存袋是独立 inbox（按页手风琴）；两套路径视觉分离最彻底'],
+  ['C', '单一时间线', '无分档，全部条目按时间混排 + 来源筛选 chips；最轻，但本页/跨页的界线变模糊'],
+];
+let current = new URLSearchParams(location.search).get('variant') || 'A';
+if (!VARIANTS.some(([k]) => k === current)) current = 'A';
+function setVariant(v) {
+  current = v;
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  ({ A: VariantA, B: VariantB, C: VariantC })[v](app);
+  const [k, name, desc] = VARIANTS.find(([kk]) => kk === v);
+  document.getElementById('vname').innerHTML = k + ' — ' + name + '<small>' + desc + '</small>';
+  const u = new URL(location); u.searchParams.set('variant', v);
+  history.replaceState(null, '', u);
+}
+document.getElementById('prev').onclick = () => cycle(-1);
+document.getElementById('next').onclick = () => cycle(1);
+function cycle(d) {
+  const i = VARIANTS.findIndex(([k]) => k === current);
+  setVariant(VARIANTS[(i + d + VARIANTS.length) % VARIANTS.length][0]);
+}
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea') || e.target.isContentEditable) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(1);
+});
+setVariant(current);
+</script>
+</body>
+</html>

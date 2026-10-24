@@ -20,7 +20,7 @@ function copyText(text) {
 
 export function initSend(ctx) {
   const { els, toast } = ctx;
-  const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elConn, elConnText, elSendOffline } = els;
+  const { elPrompt, elSend, elClear, elSendGroup, elSendMore, elSendMenu, elCopyPrompt, elStage, elConn, elConnText, elSendOffline } = els;
   const conn = ctx.conn;
 
   // No broker? Compose the same document here in the tab from data we already
@@ -105,6 +105,27 @@ export function initSend(ctx) {
   elCopyPrompt.addEventListener('click', copyHandoffPrompt);
   if (elSendOffline) elSendOffline.addEventListener('click', copyHandoffPrompt);
   ctx.copyHandoffPrompt = copyHandoffPrompt;
+
+  // 暂存到 broker：本页直发路径之外的第二条显式路径（硬约束：不改变本页默认行为，
+  // 未连接时菜单项灰掉——袋在 broker 上，离线暂存无从谈起）。
+  async function stageToBroker() {
+    ctx.closeSendMenu();
+    if (conn.getState() !== 'on') { toast(t('bag.stageFailed', { detail: t('conn.notConnected') })); return; }
+    const b = loadBatch();
+    if (!b.length) { toast(t('send.needContent')); return; }
+    let ok = 0;
+    for (const pick of b) {
+      const res = await conn.stagePick(pick);
+      if (res.ok) ok++;
+      else { toast(t('bag.stageFailed', { detail: res.code + (res.message ? ' — ' + res.message : '') })); return; }
+    }
+    toast(t('bag.staged', { n: ok }));
+    // 入袋后默认清空本页（开放问题的拍板：不保留副本，避免双份）
+    ctx.clearBatch();
+    ctx.renderPanel();
+    if (ctx.refreshBag) void ctx.refreshBag();
+  }
+  elStage.addEventListener('click', stageToBroker);
   window.addEventListener('pointerdown', (e) => {
     if (!sendMenuOpen) return;
     const path = e.composedPath ? e.composedPath() : [];
@@ -136,8 +157,11 @@ export function initSend(ctx) {
     const busy = s === 'connecting';
     elSendGroup.style.display = linked || busy ? '' : 'none';
     elSend.disabled = !linked;
+    elStage.style.opacity = linked ? '' : '.45';
+    elStage.style.pointerEvents = linked ? '' : 'none';
     if (elSendOffline) elSendOffline.hidden = linked || busy;
     if (!linked) closeSendMenu();
+    if (ctx.renderBagAffordance) ctx.renderBagAffordance(s);
   }
   ctx.renderSendAffordance = renderSendAffordance;
 

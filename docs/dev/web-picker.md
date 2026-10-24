@@ -46,7 +46,12 @@ page side:
   Protocol constants come from the shared `wire.ts` (also imported by
   `broker-main.ts`), so the two ends cannot drift. The hello tab id is
   persisted per page (`pi.wp.tabId` in sessionStorage) so the broker routes
-  follow-up `page.request`s back to the SAME tab across reloads.
+  follow-up `page.request`s back to the SAME tab across reloads. Routing is
+  always explicit (ADR-0022): page-tool requires `--tab <tabId>` (HTTP body
+  `tabId`), misses answer `missing_tab` (no tabId given) /
+  `tab_unreachable` (page closed) — the previous latest-tab guess and the
+  broadcast fallback are gone. Agents stop and ask the human on
+  `tab_unreachable`; only connection-layer `timeout`s are retryable.
 
 Wire protocol: **v0, localhost-trust (no token)**. Every frame carries
 `{v, type}`; every request gets exactly one reply. The userscript builds all
@@ -55,10 +60,13 @@ shapes below match `mock-broker.mjs`, `.pi/wayfinder/prototypes/`).
 
 | Direction | Frame | Shape |
 |-----------|-------|-------|
-| page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` |
+| page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` → `ack{result:{handoff_id, doc, routedTabId?}}`（ADR-0022：ack 里的 routedTabId 是后续 page-tool `--tab` 的值） |
 | page → broker | `annotation.compose` | `{id, page, picks, prompt, target?}` → `ack{result:{prompt:<handoff doc>}}`（只渲染，不落盘不投递） |
+| page → broker | `annotation.stage` | `{id, pick, page:{tabId, origin, url, title, ts}}` → `ack{result:{id, count}}`（入袋；broker 分配 id，不去重） |
+| page → broker | `bag.list` | `{id}` → `ack{result:{items:[StagedMarker]}}`（全量快照，重连重建的唯一来源） |
+| page → broker | `bag.submit` | `{id, prompt, target:{name}}` → `ack{result:{handoff_id, doc}}`；渲染为每页一节的 handoff（节头带 tabId/url/title），发送即清袋，失败保袋 |
 | page → broker | `targets.list` | `{id}` |
-| broker → page | `page.request` | `{id, handoff_id, from, tool:{op, params?}, timeoutMs}` |
+| broker → page | `page.request` | `{id, handoff_id, from, tool:{op, params?}, timeoutMs}` — ADR-0022：定向到显式 tabId，无广播 |
 | page → broker | `page.response` | `{id, ok:true, text}` / `{id, ok:false, error}` |
 
 ---
@@ -196,7 +204,7 @@ oracle is needed.
    `node pi/agent/extensions/xfer/broker-main.ts page-tool <session-name> page.info`
    → the broker prints the result JSON (`url`, `title`, `viewport`, …). Try
    `dom.query '{"selector":"a","maxCount":3}'` or `console.logs`. The broker log
-   shows `[page.request r… ] → 1 tab(s): …` and `[page.response r…] ok=true`.
+   shows `[page.request r… ] → tab <id>: …` and `[page.response r…] ok=true`.
    A timeout (default 30s, `--timeout-ms` override) or no connected tabs exits 1
    with the error on stderr.
 
@@ -258,3 +266,31 @@ Nothing here tries to bypass a site's policy; the picker adapts to it.
 > (`dom.click` / `dom.setValue`) additionally refuse targets inside the
 > picker's own overlay host, and only run when the origin has page-write
 > authorization (连接设置 → 「允许 agent 操作本页」).
+
+---
+
+## Staging bag (cross-page staging)
+
+The note panel sends *this page's* picks. The staging bag is the second,
+explicit path: while the broker link is up, ▾ → 「暂存到 broker」 moves the
+page's picks into a broker-held bag with full Provenance (tabId, origin, url,
+title, time — glossary: **Bag**, **Staged marker**, **Provenance**). Do it on
+several pages, then send the whole bag from any of them.
+
+- **Entry & drawer** — the panel header shows 「暂存袋 ▾」 only while
+  connected (the bag is broker state; an offline entry would be a lie).
+  The drawer lists the bag grouped by page (url+title accordion, each page
+  header carrying its tabId) with its own prompt textarea, target combo and
+  发送整袋 button. The note panel itself is untouched — the two paths stay
+  visually separate.
+- **Lifecycle** — one default bag, in memory only (lost on broker restart;
+  every entry carries provenance, restaging is cheap). `bag.submit` consumes
+  the bag: it clears on success and is kept on failure (retry the submit).
+  No dedup: staging the same element twice creates two entries.
+- **Doc shape** — `bag.submit` renders one handoff with a `## Page:` section
+  per page (url/origin/tabId header, that page's picks inside), plus a
+  Routing note telling the agent to take `--tab` per section and to stop and
+  ask the human on `tab_unreachable` (skills/xfer has the full rule).
+- **v1 limits** — bag entries cannot be edited or deleted from the picker
+  (broker-owned; prune by restaging or just send). Copy-prompt only ever
+  covers the local page's picks, never the bag.

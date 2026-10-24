@@ -108,6 +108,29 @@ scripts/xfer mesh down --name <my-node-name>
 
 This only removes the **mesh** half: the local socket and the inbox are untouched, so local peers keep working. It is the same destroy the admin page's "mesh down" button performs.
 
+## Web picker follow-ups (page-tool)
+
+A web-picker handoff's follow-up channel is the broker CLI. Every call must
+name its tab explicitly (ADR-0022 — the tabId is in the handoff's page
+sections / the submit ack's `routedTabId`):
+
+```sh
+node <broker-main.ts path> page-tool <target> <op> [paramsJSON] --tab <tabId>
+```
+
+- **`missing_tab`** — you called without `--tab`. Read the tabId from the
+  handoff and pass it; do not guess.
+- **`tab_unreachable`** — that page is closed or the picker disconnected.
+  **Stop and ask the human** to reopen the page (title/url are in the
+  handoff) or reconnect the picker. Do not retry: a page-lifetime tab id
+  never comes back on its own.
+- Distinguish this from **connection-layer failures** (`timeout` right after
+  a reload): those recover by themselves within seconds — wait and retry ≤3
+  times is fine there. Only a *routing* failure is a HITL stop.
+- A **staging-bag handoff** covers several pages: each "## Page:" section
+  carries its own `tabId`. Per-page follow-ups take the tabId from that
+  section — staged markers may come from pages other than the sender's.
+
 ## Guardrails
 
 - **`inbox take` is destructive.** `list` first, never take on speculation.

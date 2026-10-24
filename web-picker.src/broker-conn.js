@@ -25,8 +25,8 @@
 import { GM_BROKER, DEFAULT_BROKER_URL } from './constants.js';
 import { t } from './i18n.js';
 import {
-  PROTOCOL,
   frameHello, frameSubmit, frameCompose, frameTargetsList,
+  frameStage, frameBagList, frameBagSubmit,
 } from './protocol.js';
 
 // 指数退避序列（ms）：1s → 4s → 16s → 60s（封顶）
@@ -372,6 +372,42 @@ export function createBrokerConn(deps) {
       }, 5000);
     });
   }
+  // staging bag（跨页暂存）：三个请求都要求已连接——未连接时袋在 broker 上不可达，
+  // UI 侧以隐藏入口表达这一点（B 方案决策：袋入口随连接显隐）。
+  function stagePick(pick) {
+    return new Promise((resolve) => {
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
+      const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pending.set(id, { kind: 'stage', resolve });
+      if (!sendFrame(frameStage(id, pick))) { pending.delete(id); resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
+      setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); } }, 10000);
+    });
+  }
+
+  function requestBagList() {
+    return new Promise((resolve) => {
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', items: [] }); return; }
+      const id = 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pending.set(id, { kind: 'baglist', resolve });
+      if (!sendFrame(frameBagList(id))) { pending.delete(id); resolve({ ok: false, code: 'not_connected', items: [] }); return; }
+      setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', items: [] }); } }, 10000);
+    });
+  }
+
+  function submitBag(prompt, targetName) {
+    return new Promise((resolve) => {
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
+      const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pending.set(id, { kind: 'bagsubmit', resolve });
+      const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
+      if (!sendFrame(frameBagSubmit(id, promptText, targetName))) {
+        pending.delete(id);
+        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
+        return;
+      }
+      setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); } }, 10000);
+    });
+  }
 
   return {
     brokerUrl,
@@ -386,5 +422,8 @@ export function createBrokerConn(deps) {
     submitToAgent,
     requestCompose,
     requestTargets,
+    stagePick,
+    requestBagList,
+    submitBag,
   };
 }

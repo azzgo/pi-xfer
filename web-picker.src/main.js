@@ -16,6 +16,7 @@ import { initPanel } from './ui/panel.js';
 import { initPick } from './ui/pick.js';
 import { initCombo } from './ui/combo.js';
 import { initSend } from './ui/send.js';
+import { initBag } from './ui/bag.js';
 import { initSettings } from './ui/settings.js';
 import { initFab } from './ui/fab.js';
 import { initHotkeys } from './ui/hotkeys.js';
@@ -66,6 +67,8 @@ if (!window.__PI_WEBPICKER__) {
     initPick(ctx);
     initCombo(ctx);
     initSend(ctx);
+    initBag(ctx);          // 暂存袋抽屉：在 send 之后（依赖 conn），在 fab 之前（bag entry 显隐）
+    ctx.setBagEntry(ctx.els.elBagEntry);
     initSettings(ctx);
     initFab(ctx);
     ctx.consoleRing = consoleRing;   // record stop 时按窗口切片用
