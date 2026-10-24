@@ -358,6 +358,9 @@ var WIRE = {
   KIND_COMPOSE: "annotation.compose",
   KIND_TARGETS_LIST: "targets.list",
   KIND_TARGETS_RESULT: "targets.result",
+  KIND_STAGE: "annotation.stage",
+  KIND_BAG_LIST: "bag.list",
+  KIND_BAG_SUBMIT: "bag.submit",
   KIND_PAGE_REQUEST: "page.request",
   KIND_PAGE_RESPONSE: "page.response",
   NS_LOCAL: "local"
@@ -391,7 +394,9 @@ var ERR = {
   INVALID_PAYLOAD: "invalid_payload",
   BAD_TARGET: "bad_target",
   TARGET_NOT_FOUND: "target_not_found",
-  DELIVERY_FAILED: "delivery_failed",
+  TARGET_NOT_FOUND: "target_not_found",
+  MISSING_TAB: "missing_tab",
+  TAB_UNREACHABLE: "tab_unreachable",
   UNSUPPORTED_VERSION: "unsupported_version"
 };
 var FROM_WEB_PICKER = "web-picker";
@@ -517,6 +522,57 @@ function renderHandoffDoc({ msgId, prompt, page: page2, picks, record, fromTarge
     "",
     // Identity note: the sender is never a replyable xfer peer — point the
     // agent at the page-tool channel instead of an xfer_to that cannot succeed.
+    `from: ${FROM_WEB_PICKER} (browser userscript — not an agent, no reply socket; query the page via the Follow-up channel above)`,
+    `handoff_id: ${msgId}`
+  );
+  return lines.join("\n") + "\n";
+}
+function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath }) {
+  const pages = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    const key = `${item.url}|${item.title}`;
+    if (!pages.has(key)) pages.set(key, []);
+    pages.get(key).push(item);
+  }
+  const lines = [
+    "# Web annotation handoff (staging bag)",
+    "",
+    formatHandoffKind("task"),
+    "",
+    "## Request",
+    "",
+    prompt,
+    "",
+    field("pages", String(pages.size)),
+    field("markers", String(items.length)),
+    "",
+    "## Annotations (grouped by page)",
+    ""
+  ];
+  for (const [key, group] of pages) {
+    void key;
+    const first = group[0];
+    lines.push(
+      `## Page: ${first.title || first.url}`,
+      "",
+      field("url", first.url),
+      field("origin", first.origin),
+      field("tabId", first.tabId),
+      field("staged", `${group.length} marker(s)`),
+      ""
+    );
+    for (const item of group) lines.push(...pickSection(item.pick));
+  }
+  lines.push(
+    "## Routing",
+    "",
+    `Every page section above carries its tabId. Follow up with \`page-tool <target> <op> --tab <tabId>\` — tabIds come from this doc, never guessed. If a call answers tab_unreachable, that page is closed: do NOT retry — stop and ask the human to reopen the page (title/url above) or reconnect the picker. Staged markers may come from pages other than the one this bag was sent from.`,
+    ""
+  );
+  lines.push(...followUpSection(fromTarget, brokerCliPath), "");
+  lines.push(
+    "---",
+    "",
     `from: ${FROM_WEB_PICKER} (browser userscript — not an agent, no reply socket; query the page via the Follow-up channel above)`,
     `handoff_id: ${msgId}`
   );
@@ -1112,6 +1168,9 @@ var {
   KIND_ACK: WIRE_ACK,
   KIND_SUBMIT: WIRE_ANNOTATION_SUBMIT,
   KIND_COMPOSE: WIRE_ANNOTATION_COMPOSE,
+  KIND_STAGE: WIRE_STAGE,
+  KIND_BAG_LIST: WIRE_BAG_LIST,
+  KIND_BAG_SUBMIT: WIRE_BAG_SUBMIT,
   KIND_TARGETS_LIST: WIRE_TARGETS_LIST,
   KIND_TARGETS_RESULT: WIRE_TARGETS_RESULT,
   KIND_PAGE_REQUEST: WIRE_PAGE_REQUEST,
@@ -1125,6 +1184,8 @@ var {
   INVALID_PAYLOAD: ERR_INVALID_PAYLOAD,
   BAD_TARGET: ERR_BAD_TARGET,
   TARGET_NOT_FOUND: ERR_TARGET_NOT_FOUND,
+  MISSING_TAB: ERR_MISSING_TAB,
+  TAB_UNREACHABLE: ERR_TAB_UNREACHABLE,
   DELIVERY_FAILED: ERR_DELIVERY_FAILED,
   UNSUPPORTED_VERSION: ERR_UNSUPPORTED_VERSION
 } = ERR;
@@ -1341,9 +1402,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
   console.log(`[doc] ${doc} (${picks.length} picks${record ? ` + record ${record.id} (${record.events.length} events)` : ""} → local:${targetName})`);
   latestHandoffByTarget.set(targetName, msgId);
   const submittingTab = activeConns?.get(connection);
-  if (submittingTab && typeof submittingTab.id === "string" && submittingTab.id !== "") {
-    latestTabIdByTarget.set(targetName, submittingTab.id);
-  }
+  const routedTabId = submittingTab && typeof submittingTab.id === "string" ? submittingTab.id : void 0;
   void pushXferNotify(xferDir, targetName, {
     type: WIRE_XFER_NOTIFY,
     msg_id: msgId,
@@ -1351,7 +1410,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
     file: doc,
     summary: prompt.slice(0, 120)
   }).then(() => {
-    connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id, result: { handoff_id: msgId, doc } });
+    connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id, result: { handoff_id: msgId, doc, ...routedTabId !== void 0 ? { routedTabId } : {} } });
     console.log(`[xfer] delivered to ${targetName}`);
   }).catch((error) => {
     const code = error.code === ERR_TARGET_NOT_FOUND ? ERR_TARGET_NOT_FOUND : ERR_DELIVERY_FAILED;
@@ -1421,8 +1480,104 @@ async function handleTargetsList(connection, frame, xferDir) {
 }
 var DEFAULT_PAGE_TIMEOUT_MS = 3e4;
 var latestHandoffByTarget = /* @__PURE__ */ new Map();
-var latestTabIdByTarget = /* @__PURE__ */ new Map();
 var tabConns = null;
+var bag = [];
+var stageSeq = 0;
+function nextStageId() {
+  return `s${Date.now().toString(36)}${(stageSeq++).toString(36)}`;
+}
+function parseStagePayload(frame) {
+  const pick = frame.pick;
+  if (typeof pick !== "object" || pick === null || Array.isArray(pick)) return null;
+  const p = pick;
+  if (typeof p.selector !== "string" || p.selector === "") return null;
+  if (typeof p.xpath !== "string" || typeof p.rect !== "object" || p.rect === null) return null;
+  const page2 = typeof frame.page === "object" && frame.page !== null ? frame.page : {};
+  const tabId = typeof page2.tabId === "string" && page2.tabId !== "" ? page2.tabId : null;
+  if (tabId === null) return null;
+  return {
+    tabId,
+    origin: typeof page2.origin === "string" ? page2.origin : "",
+    url: typeof page2.url === "string" ? page2.url : "",
+    title: typeof page2.title === "string" ? page2.title : "",
+    pick,
+    ts: typeof page2.ts === "number" ? page2.ts : Date.now()
+  };
+}
+function handleAnnotationStage(connection, frame) {
+  const staged = parseStagePayload(frame);
+  if (staged === null) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "malformed stage: expected {pick:{selector,xpath,rect...}, page:{tabId,origin,url,title,ts}}");
+    return;
+  }
+  const entry = { id: nextStageId(), ...staged };
+  bag.push(entry);
+  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { id: entry.id, count: bag.length } });
+  console.log(`[bag] staged ${entry.id} [tab ${entry.tabId}] ${entry.pick.selector} (bag: ${bag.length})`);
+}
+function handleBagList(connection, frame) {
+  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { items: bag } });
+}
+function parseBagSubmitTarget(connection, frame) {
+  const prompt = frame.prompt;
+  const target = typeof frame.target === "object" && frame.target !== null ? frame.target : null;
+  const targetName = target?.name;
+  const missing = [];
+  if (typeof prompt !== "string" || prompt.trim() === "") missing.push("prompt");
+  if (typeof targetName !== "string" || targetName.trim() === "") missing.push("target.name");
+  const namespace = target?.namespace;
+  if (namespace !== void 0 && namespace !== WIRE_NAMESPACE_LOCAL) {
+    sendError(connection, frame, ERR_BAD_TARGET, `namespace "${String(namespace)}" out of scope (v0: local only)`);
+    return null;
+  }
+  if (missing.length > 0) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `missing or invalid: ${missing.join(", ")}`);
+    return null;
+  }
+  return { prompt, targetName };
+}
+function handleBagSubmit(connection, frame, xferDir) {
+  const parsed = parseBagSubmitTarget(connection, frame);
+  if (parsed === null) return;
+  const { prompt, targetName } = parsed;
+  if (bag.length === 0) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "bag is empty");
+    return;
+  }
+  const msgId = nextMsgId();
+  const doc = path6.join(os4.tmpdir(), `pi-xfer-${msgId}.md`);
+  let content;
+  try {
+    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path6.join(__dirname, "broker-main.ts") });
+  } catch (error) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed staged markers: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  try {
+    fs5.writeFileSync(doc, content, { mode: 384 });
+  } catch (error) {
+    sendError(connection, frame, ERR_DELIVERY_FAILED, `cannot write doc: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  console.log(`[bag] ${doc} (${bag.length} staged markers across ${new Set(bag.map((m) => m.tabId)).size} tab(s) → local:${targetName})`);
+  latestHandoffByTarget.set(targetName, msgId);
+  void pushXferNotify(xferDir, targetName, {
+    type: WIRE_XFER_NOTIFY,
+    msg_id: msgId,
+    from: FROM_WEB_PICKER,
+    file: doc,
+    summary: prompt.slice(0, 120)
+  }).then(() => {
+    bag = [];
+    connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { handoff_id: msgId, doc, count: bag.length } });
+    console.log(`[xfer] delivered to ${targetName}; bag cleared`);
+  }).catch((error) => {
+    const code = error.code === ERR_TARGET_NOT_FOUND ? ERR_TARGET_NOT_FOUND : ERR_DELIVERY_FAILED;
+    const message = error instanceof Error ? error.message : String(error);
+    sendError(connection, frame, code, message);
+    console.log(`[xfer] FAILED: ${message} (doc kept at ${doc}; bag kept)`);
+  });
+}
 var pendingPageRequests = /* @__PURE__ */ new Map();
 var MAX_PENDING_PAGE_REQUESTS = 128;
 function envPageTimeoutMs() {
@@ -1443,15 +1598,17 @@ function settlePageRequest(requestId, result) {
     }
   }
 }
-function routePageTool(target, tool, timeoutMs) {
-  const tabs = activeConns ? [...activeConns.keys()] : [];
-  if (tabs.length === 0) {
-    console.log(`[page.request] no tabs connected → no_tabs (target ${target})`);
+function routePageTool(target, tool, timeoutMs, tabId) {
+  if (tabId === void 0 || tabId === "") {
+    console.log(`[page.request] no tabId given → missing_tab (target ${target})`);
     return null;
   }
-  const lastTabId = latestTabIdByTarget.get(target);
-  const targeted = lastTabId !== void 0 && tabConns !== null && tabConns.has(lastTabId) && activeConns.has(tabConns.get(lastTabId));
-  const routed = targeted ? [tabConns.get(lastTabId)] : tabs;
+  const conn = tabConns?.get(tabId);
+  if (conn === void 0 || !activeConns?.has(conn)) {
+    console.log(`[page.request] tab ${tabId} not connected → tab_unreachable (target ${target})`);
+    return null;
+  }
+  const routed = [conn];
   const id = nextRequestId();
   const resolvedTimeout = timeoutMs ?? envPageTimeoutMs();
   const frame = {
@@ -1464,13 +1621,12 @@ function routePageTool(target, tool, timeoutMs) {
     timeoutMs: resolvedTimeout
   };
   let sent = 0;
-  for (const conn of routed) {
-    conn.send(frame);
+  for (const conn2 of routed) {
+    conn2.send(frame);
     sent++;
   }
-  const routedNote = routed.length === 1 && lastTabId !== void 0;
   console.log(
-    `[page.request ${id}] → ${sent} tab(s) ${routedNote ? `[tab ${lastTabId}]` : "(broadcast)"}: ${tool.op} ${JSON.stringify(tool.params ?? {})} (handoff ${frame.handoff_id}, timeout ${resolvedTimeout}ms)`
+    `[page.request ${id}] → tab ${tabId}: ${tool.op} ${JSON.stringify(tool.params ?? {})} (handoff ${frame.handoff_id}, timeout ${resolvedTimeout}ms)`
   );
   let resolve;
   const result = new Promise((res) => {
@@ -1492,9 +1648,12 @@ function awaitPageResult(requestId) {
   const entry = pendingPageRequests.get(requestId);
   return entry ? entry.result : Promise.resolve({ ok: false, error: "no_such_request" });
 }
-function runPageTool(target, tool, timeoutMs) {
-  const requestId = routePageTool(target, tool, timeoutMs);
-  return requestId === null ? Promise.resolve({ ok: false, error: "no_tabs" }) : awaitPageResult(requestId);
+function runPageTool(target, tool, timeoutMs, tabId) {
+  const requestId = routePageTool(target, tool, timeoutMs, tabId);
+  if (requestId === null) {
+    return Promise.resolve({ ok: false, error: tabId === void 0 || tabId === "" ? "missing_tab" : "tab_unreachable" });
+  }
+  return awaitPageResult(requestId);
 }
 function handlePageResponse(connection, frame) {
   const id = frameId(frame);
@@ -1549,9 +1708,13 @@ function handlePageToolHttp(request2, response) {
       return;
     }
     const record = body ?? {};
-    const { target, tool, timeoutMs } = record;
+    const { target, tool, tabId, timeoutMs } = record;
     if (typeof target !== "string" || target.trim() === "") {
       respond(400, { ok: false, error: "invalid_payload: missing or invalid target" });
+      return;
+    }
+    if (typeof tabId !== "string" || tabId.trim() === "") {
+      respond(400, { ok: false, error: ERR_MISSING_TAB });
       return;
     }
     if (typeof tool !== "object" || tool === null || Array.isArray(tool)) {
@@ -1575,7 +1738,7 @@ function handlePageToolHttp(request2, response) {
       op: toolRecord.op,
       ...toolRecord.params !== void 0 ? { params: toolRecord.params } : {}
     };
-    void runPageTool(target, pageTool, timeoutMs).then((result) => {
+    void runPageTool(target, pageTool, timeoutMs, tabId).then((result) => {
       if (result.ok) {
         let parsed;
         let parseOk = false;
@@ -1599,6 +1762,9 @@ function buildFrameHandlers(xferDir) {
   return {
     [WIRE_ANNOTATION_SUBMIT]: (connection, frame) => handleAnnotationSubmit(connection, frame, xferDir),
     [WIRE_ANNOTATION_COMPOSE]: (connection, frame) => handleAnnotationCompose(connection, frame),
+    [WIRE_STAGE]: (connection, frame) => handleAnnotationStage(connection, frame),
+    [WIRE_BAG_LIST]: (connection, frame) => handleBagList(connection, frame),
+    [WIRE_BAG_SUBMIT]: (connection, frame) => handleBagSubmit(connection, frame, xferDir),
     [WIRE_TARGETS_LIST]: (connection, frame) => handleTargetsList(connection, frame, xferDir),
     [WIRE_PAGE_REQUEST]: () => handleInboundPageRequest(),
     [WIRE_PAGE_RESPONSE]: (connection, frame) => handlePageResponse(connection, frame)
@@ -1632,7 +1798,9 @@ function handleFrame(connection, raw, conns) {
 async function startBroker(options) {
   const conns = /* @__PURE__ */ new Map();
   activeConns = conns;
+  activeConns = conns;
   tabConns = /* @__PURE__ */ new Map();
+  bag = [];
   frameHandlers = buildFrameHandlers(options.xferDir);
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   const server = http.createServer((request2, response) => {
@@ -1734,6 +1902,7 @@ function httpPostJson(port, pathname, body) {
 async function runPageToolCommand(args) {
   const positional = [];
   let timeoutMs;
+  let tabId;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--timeout-ms") {
@@ -1744,6 +1913,17 @@ async function runPageToolCommand(args) {
         process.exit(1);
       }
       timeoutMs = parsed;
+      i++;
+      continue;
+      continue;
+    }
+    if (arg === "--tab") {
+      const raw = args[i + 1];
+      if (raw === void 0 || raw.trim() === "") {
+        console.error("[broker] page-tool: --tab requires the tabId from the handoff/submit ack");
+        process.exit(1);
+      }
+      tabId = raw;
       i++;
       continue;
     }
@@ -1769,8 +1949,13 @@ async function runPageToolCommand(args) {
       process.exit(1);
     }
   }
+  if (tabId === void 0) {
+    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
+    console.error("  --tab is mandatory (ADR-0022): the tabId carried by the handoff / submit ack");
+    process.exit(1);
+  }
   if (typeof target !== "string" || target.trim() === "" || typeof op !== "string" || op.trim() === "") {
-    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] [--timeout-ms <ms>]");
+    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
     process.exit(1);
   }
   const xferDir = parseArgs(process.argv.slice(2)).xferDir;
@@ -1788,6 +1973,7 @@ async function runPageToolCommand(args) {
   try {
     response = await httpPostJson(port, "/page-tool", {
       target,
+      tabId,
       tool: { op, ...params !== void 0 ? { params } : {} },
       ...timeoutMs !== void 0 ? { timeoutMs } : {}
     });

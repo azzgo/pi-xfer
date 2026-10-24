@@ -26,6 +26,9 @@ export const WIRE = {
   KIND_COMPOSE: "annotation.compose",
   KIND_TARGETS_LIST: "targets.list",
   KIND_TARGETS_RESULT: "targets.result",
+  KIND_STAGE: "annotation.stage",
+  KIND_BAG_LIST: "bag.list",
+  KIND_BAG_SUBMIT: "bag.submit",
   KIND_PAGE_REQUEST: "page.request",
   KIND_PAGE_RESPONSE: "page.response",
   NS_LOCAL: "local",
@@ -68,7 +71,9 @@ export const ERR = {
   INVALID_PAYLOAD: "invalid_payload",
   BAD_TARGET: "bad_target",
   TARGET_NOT_FOUND: "target_not_found",
-  DELIVERY_FAILED: "delivery_failed",
+  TARGET_NOT_FOUND: "target_not_found",
+  MISSING_TAB: "missing_tab",
+  TAB_UNREACHABLE: "tab_unreachable",
   UNSUPPORTED_VERSION: "unsupported_version",
 } as const;
 

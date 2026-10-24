@@ -251,3 +251,78 @@ export function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarge
   );
   return lines.join("\n") + "\n";
 }
+
+/** Arguments for {@link renderBagHandoffDoc} (bag.submit, staging bag). */
+export interface RenderBagHandoffDocInput {
+  msgId: string;
+  prompt: string;
+  /** The whole Bag, already ordered by staging time; grouped by page here. */
+  items: ReadonlyArray<{
+    tabId: string;
+    origin: string;
+    url: string;
+    title: string;
+    pick: HandoffPick;
+    ts: number;
+  }>;
+  fromTarget?: string;
+  brokerCliPath?: string;
+}
+
+/**
+ * bag.submit's doc: one section per page (url+title), the page header carrying
+ * the Provenance the agent needs for `page-tool --tab` follow-ups. Follow-ups
+ * for a page whose tab is gone fail with tab_unreachable — the agent must stop
+ * and ask the human (ADR-0022); the routing note below says so up front.
+ */
+export function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath }: RenderBagHandoffDocInput): string {
+  const pages = new Map<string, typeof items>();
+  for (const item of items) {
+    const key = `${item.url}|${item.title}`;
+    if (!pages.has(key)) pages.set(key, []);
+    pages.get(key)!.push(item);
+  }
+  const lines: string[] = [
+    "# Web annotation handoff (staging bag)",
+    "",
+    formatHandoffKind("task"),
+    "",
+    "## Request",
+    "",
+    prompt,
+    "",
+    field("pages", String(pages.size)),
+    field("markers", String(items.length)),
+    "",
+    "## Annotations (grouped by page)",
+    "",
+  ];
+  for (const [key, group] of pages) {
+    void key;
+    const first = group[0]!;
+    lines.push(
+      `## Page: ${first.title || first.url}`,
+      "",
+      field("url", first.url),
+      field("origin", first.origin),
+      field("tabId", first.tabId),
+      field("staged", `${group.length} marker(s)`),
+      "",
+    );
+    for (const item of group) lines.push(...pickSection(item.pick));
+  }
+  lines.push(
+    "## Routing",
+    "",
+    `Every page section above carries its tabId. Follow up with \`page-tool <target> <op> --tab <tabId>\` — tabIds come from this doc, never guessed. If a call answers tab_unreachable, that page is closed: do NOT retry — stop and ask the human to reopen the page (title/url above) or reconnect the picker. Staged markers may come from pages other than the one this bag was sent from.`,
+    "",
+  );
+  lines.push(...followUpSection(fromTarget, brokerCliPath), "");
+  lines.push(
+    "---",
+    "",
+    `from: ${FROM_WEB_PICKER} (browser userscript — not an agent, no reply socket; query the page via the Follow-up channel above)`,
+    `handoff_id: ${msgId}`,
+  );
+  return lines.join("\n") + "\n";
+}

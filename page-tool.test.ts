@@ -222,8 +222,9 @@ function parseFrame(frame: DecodedFrame): Record<string, unknown> {
   return JSON.parse(frame.payload.toString("utf-8")) as Record<string, unknown>;
 }
 
-async function welcome(ws: RawWs): Promise<void> {
-  ws.sendText(JSON.stringify({ v: 0, type: "hello" }));
+/** Hello with a stable page-lifetime tabId (what the real userscript sends). */
+async function welcome(ws: RawWs, tabId?: string): Promise<void> {
+  ws.sendText(JSON.stringify({ v: 0, type: "hello", client: { tab: tabId !== undefined ? { id: tabId } : {} } }));
   const frame = await ws.next();
   assert.equal(frame.opcode, OPCODE_TEXT);
   const parsed = parseFrame(frame);
@@ -324,12 +325,12 @@ function writeStaleBrokerJson(xferDir: string): void {
 // ---------- tests ----------
 
 describe("page-tool flow", () => {
-  it("runPageTool: the tab gets page.request{tool}, its page.response resolves the result", async () => {
+  it("runPageTool: the named tab gets page.request{tool}, its page.response resolves the result", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
-    const pending = runPageTool("alpha", { op: "dom.query", params: { selector: ".btn" } }, 5_000);
+    const pending = runPageTool("alpha", { op: "dom.query", params: { selector: ".btn" } }, 5_000, "tab-1");
     const frame = await answerNextPageRequest(tab, { ok: true, text: '{"matched":2}' });
 
     assert.equal(frame.from, "alpha");
@@ -341,9 +342,9 @@ describe("page-tool flow", () => {
   it("runPageTool with a short timeout → {ok:false, error:'timeout'}, late responses ignored", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
-    const pending = runPageTool("alpha", { op: "page.info" }, 100);
+    const pending = runPageTool("alpha", { op: "page.info" }, 100, "tab-1");
     const frame = parseFrame(await tab.next());
     assert.equal(frame.type, "page.request");
     assert.equal(frame.timeoutMs, 100);
@@ -358,22 +359,47 @@ describe("page-tool flow", () => {
       },
     );
     await late;
-    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }, 1), { ok: false, error: "timeout" });
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }, 1, "tab-1"), { ok: false, error: "timeout" });
   });
 
-  it("no tabs connected → {ok:false, error:'no_tabs'} without creating a request", async () => {
-    await startTestBroker();
-    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }), { ok: false, error: "no_tabs" });
-  });
-
-  it("HTTP POST /page-tool → {ok:true, result:<parsed JSON>} once the tab answers", async () => {
+  it("runPageTool without tabId → {ok:false, error:'missing_tab'} without creating a request (ADR-0022)", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
+
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }), { ok: false, error: "missing_tab" });
+    await tab.next(200).then(
+      () => assert.fail("a frame reached the tab despite missing_tab"),
+      () => { /* silence expected */ },
+    );
+  });
+
+  it("runPageTool with an unknown tabId → {ok:false, error:'tab_unreachable'} without creating a request", async () => {
+    await startTestBroker();
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }, undefined, "tab-ghost"), { ok: false, error: "tab_unreachable" });
+  });
+
+  it("runPageTool with a disconnected tabId → tab_unreachable (the page is gone; no retry)", async () => {
+    const daemon = await startTestBroker();
+    const tab = await RawWs.connect(daemon.port);
+    await welcome(tab, "tab-1");
+    tab.sendClose();
+    // The broker prunes its tab registry when the close handshake completes —
+    // a probe request while the tab is still registered would block for the
+    // full default timeout, so wait for the socket to finish closing first.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }, undefined, "tab-1"), { ok: false, error: "tab_unreachable" });
+  });
+
+  it("HTTP POST /page-tool → {ok:true, result:<parsed JSON>} once the named tab answers", async () => {
+    const daemon = await startTestBroker();
+    const tab = await RawWs.connect(daemon.port);
+    await welcome(tab, "tab-1");
 
     const respond = answerNextPageRequest(tab, { ok: true, text: '{"url":"https://example.com","depth":3}' });
     const response = await httpPost(daemon.port, "/page-tool", {
       target: "alpha",
+      tabId: "tab-1",
       tool: { op: "framework.inspect", params: { selector: "#app" } },
       timeoutMs: 5_000,
     });
@@ -386,11 +412,12 @@ describe("page-tool flow", () => {
   it("HTTP POST /page-tool: non-JSON response text falls back to {ok:true, text}", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
     const respond = answerNextPageRequest(tab, { ok: true, text: "plain answer" });
     const response = await httpPost(daemon.port, "/page-tool", {
       target: "alpha",
+      tabId: "tab-1",
       tool: { op: "page.info" },
       timeoutMs: 5_000,
     });
@@ -402,11 +429,12 @@ describe("page-tool flow", () => {
   it("HTTP POST /page-tool: page error response passes through as {ok:false, error}", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
     const respond = answerNextPageRequest(tab, { ok: false, error: "unknown_op: dom.eval" });
     const response = await httpPost(daemon.port, "/page-tool", {
       target: "alpha",
+      tabId: "tab-1",
       tool: { op: "dom.eval" },
       timeoutMs: 5_000,
     });
@@ -415,15 +443,27 @@ describe("page-tool flow", () => {
     assert.deepEqual(response.data, { ok: false, error: "unknown_op: dom.eval" });
   });
 
+  it("HTTP POST /page-tool without tabId → {ok:false, error:'missing_tab'}", async () => {
+    const daemon = await startTestBroker();
+    const response = await httpPost(daemon.port, "/page-tool", { target: "alpha", tool: { op: "page.info" } });
+    assert.deepEqual(response.data, { ok: false, error: "missing_tab" });
+  });
+
+  it("HTTP POST /page-tool with an unreachable tabId → {ok:false, error:'tab_unreachable'}", async () => {
+    const daemon = await startTestBroker();
+    const response = await httpPost(daemon.port, "/page-tool", { target: "alpha", tabId: "tab-ghost", tool: { op: "page.info" } });
+    assert.deepEqual(response.data, { ok: false, error: "tab_unreachable" });
+  });
+
   it("HTTP POST /page-tool validation: malformed JSON / bad tool / bad params / bad timeoutMs → 400, oversized → 413", async () => {
     const daemon = await startTestBroker();
     const cases: Array<[unknown, RegExp]> = [
       ["{not json", /invalid_json/],
-      [{ tool: { op: "page.info" } }, /missing or invalid target/],
-      [{ target: "alpha" }, /tool must be an object/],
-      [{ target: "alpha", tool: { op: "  " } }, /tool\.op must be a non-empty string/],
-      [{ target: "alpha", tool: { op: "page.info", params: [1, 2] } }, /tool\.params must be an object/],
-      [{ target: "alpha", tool: { op: "page.info" }, timeoutMs: -5 }, /timeoutMs must be a positive number/],
+      [{ tool: { op: "page.info" }, tabId: "t" }, /missing or invalid target/],
+      [{ target: "alpha", tabId: "t" }, /tool must be an object/],
+      [{ target: "alpha", tabId: "t", tool: { op: "  " } }, /tool\.op must be a non-empty string/],
+      [{ target: "alpha", tabId: "t", tool: { op: "page.info", params: [1, 2] } }, /tool\.params must be an object/],
+      [{ target: "alpha", tabId: "t", tool: { op: "page.info" }, timeoutMs: -5 }, /timeoutMs must be a positive number/],
     ];
     for (const [body, expected] of cases) {
       const response = await httpPost(daemon.port, "/page-tool", body);
@@ -432,24 +472,19 @@ describe("page-tool flow", () => {
     }
     const oversized = await httpPost(daemon.port, "/page-tool", {
       target: "alpha",
+      tabId: "t",
       tool: { op: "page.info", params: { blob: "x".repeat(1024 * 1024 + 1) } },
     });
     assert.equal(oversized.status, 413);
     assert.equal(oversized.data.error, "payload_too_large");
   });
 
-  it("HTTP POST /page-tool with no tabs → {ok:false, error:'no_tabs'}", async () => {
-    const daemon = await startTestBroker();
-    const response = await httpPost(daemon.port, "/page-tool", { target: "alpha", tool: { op: "page.info" } });
-    assert.deepEqual(response.data, { ok: false, error: "no_tabs" });
-  });
-
   it("CLI page-tool: prints the result JSON and exits 0", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
-    const cli = runCli(daemon.xferDir, ["alpha", "dom.query", '{"selector":"button","maxCount":5}']);
+    const cli = runCli(daemon.xferDir, ["alpha", "dom.query", '{"selector":"button","maxCount":5}', "--tab", "tab-1"]);
     const frame = await answerNextPageRequest(tab, {
       ok: true,
       text: '{"matched":1,"elements":[{"tagName":"button"}]}',
@@ -463,18 +498,33 @@ describe("page-tool flow", () => {
     assert.equal((parsed.elements as unknown[]).length, 1);
   });
 
-  it("CLI page-tool with no tabs → error message and exit 1", async () => {
+  it("CLI page-tool without --tab → usage error and exit 1 (ADR-0022)", async () => {
     const daemon = await startTestBroker();
+    const tab = await RawWs.connect(daemon.port);
+    await welcome(tab, "tab-1");
+
     const { code, stdout, stderr } = await runCli(daemon.xferDir, ["alpha", "page.info"]);
     assert.equal(code, 1);
     assert.equal(stdout, "");
-    assert.match(stderr, /no_tabs/);
+    assert.match(stderr, /--tab is mandatory/);
+    await tab.next(200).then(
+      () => assert.fail("a frame reached the tab despite missing --tab"),
+      () => { /* silence expected */ },
+    );
+  });
+
+  it("CLI page-tool with an unreachable tab → error message and exit 1", async () => {
+    const daemon = await startTestBroker();
+    const { code, stdout, stderr } = await runCli(daemon.xferDir, ["alpha", "page.info", "--tab", "tab-ghost"]);
+    assert.equal(code, 1);
+    assert.equal(stdout, "");
+    assert.match(stderr, /tab_unreachable/);
   });
 
   it("CLI page-tool with no broker.json → friendly error and exit 1", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-page-tool-nojson-"));
     tmpDirs.push(dir);
-    const { code, stderr } = await runCli(dir, ["alpha", "page.info"]);
+    const { code, stderr } = await runCli(dir, ["alpha", "page.info", "--tab", "tab-1"]);
     assert.equal(code, 1);
     assert.match(stderr, /broker not running/);
   });
@@ -483,7 +533,7 @@ describe("page-tool flow", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-page-tool-stale-"));
     tmpDirs.push(dir);
     writeStaleBrokerJson(dir);
-    const { code, stderr } = await runCli(dir, ["alpha", "page.info"]);
+    const { code, stderr } = await runCli(dir, ["alpha", "page.info", "--tab", "tab-1"]);
     assert.equal(code, 1);
     assert.match(stderr, /broker unreachable/);
   });

@@ -214,6 +214,9 @@
     KIND_COMPOSE: "annotation.compose",
     KIND_TARGETS_LIST: "targets.list",
     KIND_TARGETS_RESULT: "targets.result",
+    KIND_STAGE: "annotation.stage",
+    KIND_BAG_LIST: "bag.list",
+    KIND_BAG_SUBMIT: "bag.submit",
     KIND_PAGE_REQUEST: "page.request",
     KIND_PAGE_RESPONSE: "page.response",
     NS_LOCAL: "local"

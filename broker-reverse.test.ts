@@ -1,8 +1,8 @@
 /**
  * broker-reverse.test.ts — integration tests for the xfer broker's reverse
- * tool channel: routePageTool → page.request{tool} broadcast to every
- * welcomed tab, first page.response wins, timeout synthesis, late responses
- * ignored, and the no-tabs short circuit.
+ * tool channel: routePageTool → page.request{tool} to ONE explicitly named
+ * tab (ADR-0022: tabId is mandatory, no broadcast), timeout synthesis, late
+ * responses ignored, and the missing/unreachable-tab short circuits.
  *
  * Harness mirrors broker-delivery.test.ts's RawWs (RFC 6455 by hand over a
  * raw net.Socket) and fakeSession helpers, but runs the broker IN-PROCESS via
@@ -243,8 +243,9 @@ function parseFrame(frame: DecodedFrame): Record<string, unknown> {
   return JSON.parse(frame.payload.toString("utf-8")) as Record<string, unknown>;
 }
 
-async function welcome(ws: RawWs): Promise<void> {
-  ws.sendText(JSON.stringify({ v: 0, type: "hello" }));
+/** Hello with a stable page-lifetime tabId (what the real userscript sends). */
+async function welcome(ws: RawWs, tabId?: string): Promise<void> {
+  ws.sendText(JSON.stringify({ v: 0, type: "hello", client: { tab: tabId !== undefined ? { id: tabId } : {} } }));
   const frame = await ws.next();
   assert.equal(frame.opcode, OPCODE_TEXT);
   const parsed = parseFrame(frame);
@@ -271,36 +272,40 @@ async function captureLog(fn: () => Promise<void>): Promise<string[]> {
 // ---------- tests ----------
 
 describe("broker reverse channel (integration)", () => {
-  it("first responder wins: both tabs get page.request, the first page.response resolves", async () => {
+  it("targeted routing: only the named tab gets page.request; its page.response resolves", async () => {
     const daemon = await startTestBroker();
     const tab1 = await RawWs.connect(daemon.port);
     const tab2 = await RawWs.connect(daemon.port);
-    await welcome(tab1);
-    await welcome(tab2);
+    await welcome(tab1, "tab-1");
+    await welcome(tab2, "tab-2");
 
-    const requestId = routePageTool("alpha", { op: "dom.query", params: { selector: ".btn" } }, 5_000);
+    const requestId = routePageTool("alpha", { op: "dom.query", params: { selector: ".btn" } }, 5_000, "tab-1");
     assert.equal(typeof requestId, "string");
     assert.match(requestId!, /^r[0-9a-z]+$/);
 
-    for (const tab of [tab1, tab2]) {
-      const frame = parseFrame(await tab.next());
-      assert.equal(frame.v, 0);
-      assert.equal(frame.type, "page.request");
-      assert.equal(frame.id, requestId);
-      assert.equal(frame.handoff_id, "demo");
-      assert.equal(frame.from, "alpha");
-      assert.deepEqual(frame.tool, { op: "dom.query", params: { selector: ".btn" } });
-      assert.equal(frame.timeoutMs, 5_000);
-    }
+    const frame = parseFrame(await tab1.next());
+    assert.equal(frame.v, 0);
+    assert.equal(frame.type, "page.request");
+    assert.equal(frame.id, requestId);
+    assert.equal(frame.handoff_id, "demo");
+    assert.equal(frame.from, "alpha");
+    assert.deepEqual(frame.tool, { op: "dom.query", params: { selector: ".btn" } });
+    assert.equal(frame.timeoutMs, 5_000);
+
+    // ADR-0022: the unnamed tab stays silent — routing never broadcasts.
+    await tab2.next(200).then(
+      () => assert.fail("untargeted tab received page.request"),
+      () => { /* silence expected */ },
+    );
 
     tab1.sendText(
       JSON.stringify({ v: 0, type: "page.response", id: requestId, ok: true, text: "red" }),
     );
     assert.deepEqual(await awaitPageResult(requestId!), { ok: true, text: "red" });
 
-    // A late response from the second tab is ignored: log line, no re-resolution.
+    // A late response is ignored: log line, no re-resolution.
     const late = await captureLog(async () => {
-      tab2.sendText(
+      tab1.sendText(
         JSON.stringify({ v: 0, type: "page.response", id: requestId, ok: false, error: "dismissed" }),
       );
       await sleep(50);
@@ -312,14 +317,32 @@ describe("broker reverse channel (integration)", () => {
     assert.deepEqual(await awaitPageResult(requestId!), { ok: true, text: "red" });
   });
 
+  it("missing_tab / tab_unreachable: routePageTool returns null, runPageTool answers directly", async () => {
+    const daemon = await startTestBroker();
+    const tab = await RawWs.connect(daemon.port);
+    await welcome(tab, "tab-1");
+
+    // No tabId at all → missing_tab, no request created, tab silent.
+    assert.equal(routePageTool("alpha", { op: "page.info" }), null);
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }), { ok: false, error: "missing_tab" });
+    await tab.next(150).then(
+      () => assert.fail("a frame reached the tab despite missing_tab"),
+      () => { /* silence expected */ },
+    );
+
+    // Named but unknown tab → tab_unreachable, same short circuit.
+    assert.equal(routePageTool("alpha", { op: "page.info" }, undefined, "tab-ghost"), null);
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }, undefined, "tab-ghost"), { ok: false, error: "tab_unreachable" });
+  });
+
   it("timeout: explicit short override resolves {ok:false, error:'timeout'}, late response ignored", async () => {
     assert.equal(DEFAULT_PAGE_TIMEOUT_MS, 30_000);
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
     const started = Date.now();
-    const requestId = routePageTool("alpha", { op: "console.logs" }, 100);
+    const requestId = routePageTool("alpha", { op: "console.logs" }, 100, "tab-1");
     assert.ok(requestId);
     assert.equal(parseFrame(await tab.next()).timeoutMs, 100);
 
@@ -342,12 +365,12 @@ describe("broker reverse channel (integration)", () => {
   it("timeout default: BROKER_PAGE_TIMEOUT_MS env fallback, else 30s on the wire", async () => {
     const daemon = await startTestBroker();
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
     const previous = process.env.BROKER_PAGE_TIMEOUT_MS;
     process.env.BROKER_PAGE_TIMEOUT_MS = "60";
     try {
-      const requestId = routePageTool("alpha", { op: "page.info" });
+      const requestId = routePageTool("alpha", { op: "page.info" }, undefined, "tab-1");
       assert.ok(requestId);
       assert.equal(parseFrame(await tab.next()).timeoutMs, 60);
       assert.deepEqual(await awaitPageResult(requestId!), { ok: false, error: "timeout" });
@@ -357,29 +380,32 @@ describe("broker reverse channel (integration)", () => {
     }
 
     // With no env and no explicit timeout the frame carries the 30s default.
-    const defaultId = routePageTool("alpha", { op: "page.info" });
+    const defaultId = routePageTool("alpha", { op: "page.info" }, undefined, "tab-1");
     assert.ok(defaultId);
     assert.equal(parseFrame(await tab.next()).timeoutMs, DEFAULT_PAGE_TIMEOUT_MS);
   });
 
-  it("no tabs connected → routePageTool returns null, runPageTool resolves {ok:false, error:'no_tabs'}", async () => {
+  it("routing recovers once the named tab reconnects (no stale unreachable state)", async () => {
     const daemon = await startTestBroker();
-    assert.equal(routePageTool("alpha", { op: "page.info" }), null);
-    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }), { ok: false, error: "no_tabs" });
-
-    // Sanity: once a tab connects, requests flow again (no stale no_tabs state).
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
-    const requestId = routePageTool("alpha", { op: "page.info" });
+    await welcome(tab, "tab-1");
+    tab.sendClose();
+    await sleep(150);
+    assert.equal(routePageTool("alpha", { op: "page.info" }, undefined, "tab-1"), null);
+
+    // Same page-lifetime id reconnects (HMR reload) → requests flow again.
+    const reconnected = await RawWs.connect(daemon.port);
+    await welcome(reconnected, "tab-1");
+    const requestId = routePageTool("alpha", { op: "page.info" }, undefined, "tab-1");
     assert.ok(requestId);
-    assert.equal(parseFrame(await tab.next()).id, requestId);
+    assert.equal(parseFrame(await reconnected.next()).id, requestId);
   });
 
   it("page.request handoff_id: latest handoff for the target, 'demo' when none", async () => {
     const daemon = await startTestBroker();
     await fakeSession(daemon.xferDir, "alpha");
     const tab = await RawWs.connect(daemon.port);
-    await welcome(tab);
+    await welcome(tab, "tab-1");
 
     tab.sendText(
       JSON.stringify({
@@ -395,13 +421,15 @@ describe("broker reverse channel (integration)", () => {
     const ack = parseFrame(await tab.next());
     assert.equal(ack.type, "ack");
     const handoffId = (ack.result as { handoff_id?: unknown }).handoff_id as string;
+    // ADR-0022: the ack tells the agent which tab to target with --tab.
+    assert.equal((ack.result as { routedTabId?: unknown }).routedTabId, "tab-1");
 
-    const requestId = routePageTool("alpha", { op: "dom.html", params: { selector: "#app" } });
+    const requestId = routePageTool("alpha", { op: "dom.html", params: { selector: "#app" } }, undefined, "tab-1");
     assert.ok(requestId);
     assert.equal(parseFrame(await tab.next()).handoff_id, handoffId);
 
     // A target with no handoff yet falls back to "demo".
-    const otherId = routePageTool("ghost", { op: "page.info" });
+    const otherId = routePageTool("ghost", { op: "page.info" }, undefined, "tab-1");
     assert.ok(otherId);
     assert.equal(parseFrame(await tab.next()).handoff_id, "demo");
   });
@@ -431,8 +459,9 @@ describe("broker reverse channel (integration)", () => {
     const ack = parseFrame(await picker.next());
     assert.equal(ack.type, "ack");
 
-    // Follow-up query goes ONLY to the submitting tab.
-    const requestId = routePageTool("alpha", { op: "dom.query", params: { selector: ".btn" } });
+    // Follow-up query goes ONLY to the named tab (the ack's routedTabId).
+    assert.equal((ack.result as { routedTabId?: unknown }).routedTabId, "tab-abc");
+    const requestId = routePageTool("alpha", { op: "dom.query", params: { selector: ".btn" } }, undefined, "tab-abc");
     assert.ok(requestId);
     const routed = parseFrame(await picker.next());
     assert.equal(routed.type, "page.request");
@@ -467,7 +496,7 @@ describe("broker reverse channel (integration)", () => {
     reloaded.sendText(JSON.stringify({ v: 0, type: "hello", client: { tab: { id: "tab-abc", url: "https://example.com", title: "Example" } } }));
     assert.equal(parseFrame(await reloaded.next()).type, "welcome");
 
-    const requestId = routePageTool("alpha", { op: "page.info" });
+    const requestId = routePageTool("alpha", { op: "page.info" }, undefined, "tab-abc");
     assert.ok(requestId);
     const routed = parseFrame(await reloaded.next());
     assert.equal(routed.type, "page.request");
@@ -475,7 +504,7 @@ describe("broker reverse channel (integration)", () => {
     reloaded.sendText(JSON.stringify({ v: 0, type: "page.response", id: requestId, ok: true, text: "{}" }));
   });
 
-  it("tab addressing falls back to broadcast when the recorded tab id never reconnects", async () => {
+  it("the submitting tab gone and no other connection → tab_unreachable, never broadcast (ADR-0022)", async () => {
     const daemon = await startTestBroker();
     await fakeSession(daemon.xferDir, "alpha");
     const picker = await RawWs.connect(daemon.port);
@@ -491,11 +520,8 @@ describe("broker reverse channel (integration)", () => {
     picker.sendClose();
     await sleep(150);
 
-    const other = await RawWs.connect(daemon.port);
-    await welcome(other);
-    const requestId = routePageTool("alpha", { op: "page.info" });
-    assert.ok(requestId);
-    // Recorded tab is gone → broadcast reaches any live tab.
-    assert.equal(parseFrame(await other.next()).id, requestId);
+    // The page is gone → direct failure. No other tab is woken, no guess is made.
+    assert.equal(routePageTool("alpha", { op: "page.info" }, undefined, "tab-gone"), null);
+    assert.deepEqual(await runPageTool("alpha", { op: "page.info" }, undefined, "tab-gone"), { ok: false, error: "tab_unreachable" });
   });
 });

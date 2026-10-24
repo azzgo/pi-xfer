@@ -51,7 +51,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
 import { ERR, FROM_WEB_PICKER, WIRE } from "./wire.ts";
-import { renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./handoff-doc.ts";
+import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./handoff-doc.ts";
 import { createMeshDescriber } from "./mesh-describer.ts";
 import { listTargetsWithDescriptions } from "./targets.ts";
 import { encodeAgentName, isEntryPoint } from "./utils.ts";
@@ -80,6 +80,9 @@ const {
   KIND_ACK: WIRE_ACK,
   KIND_SUBMIT: WIRE_ANNOTATION_SUBMIT,
   KIND_COMPOSE: WIRE_ANNOTATION_COMPOSE,
+  KIND_STAGE: WIRE_STAGE,
+  KIND_BAG_LIST: WIRE_BAG_LIST,
+  KIND_BAG_SUBMIT: WIRE_BAG_SUBMIT,
   KIND_TARGETS_LIST: WIRE_TARGETS_LIST,
   KIND_TARGETS_RESULT: WIRE_TARGETS_RESULT,
   KIND_PAGE_REQUEST: WIRE_PAGE_REQUEST,
@@ -94,6 +97,8 @@ const {
   INVALID_PAYLOAD: ERR_INVALID_PAYLOAD,
   BAD_TARGET: ERR_BAD_TARGET,
   TARGET_NOT_FOUND: ERR_TARGET_NOT_FOUND,
+  MISSING_TAB: ERR_MISSING_TAB,
+  TAB_UNREACHABLE: ERR_TAB_UNREACHABLE,
   DELIVERY_FAILED: ERR_DELIVERY_FAILED,
   UNSUPPORTED_VERSION: ERR_UNSUPPORTED_VERSION,
 } = ERR;
@@ -395,12 +400,10 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   }
   console.log(`[doc] ${doc} (${picks.length} picks${record ? ` + record ${record.id} (${record.events.length} events)` : ""} → local:${targetName})`);
   latestHandoffByTarget.set(targetName, msgId); // the doc exists → page.requests can reference it
-  // Record the submitting tab so follow-up page.requests route back to it
-  // (survives same-id reloads; unknown tab id → broadcast fallback).
+  // ADR-0022: the ack carries the originating tabId; the agent passes it back
+  // as --tab on every follow-up page-tool call. No latest-tab guess is kept.
   const submittingTab = activeConns?.get(connection);
-  if (submittingTab && typeof submittingTab.id === "string" && submittingTab.id !== "") {
-    latestTabIdByTarget.set(targetName, submittingTab.id);
-  }
+  const routedTabId = submittingTab && typeof submittingTab.id === "string" ? submittingTab.id : undefined;
 
   void pushXferNotify(xferDir, targetName, {
     type: WIRE_XFER_NOTIFY,
@@ -410,7 +413,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
     summary: prompt.slice(0, 120),
   })
     .then(() => {
-      connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id, result: { handoff_id: msgId, doc } });
+      connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id, result: { handoff_id: msgId, doc, ...(routedTabId !== undefined ? { routedTabId } : {}) } });
       console.log(`[xfer] delivered to ${targetName}`);
     })
     .catch((error: unknown) => {
@@ -530,17 +533,141 @@ export const DEFAULT_PAGE_TIMEOUT_MS = 30_000;
 /** Latest handoff doc id delivered to each asking target (page.request handoff_id). */
 const latestHandoffByTarget = new Map<string, string>();
 
-/**
- * Latest submitting tab (stable page-lifetime id) for each target. Set from
- * the submitting connection's hello tab.id at annotation.submit; the follow-up
- * page.requests route back to that tab instead of broadcasting — the page
- * keeps the same id across HMR full reloads (sessionStorage), so verification
- * queries land on the reloaded page, not on whichever tab answers first.
- */
-const latestTabIdByTarget = new Map<string, string>();
-
 /** Live tab id → connection.hello registration map (module-level, mirrors activeConns). */
 let tabConns: Map<string, WsConnection> | null = null;
+
+// ---------- staging bag (web picker cross-page staging, ADR-glossed in CONTEXT.md) ----------
+
+/** One Staged marker: a pick plus the Provenance of the tab that captured it. */
+export interface StagedMarker {
+  id: string;
+  tabId: string;
+  origin: string;
+  url: string;
+  title: string;
+  pick: HandoffPick;
+  ts: number;
+}
+
+/** The one default Bag: broker-lifetime, in memory, consumed by bag.submit. */
+let bag: StagedMarker[] = [];
+
+let stageSeq = 0;
+function nextStageId(): string {
+  return `s${Date.now().toString(36)}${(stageSeq++).toString(36)}`;
+}
+
+/** Parse the provenance + pick payload of annotation.stage; null when malformed. */
+function parseStagePayload(frame: Frame): Omit<StagedMarker, "id"> | null {
+  const pick = frame.pick;
+  if (typeof pick !== "object" || pick === null || Array.isArray(pick)) return null;
+  const p = pick as Record<string, unknown>;
+  if (typeof p.selector !== "string" || p.selector === "") return null;
+  if (typeof p.xpath !== "string" || typeof p.rect !== "object" || p.rect === null) return null;
+  const page = typeof frame.page === "object" && frame.page !== null ? (frame.page as Record<string, unknown>) : {};
+  const tabId = typeof page.tabId === "string" && page.tabId !== "" ? page.tabId : null;
+  if (tabId === null) return null;
+  return {
+    tabId,
+    origin: typeof page.origin === "string" ? page.origin : "",
+    url: typeof page.url === "string" ? page.url : "",
+    title: typeof page.title === "string" ? page.title : "",
+    pick: pick as HandoffPick,
+    ts: typeof page.ts === "number" ? page.ts : Date.now(),
+  };
+}
+
+/**
+ * annotation.stage — add one marker to the Bag. No dedup (glossary: repeated
+ * staging creates independent entries); the broker assigns the entry id, so a
+ * reconnecting picker rebuilds its view from bag.list alone.
+ */
+function handleAnnotationStage(connection: WsConnection, frame: Frame): void {
+  const staged = parseStagePayload(frame);
+  if (staged === null) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "malformed stage: expected {pick:{selector,xpath,rect...}, page:{tabId,origin,url,title,ts}}");
+    return;
+  }
+  const entry: StagedMarker = { id: nextStageId(), ...staged };
+  bag.push(entry);
+  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { id: entry.id, count: bag.length } });
+  console.log(`[bag] staged ${entry.id} [tab ${entry.tabId}] ${entry.pick.selector} (bag: ${bag.length})`);
+}
+
+/** bag.list — full Bag snapshot; the picker's only source of truth after reconnect. */
+function handleBagList(connection: WsConnection, frame: Frame): void {
+  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { items: bag } });
+}
+
+/** Shared validation of bag.submit's {prompt, target}; null → error already sent. */
+function parseBagSubmitTarget(connection: WsConnection, frame: Frame): { prompt: string; targetName: string } | null {
+  const prompt = frame.prompt;
+  const target = typeof frame.target === "object" && frame.target !== null ? (frame.target as Record<string, unknown>) : null;
+  const targetName = target?.name;
+  const missing: string[] = [];
+  if (typeof prompt !== "string" || prompt.trim() === "") missing.push("prompt");
+  if (typeof targetName !== "string" || targetName.trim() === "") missing.push("target.name");
+  const namespace = target?.namespace;
+  if (namespace !== undefined && namespace !== WIRE_NAMESPACE_LOCAL) {
+    sendError(connection, frame, ERR_BAD_TARGET, `namespace "${String(namespace)}" out of scope (v0: local only)`);
+    return null;
+  }
+  if (missing.length > 0) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `missing or invalid: ${missing.join(", ")}`);
+    return null;
+  }
+  return { prompt: prompt as string, targetName: targetName as string };
+}
+
+/**
+ * bag.submit — render the whole Bag as one per-page handoff doc, deliver it to
+ * the target and clear the Bag (glossary: sending consumes). A full Bag is a
+ * client error: the user decides whether to send an empty bag, not us.
+ */
+function handleBagSubmit(connection: WsConnection, frame: Frame, xferDir: string): void {
+  const parsed = parseBagSubmitTarget(connection, frame);
+  if (parsed === null) return;
+  const { prompt, targetName } = parsed;
+  if (bag.length === 0) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "bag is empty");
+    return;
+  }
+  const msgId = nextMsgId();
+  const doc = path.join(os.tmpdir(), `pi-xfer-${msgId}.md`);
+  let content: string;
+  try {
+    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path.join(import.meta.dirname, "broker-main.ts") });
+  } catch (error) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed staged markers: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  try {
+    fs.writeFileSync(doc, content, { mode: 0o600 });
+  } catch (error) {
+    sendError(connection, frame, ERR_DELIVERY_FAILED, `cannot write doc: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  console.log(`[bag] ${doc} (${bag.length} staged markers across ${new Set(bag.map((m) => m.tabId)).size} tab(s) → local:${targetName})`);
+  latestHandoffByTarget.set(targetName, msgId);
+  void pushXferNotify(xferDir, targetName, {
+    type: WIRE_XFER_NOTIFY,
+    msg_id: msgId,
+    from: FROM_WEB_PICKER,
+    file: doc,
+    summary: prompt.slice(0, 120),
+  })
+    .then(() => {
+      bag = [];
+      connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { handoff_id: msgId, doc, count: bag.length } });
+      console.log(`[xfer] delivered to ${targetName}; bag cleared`);
+    })
+    .catch((error: unknown) => {
+      const code = (error as { code?: unknown }).code === ERR_TARGET_NOT_FOUND ? ERR_TARGET_NOT_FOUND : ERR_DELIVERY_FAILED;
+      const message = error instanceof Error ? error.message : String(error);
+      sendError(connection, frame, code, message);
+      console.log(`[xfer] FAILED: ${message} (doc kept at ${doc}; bag kept)`);
+    });
+}
 
 /**
  * In-flight page.requests: requestId → entry. Settled entries stay put (so the
@@ -584,25 +711,26 @@ function settlePageRequest(requestId: string, result: PageResult): void {
 }
 
 /**
- * Broadcast a page tool call to every welcomed tab and register the pending
- * request. Returns the requestId (r<msg_id> scheme), or null when no tabs are
- * connected (no request created — the HTTP/CLI layer reports
- * {ok:false, error:"no_tabs"}). Await the outcome with {@link awaitPageResult}
- * / {@link runPageTool}.
+/**
+ * Route a page tool call to ONE explicit tab and register the pending request.
+ * ADR-0022: routing always targets a tab — the caller passes the tabId it
+ * read from the submit ack / handoff Provenance. No broadcast, no latest-tab
+ * guess: a miss is a direct connect-style error (missing_tab when the caller
+ * gave no tabId, tab_unreachable when the named tab is not connected), and
+ * the caller stops and asks the human instead of retrying. Returns null (no
+ * request created) for the immediate-error cases; the requestId otherwise.
  */
-export function routePageTool(target: string, tool: PageTool, timeoutMs?: number): string | null {
-  const tabs = activeConns ? [...activeConns.keys()] : [];
-  if (tabs.length === 0) {
-    console.log(`[page.request] no tabs connected → no_tabs (target ${target})`);
+export function routePageTool(target: string, tool: PageTool, timeoutMs?: number, tabId?: string): string | null {
+  if (tabId === undefined || tabId === "") {
+    console.log(`[page.request] no tabId given → missing_tab (target ${target})`);
     return null;
   }
-  // Targeted routing: the tab that submitted the latest handoff for this
-  // target gets the call; fall back to broadcast when that tab is gone
-  // (never connected, or the page closed without a same-id reload).
-  const lastTabId = latestTabIdByTarget.get(target);
-  const targeted =
-    lastTabId !== undefined && tabConns !== null && tabConns.has(lastTabId) && activeConns!.has(tabConns.get(lastTabId)!);
-  const routed = targeted ? [tabConns.get(lastTabId!)] : tabs;
+  const conn = tabConns?.get(tabId);
+  if (conn === undefined || !activeConns?.has(conn)) {
+    console.log(`[page.request] tab ${tabId} not connected → tab_unreachable (target ${target})`);
+    return null;
+  }
+  const routed = [conn];
   const id = nextRequestId();
   const resolvedTimeout = timeoutMs ?? envPageTimeoutMs();
   const frame = {
@@ -619,9 +747,8 @@ export function routePageTool(target: string, tool: PageTool, timeoutMs?: number
     conn.send(frame);
     sent++;
   }
-  const routedNote = routed.length === 1 && lastTabId !== undefined;
   console.log(
-    `[page.request ${id}] → ${sent} tab(s) ${routedNote ? `[tab ${lastTabId}]` : "(broadcast)"}: ${tool.op} ${JSON.stringify(tool.params ?? {})} (handoff ${frame.handoff_id}, timeout ${resolvedTimeout}ms)`,
+    `[page.request ${id}] → tab ${tabId}: ${tool.op} ${JSON.stringify(tool.params ?? {})} (handoff ${frame.handoff_id}, timeout ${resolvedTimeout}ms)`,
   );
 
   let resolve!: (result: PageResult) => void;
@@ -651,12 +778,15 @@ export function awaitPageResult(requestId: string): Promise<PageResult> {
 /**
  * Session-facing wrapper: route a page tool call and await its outcome
  * (synchronous round trip — the HTTP layer returns the result directly).
- * No connected tabs → immediate {ok:false, error:"no_tabs"} without creating
- * a request.
+ * tabId is mandatory (ADR-0022): missing_tab / tab_unreachable come back as
+ * immediate errors without creating a request.
  */
-export function runPageTool(target: string, tool: PageTool, timeoutMs?: number): Promise<PageResult> {
-  const requestId = routePageTool(target, tool, timeoutMs);
-  return requestId === null ? Promise.resolve({ ok: false, error: "no_tabs" }) : awaitPageResult(requestId);
+export function runPageTool(target: string, tool: PageTool, timeoutMs?: number, tabId?: string): Promise<PageResult> {
+  const requestId = routePageTool(target, tool, timeoutMs, tabId);
+  if (requestId === null) {
+    return Promise.resolve({ ok: false, error: tabId === undefined || tabId === "" ? "missing_tab" : "tab_unreachable" });
+  }
+  return awaitPageResult(requestId);
 }
 
 /**
@@ -693,10 +823,12 @@ export function handlePageResponse(connection: WsConnection, frame: Frame): void
 
 /**
  * POST /page-tool — {target, tool:{op, params?}, timeoutMs?}, size-guarded
+ * POST /page-tool — {target, tool:{op, params?}, tabId?, timeoutMs?}, size-guarded
  * ≤ MAX_FRAME_BYTES. Synchronous round trip: waits for the page.response (or
  * timeout) and replies {ok:true, result:<parsed JSON>} / {ok:false, error}.
  * When the response text is not valid JSON it is returned verbatim as
- * {ok:true, text}. no_tabs → {ok:false, error:"no_tabs"}.
+ * {ok:true, text}. tabId is mandatory (ADR-0022): a missing or unreachable
+ * tab answers {ok:false, error:"missing_tab"|"tab_unreachable"}.
  */
 function handlePageToolHttp(request: http.IncomingMessage, response: http.ServerResponse): void {
   let settled = false;
@@ -729,10 +861,14 @@ function handlePageToolHttp(request: http.IncomingMessage, response: http.Server
       respond(400, { ok: false, error: "invalid_json" });
       return;
     }
-    const record = (body ?? {}) as { target?: unknown; tool?: unknown; timeoutMs?: unknown };
-    const { target, tool, timeoutMs } = record;
+    const record = (body ?? {}) as { target?: unknown; tool?: unknown; tabId?: unknown; timeoutMs?: unknown };
+    const { target, tool, tabId, timeoutMs } = record;
     if (typeof target !== "string" || target.trim() === "") {
       respond(400, { ok: false, error: "invalid_payload: missing or invalid target" });
+      return;
+    }
+    if (typeof tabId !== "string" || tabId.trim() === "") {
+      respond(400, { ok: false, error: ERR_MISSING_TAB });
       return;
     }
     if (typeof tool !== "object" || tool === null || Array.isArray(tool)) {
@@ -759,7 +895,7 @@ function handlePageToolHttp(request: http.IncomingMessage, response: http.Server
         ? { params: toolRecord.params as Record<string, unknown> }
         : {}),
     };
-    void runPageTool(target, pageTool, timeoutMs as number | undefined).then((result) => {
+    void runPageTool(target, pageTool, timeoutMs as number | undefined, tabId).then((result) => {
       if (result.ok) {
         let parsed: unknown;
         let parseOk = false;
@@ -787,6 +923,9 @@ function buildFrameHandlers(xferDir: string): Record<string, FrameHandler> {
   return {
     [WIRE_ANNOTATION_SUBMIT]: (connection, frame) => handleAnnotationSubmit(connection, frame, xferDir),
     [WIRE_ANNOTATION_COMPOSE]: (connection, frame) => handleAnnotationCompose(connection, frame),
+    [WIRE_STAGE]: (connection, frame) => handleAnnotationStage(connection, frame),
+    [WIRE_BAG_LIST]: (connection, frame) => handleBagList(connection, frame),
+    [WIRE_BAG_SUBMIT]: (connection, frame) => handleBagSubmit(connection, frame, xferDir),
     [WIRE_TARGETS_LIST]: (connection, frame) => handleTargetsList(connection, frame, xferDir),
     [WIRE_PAGE_REQUEST]: () => handleInboundPageRequest(),
     [WIRE_PAGE_RESPONSE]: (connection, frame) => handlePageResponse(connection, frame),
@@ -840,7 +979,9 @@ export function handleFrame(
 export async function startBroker(options: BrokerOptions): Promise<BrokerHandle> {
   const conns = new Map<WsConnection, TabInfo>();
   activeConns = conns;
+  activeConns = conns;
   tabConns = new Map();
+  bag = []; // per-broker-instance state — a test-started broker gets a fresh bag
   frameHandlers = buildFrameHandlers(options.xferDir);
   const startedAt = new Date().toISOString();
 
@@ -950,10 +1091,11 @@ function httpPostJson(port: number, pathname: string, body: unknown): Promise<{ 
 }
 
 /**
- * `node broker-main.ts page-tool <target> <op> [paramsJSON] [--timeout-ms <ms>]` —
+ * `node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]` —
  * reads broker.json (port) from the daemon's xfer dir, POSTs /page-tool, waits
  * for the outcome and prints the result JSON (stdout, exit 0), or an error
- * (stderr, exit 1) for no_tabs / timeout / broker down / unreachable.
+ * (stderr, exit 1) for missing_tab / tab_unreachable / timeout / broker down.
+ * ADR-0022: --tab is mandatory — the tabId from the handoff/submit ack.
  */
 async function runPageToolCommand(args: string[]): Promise<void> {
   // Flags may appear anywhere in argv; --xfer-dir is re-read via parseArgs
@@ -961,6 +1103,7 @@ async function runPageToolCommand(args: string[]): Promise<void> {
   // the positionals <target> <op> [paramsJSON].
   const positional: string[] = [];
   let timeoutMs: number | undefined;
+  let tabId: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--timeout-ms") {
@@ -971,6 +1114,17 @@ async function runPageToolCommand(args: string[]): Promise<void> {
         process.exit(1);
       }
       timeoutMs = parsed;
+      i++;
+      continue;
+      continue;
+    }
+    if (arg === "--tab") {
+      const raw = args[i + 1];
+      if (raw === undefined || raw.trim() === "") {
+        console.error('[broker] page-tool: --tab requires the tabId from the handoff/submit ack');
+        process.exit(1);
+      }
+      tabId = raw;
       i++;
       continue;
     }
@@ -996,8 +1150,13 @@ async function runPageToolCommand(args: string[]): Promise<void> {
       process.exit(1);
     }
   }
+  if (tabId === undefined) {
+    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
+    console.error("  --tab is mandatory (ADR-0022): the tabId carried by the handoff / submit ack");
+    process.exit(1);
+  }
   if (typeof target !== "string" || target.trim() === "" || typeof op !== "string" || op.trim() === "") {
-    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] [--timeout-ms <ms>]");
+    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
     process.exit(1);
   }
 
@@ -1018,6 +1177,7 @@ async function runPageToolCommand(args: string[]): Promise<void> {
   try {
     response = await httpPostJson(port, "/page-tool", {
       target,
+      tabId,
       tool: { op, ...(params !== undefined ? { params } : {}) },
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
