@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { XFER_DIR } from "../constants.ts";
-import { encodeAgentName } from "../utils.ts";
+import { XFER_DIR } from "../src/core/constants.ts";
+import { encodeAgentName } from "../src/core/utils.ts";
 
 /**
  * One received handoff as it sits in an adapter daemon's Inbox. The Inbox is a

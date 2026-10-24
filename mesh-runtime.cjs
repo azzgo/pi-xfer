@@ -48202,15 +48202,15 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// mesh-config.ts
+// src/mesh/mesh-config.ts
 var import_node_child_process = require("node:child_process");
 var fs = __toESM(require("node:fs"), 1);
 
-// constants.ts
+// src/core/constants.ts
 var os2 = __toESM(require("node:os"), 1);
 var path2 = __toESM(require("node:path"), 1);
 
-// mesh-guard.ts
+// src/mesh/mesh-guard.ts
 var os = __toESM(require("node:os"), 1);
 var path = __toESM(require("node:path"), 1);
 var MeshRemoteBlockedError = class extends Error {
@@ -48272,13 +48272,13 @@ function resolveMeshConfigPath(realPath, env = process.env) {
   return path.join(os.tmpdir(), `pi-xfer-test-${process.pid}-no-mesh.config.json`);
 }
 
-// constants.ts
+// src/core/constants.ts
 var XFER_DIR = path2.join(os2.homedir(), ".pi", "xfer");
 var MESH_CONFIG_PATH = resolveMeshConfigPath(path2.join(XFER_DIR, "mesh.config.json"));
 var MESH_CACHE_DIR = path2.join(XFER_DIR, "cache");
 var MAX_FRAME_BYTES = 1024 * 1024;
 
-// utils.ts
+// src/core/utils.ts
 async function withTimeout(promise2, ms) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -48291,7 +48291,7 @@ async function withTimeout(promise2, ms) {
   }
 }
 
-// mesh-config.ts
+// src/mesh/mesh-config.ts
 var XFER_INSTANCE_ACTOR = "xfer-instance";
 var HANDOFF_QUEUE = "handoff";
 function parseMeshConfig(raw) {
@@ -48560,7 +48560,7 @@ function deserializeMeshKey(serialized) {
   return parts;
 }
 
-// mesh-log.ts
+// src/mesh/mesh-log.ts
 var fs2 = __toESM(require("node:fs"), 1);
 var path3 = __toESM(require("node:path"), 1);
 var MESH_LOG_PATH = path3.join(XFER_DIR, "mesh.log");
@@ -48651,7 +48651,7 @@ function createMeshLogSink(options = {}) {
   return make({});
 }
 
-// mesh-native.ts
+// src/mesh/mesh-native.ts
 var fs3 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 var zlib = __toESM(require("node:zlib"), 1);
@@ -48829,7 +48829,7 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
   globalThis.__meshEngineCliEntry = engineCliEntry;
 }
 
-// mesh-engine.ts
+// src/mesh/mesh-engine.ts
 var DELIVERED_WINDOW_SIZE = 3;
 var MAX_NODE_DESCRIPTION = 500;
 function quietMeshRuntime() {

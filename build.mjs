@@ -82,7 +82,7 @@ globalThis.__meshLoadEngineCli = async () => {
  * specs always go into a single install call.
  */
 function ensureRivetkitDeps() {
-  const versionPin = readFileSync(join(here, 'mesh-native.ts'), 'utf8')
+  const versionPin = readFileSync(join(here, 'src/mesh/mesh-native.ts'), 'utf8')
     .match(/RIVETKIT_VERSION = "([^"]+)"/)?.[1];
   if (!versionPin) throw new Error('cannot read RIVETKIT_VERSION from mesh-native.ts');
 
@@ -135,17 +135,17 @@ async function buildRivetBundle(entry, outfile) {
 }
 
 /** Rebuild mesh-runtime.cjs (or any outfile) exactly as `npm run build` does. */
-export function buildMeshRuntime(outfile = join(here, 'mesh-runtime.cjs')) {
+export function buildMeshRuntime(outfile = join(here, '..', 'mesh-runtime.cjs')) {
   return buildRivetBundle('mesh-runtime.src/index.ts', outfile);
 }
 
 /** Rebuild xfer-adapterd.cjs (or any outfile) from adapterd.src/main.ts. */
-export function buildAdapterd(outfile = join(here, 'xfer-adapterd.cjs')) {
+export function buildAdapterd(outfile = join(here, '..', 'xfer-adapterd.cjs')) {
   return buildRivetBundle('adapterd.src/main.ts', outfile);
 }
 
 /** Rebuild web-picker.user.js (or any outfile) exactly as `npm run build` does. */
-export async function buildWebPicker(outfile = join(here, 'web-picker.user.js')) {
+export async function buildWebPicker(outfile = join(here, '..', 'web-picker.user.js')) {
   const banner = readFileSync(join(here, 'web-picker.src/banner.js'), 'utf8');
   await build({
     entryPoints: [join(here, 'web-picker.src/main.js')],
@@ -203,12 +203,12 @@ export async function buildDaemon(entry, outfile) {
 }
 
 /** Rebuild broker.cjs (or any outfile) from broker-main.ts. */
-export function buildBrokerDaemon(outfile = join(here, 'broker.cjs')) {
+export function buildBrokerDaemon(outfile = join(here, '..', 'broker.cjs')) {
   return buildDaemon('broker-main.ts', outfile);
 }
 
 /** Rebuild admin.cjs (or any outfile) from admin-main.ts. */
-export function buildAdminDaemon(outfile = join(here, 'admin.cjs')) {
+export function buildAdminDaemon(outfile = join(here, '..', 'admin.cjs')) {
   return buildDaemon('admin-main.ts', outfile);
 }
 

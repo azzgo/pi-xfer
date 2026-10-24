@@ -59,7 +59,7 @@ var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// mesh-guard.ts
+// src/mesh/mesh-guard.ts
 function inTestContext(env = process.env) {
   return Boolean(env[TEST_CONTEXT_ENV]);
 }
@@ -108,7 +108,7 @@ function resolveMeshConfigPath(realPath, env = process.env) {
 }
 var os, path, MeshRemoteBlockedError, TEST_CONTEXT_ENV, ALLOW_REMOTE_ENV, LOOPBACK_HOSTS, ledger;
 var init_mesh_guard = __esm({
-  "mesh-guard.ts"() {
+  "src/mesh/mesh-guard.ts"() {
     os = __toESM(require("node:os"), 1);
     path = __toESM(require("node:path"), 1);
     MeshRemoteBlockedError = class extends Error {
@@ -126,10 +126,10 @@ var init_mesh_guard = __esm({
   }
 });
 
-// constants.ts
+// src/core/constants.ts
 var os2, path2, XFER_DIR, MESH_CONFIG_PATH, MESH_CACHE_DIR, CONNECT_TIMEOUT_MS, ACK_TIMEOUT_MS, MAX_FRAME_BYTES;
 var init_constants = __esm({
-  "constants.ts"() {
+  "src/core/constants.ts"() {
     os2 = __toESM(require("node:os"), 1);
     path2 = __toESM(require("node:path"), 1);
     init_mesh_guard();
@@ -142,7 +142,7 @@ var init_constants = __esm({
   }
 });
 
-// utils.ts
+// src/core/utils.ts
 function msgId() {
   return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
 }
@@ -202,14 +202,14 @@ async function withTimeout(promise2, ms) {
 }
 var fs, path3;
 var init_utils = __esm({
-  "utils.ts"() {
+  "src/core/utils.ts"() {
     fs = __toESM(require("node:fs"), 1);
     path3 = __toESM(require("node:path"), 1);
     init_constants();
   }
 });
 
-// mesh-config.ts
+// src/mesh/mesh-config.ts
 function parseMeshConfig(raw) {
   if (typeof raw !== "object" || raw === null) {
     throw new Error("mesh config must be a JSON object");
@@ -373,11 +373,11 @@ async function runTokenCommand(command, timeoutMs = TOKEN_COMMAND_TIMEOUT_MS, en
     child.stderr?.on("data", (chunk) => {
       stderr += String(chunk);
     });
-    const outcome = await new Promise((resolve2, reject) => {
+    const outcome = await new Promise((resolve3, reject) => {
       child.once("error", (err) => {
         reject(new Error(`mesh token command "!${command}" could not be started (${where}) — ${err.message}`));
       });
-      child.once("close", (code, signal) => resolve2({ code, signal }));
+      child.once("close", (code, signal) => resolve3({ code, signal }));
     });
     const said = stderr.trim();
     if (outcome.code !== 0) {
@@ -468,7 +468,7 @@ function deserializeMeshKey(serialized) {
 }
 var import_node_child_process, fs3, XFER_INSTANCE_ACTOR, HANDOFF_QUEUE, ENV_VAR_NAME_RE, ENV_VAR_NAME_PREFIX_RE, TOKEN_COMMAND_TIMEOUT_MS;
 var init_mesh_config = __esm({
-  "mesh-config.ts"() {
+  "src/mesh/mesh-config.ts"() {
     import_node_child_process = require("node:child_process");
     fs3 = __toESM(require("node:fs"), 1);
     init_utils();
@@ -480,7 +480,7 @@ var init_mesh_config = __esm({
   }
 });
 
-// mesh-log.ts
+// src/mesh/mesh-log.ts
 function shouldLog(level) {
   return LEVEL_RANK[level] >= LEVEL_RANK[MESH_LOG_LEVEL];
 }
@@ -560,7 +560,7 @@ function createMeshLogSink(options = {}) {
 }
 var fs6, path6, MESH_LOG_PATH, MESH_LOG_LEVEL, LEVEL_RANK;
 var init_mesh_log = __esm({
-  "mesh-log.ts"() {
+  "src/mesh/mesh-log.ts"() {
     fs6 = __toESM(require("node:fs"), 1);
     path6 = __toESM(require("node:path"), 1);
     init_constants();
@@ -577,7 +577,7 @@ var init_mesh_log = __esm({
   }
 });
 
-// mesh-native.ts
+// src/mesh/mesh-native.ts
 function platformTriple(platform = process.platform, arch = process.arch) {
   if (platform === "darwin") return arch === "arm64" || arch === "x64" ? `darwin-${arch}` : null;
   if (platform === "linux") {
@@ -750,7 +750,7 @@ async function ensureNativeRuntimeReady(cacheDir = MESH_CACHE_DIR, fetchImpl) {
 }
 var fs7, path7, zlib, RIVETKIT_VERSION, NAPI_SCOPE, NAPI_BASE;
 var init_mesh_native = __esm({
-  "mesh-native.ts"() {
+  "src/mesh/mesh-native.ts"() {
     fs7 = __toESM(require("node:fs"), 1);
     path7 = __toESM(require("node:path"), 1);
     zlib = __toESM(require("node:zlib"), 1);
@@ -9796,7 +9796,7 @@ function isRef(value) {
 function cloneIssues(issues) {
   return issues.map((iss) => iss.path ? { ...iss, path: iss.path.slice() } : { ...iss });
 }
-function isRecursive(inst, stack, resolve2) {
+function isRecursive(inst, stack, resolve3) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -9806,7 +9806,7 @@ function isRecursive(inst, stack, resolve2) {
   let result = NONE;
   const check3 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve2);
+      const answer = isRecursive(child, stack, resolve3);
       if (answer > result)
         result = answer;
     }
@@ -9817,7 +9817,7 @@ function isRecursive(inst, stack, resolve2) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve2) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve3) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -9881,7 +9881,7 @@ function isRecursive(inst, stack, resolve2) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve2 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve3 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -28064,14 +28064,14 @@ var require_filesystem = __commonJS({
       });
       return buffer.subarray(0, bytesRead);
     };
-    var readFile = (path14) => new Promise((resolve2, reject) => {
+    var readFile = (path14) => new Promise((resolve3, reject) => {
       fs14.open(path14, "r", (err, fd) => {
         if (err) {
           reject(err);
         } else {
           const buffer = Buffer.alloc(MAX_LENGTH);
           fs14.read(fd, buffer, 0, MAX_LENGTH, 0, (_, bytesRead) => {
-            resolve2(buffer.subarray(0, bytesRead));
+            resolve3(buffer.subarray(0, bytesRead));
             fs14.close(fd, () => {
             });
           });
@@ -28139,10 +28139,10 @@ var require_detect_libc = __commonJS({
     var commandOut = "";
     var safeCommand = () => {
       if (!commandOut) {
-        return new Promise((resolve2) => {
+        return new Promise((resolve3) => {
           childProcess.exec(command, (err, out) => {
             commandOut = err ? " " : out;
-            resolve2(commandOut);
+            resolve3(commandOut);
           });
         });
       }
@@ -28423,9 +28423,9 @@ var require_node_gyp_build_optional_packages = __commonJS({
         var debug = getFirst(path14.join(dir, "build/Debug"), matchBuild);
         if (debug) return debug;
       }
-      var prebuild = resolve2(dir);
+      var prebuild = resolve3(dir);
       if (prebuild) return prebuild;
-      var nearby = resolve2(path14.dirname(process.execPath));
+      var nearby = resolve3(path14.dirname(process.execPath));
       if (nearby) return nearby;
       var platformPackage = (packageName[0] == "@" ? "" : "@" + packageName + "/") + packageName + "-" + platform + "-" + arch;
       try {
@@ -28447,7 +28447,7 @@ var require_node_gyp_build_optional_packages = __commonJS({
         // eslint-disable-line
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target2 + "\n    attempted loading from: " + dir + " and package: " + platformPackage + "\n");
-      function resolve2(dir2) {
+      function resolve3(dir2) {
         var tuples = readdirSync4(path14.join(dir2, "prebuilds")).map(parseTuple);
         var tuple2 = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple2) return;
@@ -29276,14 +29276,14 @@ function toUint8Array(data) {
   }
 }
 function promiseWithResolvers(onReject) {
-  let resolve2;
+  let resolve3;
   let reject;
   const promise2 = new Promise((res, rej) => {
-    resolve2 = res;
+    resolve3 = res;
     reject = rej;
   });
   promise2.catch(onReject);
-  return { promise: promise2, resolve: resolve2, reject };
+  return { promise: promise2, resolve: resolve3, reject };
 }
 function bufferToArrayBuffer(buf) {
   return buf.buffer.slice(
@@ -31288,7 +31288,7 @@ var init_chunk_JTHHCZCZ = __esm({
       #waiting = [];
       async acquire() {
         while (this.#locked) {
-          await new Promise((resolve2) => this.#waiting.push(resolve2));
+          await new Promise((resolve3) => this.#waiting.push(resolve3));
         }
         this.#locked = true;
       }
@@ -31629,7 +31629,7 @@ var init_is_network_error = __esm({
 
 // node_modules/p-retry/index.js
 async function pRetry(input2, options) {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     options = { ...options };
     options.onFailedAttempt ??= () => {
     };
@@ -31651,7 +31651,7 @@ async function pRetry(input2, options) {
       try {
         const result = await input2(attemptNumber);
         cleanUp();
-        resolve2(result);
+        resolve3(result);
       } catch (error62) {
         try {
           if (!(error62 instanceof Error)) {
@@ -34610,10 +34610,10 @@ function throwIfAborted(signal) {
 }
 async function waitWithSignal(ms, signal) {
   throwIfAborted(signal);
-  await new Promise((resolve2, reject) => {
+  await new Promise((resolve3, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
-      resolve2();
+      resolve3();
     }, ms);
     const onAbort = () => {
       clearTimeout(timeout);
@@ -35757,7 +35757,7 @@ async function createWebSocketProxy(_c, targetUrl, protocols) {
       }
       const targetWs = new WebSocket2(targetUrl, protocols);
       state.targetWs = targetWs;
-      state.connectPromise = new Promise((resolve2, reject) => {
+      state.connectPromise = new Promise((resolve3, reject) => {
         targetWs.addEventListener("open", () => {
           logger2().debug({
             msg: "target websocket connected",
@@ -35773,7 +35773,7 @@ async function createWebSocketProxy(_c, targetUrl, protocols) {
             reject(new Error("Client disconnected"));
             return;
           }
-          resolve2();
+          resolve3();
         });
         targetWs.addEventListener("error", (error62) => {
           logger2().warn({
@@ -36762,7 +36762,7 @@ var init_chunk_LEXBAJ2Q = __esm({
               if (group === "actor" && (code === "starting" || code === "stopping")) {
                 useQueryTarget = true;
                 await new Promise(
-                  (resolve2) => setTimeout(resolve2, 100)
+                  (resolve3) => setTimeout(resolve3, 100)
                 );
               }
               continue;
@@ -36784,11 +36784,11 @@ var init_chunk_LEXBAJ2Q = __esm({
           if (!actor2) {
             return;
           }
-          await new Promise((resolve2) => setTimeout(resolve2, 25));
+          await new Promise((resolve3) => setTimeout(resolve3, 25));
         }
       }
       async #waitForRetryWindow() {
-        await new Promise((resolve2) => setTimeout(resolve2, 100));
+        await new Promise((resolve3) => setTimeout(resolve3, 100));
       }
       #getDynamicQueryMaxAttempts() {
         if (!isDynamicActorQuery(this.#actorResolutionState)) {
@@ -37545,7 +37545,7 @@ var init_chunk_LEXBAJ2Q = __esm({
         logger().debug({ msg: "action", name: opts.name, args: opts.args });
         const actionId = this.#actionIdCounter;
         this.#actionIdCounter += 1;
-        const { promise: promise2, resolve: resolve2, reject } = promiseWithResolvers(
+        const { promise: promise2, resolve: resolve3, reject } = promiseWithResolvers(
           (reason) => logger().warn({
             msg: "unhandled action promise rejection",
             reason
@@ -37553,7 +37553,7 @@ var init_chunk_LEXBAJ2Q = __esm({
         );
         this.#actionsInFlight.set(actionId, {
           name: opts.name,
-          resolve: resolve2,
+          resolve: resolve3,
           reject
         });
         logger().debug({
@@ -38488,13 +38488,13 @@ var init_chunk_LEXBAJ2Q = __esm({
         if (this.#websocket) {
           const ws = this.#websocket;
           if (ws.readyState !== 2 && ws.readyState !== 3) {
-            const { promise: promise2, resolve: resolve2 } = promiseWithResolvers(
+            const { promise: promise2, resolve: resolve3 } = promiseWithResolvers(
               (reason) => logger().warn({
                 msg: "unhandled websocket close promise rejection",
                 reason
               })
             );
-            ws.addEventListener("close", () => resolve2(void 0));
+            ws.addEventListener("close", () => resolve3(void 0));
             ws.close(1e3, "Disposed");
             await promise2;
           }
@@ -40929,7 +40929,7 @@ function logger22() {
   return getLogger("registry");
 }
 function sleep(ms) {
-  return new Promise((resolve2) => setTimeout(resolve2, ms));
+  return new Promise((resolve3) => setTimeout(resolve3, ms));
 }
 function configureTimeoutMs() {
   const value = process.env.RIVET_SERVERLESS_CONFIGURE_TIMEOUT_MS;
@@ -41805,8 +41805,8 @@ function notifyStateChanged(state) {
   }
 }
 function waitForStateChange(state) {
-  return new Promise((resolve2) => {
-    state.waiters.add(resolve2);
+  return new Promise((resolve3) => {
+    state.waiters.add(resolve3);
   });
 }
 function asWasmConstructors(bindings) {
@@ -42260,8 +42260,8 @@ function getNativeDestroyGate(runtime, ctx) {
 function markNativeDestroyRequested(runtime, ctx) {
   const gate = getNativeDestroyGate(runtime, ctx);
   if (!gate.destroyCompletion) {
-    gate.destroyCompletion = new Promise((resolve2) => {
-      gate.resolveDestroy = resolve2;
+    gate.destroyCompletion = new Promise((resolve3) => {
+      gate.resolveDestroy = resolve3;
     });
   }
 }
@@ -44851,7 +44851,7 @@ var init_mod2 = __esm({
         }
         this.#closed = true;
         if (this.#active > 0) {
-          await new Promise((resolve2) => this.#waiters.push(resolve2));
+          await new Promise((resolve3) => this.#waiters.push(resolve3));
         }
         await callback();
       }
@@ -47582,8 +47582,8 @@ var init_mod2 = __esm({
         pendingOwners.add(this.#stateTransactionOwner);
         const predecessor = actorState.stateTransactionTail ?? Promise.resolve();
         let release;
-        const hold = new Promise((resolve2) => {
-          release = resolve2;
+        const hold = new Promise((resolve3) => {
+          release = resolve3;
         });
         actorState.stateTransactionTail = predecessor.then(
           async () => await hold
@@ -48231,8 +48231,8 @@ var init_mod2 = __esm({
         };
         const waitForBackpressure = async () => {
           if (!controllerRef || (controllerRef.desiredSize ?? 1) > 0) return;
-          await new Promise((resolve2) => {
-            backpressureWaiters.push(resolve2);
+          await new Promise((resolve3) => {
+            backpressureWaiters.push(resolve3);
           });
         };
         const stream = new ReadableStream({
@@ -48649,9 +48649,9 @@ var init_mod2 = __esm({
         await Promise.race([
           drain(),
           new Promise(
-            (resolve2) => {
+            (resolve3) => {
               var _a22, _b;
-              return (_b = (_a22 = setTimeout(resolve2, gracePeriodMs)).unref) == null ? void 0 : _b.call(_a22);
+              return (_b = (_a22 = setTimeout(resolve3, gracePeriodMs)).unref) == null ? void 0 : _b.call(_a22);
             }
           )
         ]);
@@ -48890,7 +48890,7 @@ var init_mod3 = __esm({
   }
 });
 
-// mesh-engine.ts
+// src/mesh/mesh-engine.ts
 var mesh_engine_exports = {};
 __export(mesh_engine_exports, {
   ACTOR_READY_TIMEOUT_CODE: () => ACTOR_READY_TIMEOUT_CODE,
@@ -49277,7 +49277,7 @@ function meshSendFailureFields(err) {
 }
 var DELIVERED_WINDOW_SIZE, MAX_NODE_DESCRIPTION, NO_ENVOYS_ERROR, QUEUE_SEND_TIMEOUT_MS, PREFLIGHT_TIMEOUT_MS, MeshPreflightError, ACTOR_READY_TIMEOUT_CODE, MeshSendError;
 var init_mesh_engine = __esm({
-  "mesh-engine.ts"() {
+  "src/mesh/mesh-engine.ts"() {
     init_mesh_config();
     init_mesh_guard();
     init_mesh_log();
@@ -49355,6 +49355,7 @@ function installAgentSkill(options) {
 function findSkillsRoot(baseDir = __dirname) {
   const candidates = [
     path12.join(baseDir, "skills", "xfer-agent"),
+    path12.join(baseDir, "..", "..", "skills", "xfer-agent"),
     path12.join(baseDir, "..", "skills", "xfer-agent"),
     path12.join(baseDir, "..", "..", "skills", "xfer-agent")
   ];
@@ -49391,13 +49392,13 @@ var fs13 = __toESM(require("node:fs"), 1);
 var os4 = __toESM(require("node:os"), 1);
 var path13 = __toESM(require("node:path"), 1);
 
-// client.ts
+// src/session/client.ts
 var fs2 = __toESM(require("node:fs"), 1);
 var net = __toESM(require("node:net"), 1);
 init_constants();
 init_utils();
 function sendNotify(target2, msg, xferDir) {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     const endpoint = endpointForName(target2, xferDir);
     if (!fs2.existsSync(endpoint)) {
       reject(new Error(`peer "${target2}" not found`));
@@ -49420,7 +49421,7 @@ function sendNotify(target2, msg, xferDir) {
         reject(error62);
       } else {
         sock.end();
-        resolve2(outcome);
+        resolve3(outcome);
       }
     };
     sock.on("connect", () => {
@@ -49474,7 +49475,7 @@ function sendNotify(target2, msg, xferDir) {
 init_constants();
 init_mesh_config();
 
-// handoff-kind.ts
+// src/core/handoff-kind.ts
 var KIND_LINE = /^kind:[ \t]*(task|notification)[ \t]*$/i;
 function formatHandoffKind(kind) {
   return `kind: ${kind}`;
@@ -49487,7 +49488,7 @@ function stampHandoffKind(document2, kind) {
   return lines.join("\n");
 }
 
-// sender-cwd-stamp.ts
+// src/session/sender-cwd-stamp.ts
 var fs4 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 var STAMP_LINE = /^<!--\s*xfer:sender-cwd\s+cwd=(.+?)\s+project=(\S*)\s+machine=(\S*?)(?:\s+branch=(\S*?))?\s*-->$/;
@@ -49532,7 +49533,7 @@ function senderCwdStampFor(cwd, machine) {
   };
 }
 
-// targets.ts
+// src/core/targets.ts
 var fs5 = __toESM(require("node:fs"), 1);
 var path5 = __toESM(require("node:path"), 1);
 init_constants();
@@ -49576,7 +49577,7 @@ var path11 = __toESM(require("node:path"), 1);
 var import_node_child_process2 = require("node:child_process");
 init_constants();
 
-// mesh.ts
+// src/mesh/mesh.ts
 var fs8 = __toESM(require("node:fs"), 1);
 var os3 = __toESM(require("node:os"), 1);
 var path9 = __toESM(require("node:path"), 1);
@@ -49586,7 +49587,8 @@ init_mesh_engine();
 init_mesh_log();
 init_utils();
 var MESH_RUNTIME_BUNDLE = "mesh-runtime.cjs";
-async function loadMeshRuntimeBundle(dir = __dirname) {
+var MESH_RUNTIME_DIR = path9.resolve(__dirname, "../..");
+async function loadMeshRuntimeBundle(dir = MESH_RUNTIME_DIR) {
   const bundleUrl = url2.pathToFileURL(path9.join(dir, MESH_RUNTIME_BUNDLE)).href;
   try {
     const mod = await import(bundleUrl);
@@ -49870,7 +49872,7 @@ var MeshNode = class {
 // adapterd.src/daemon.ts
 init_mesh_engine();
 
-// server.ts
+// src/session/server.ts
 var net2 = __toESM(require("node:net"), 1);
 init_constants();
 function createServer2(delivery) {
@@ -49917,11 +49919,11 @@ function createServer2(delivery) {
 // adapterd.src/daemon.ts
 init_utils();
 
-// endpoint-claim.ts
+// src/link/endpoint-claim.ts
 var fs9 = __toESM(require("node:fs"), 1);
 init_utils();
 
-// gc.ts
+// src/core/gc.ts
 var net3 = __toESM(require("node:net"), 1);
 function processAlive(pid) {
   try {
@@ -49934,7 +49936,7 @@ function processAlive(pid) {
   }
 }
 function socketHasListener(sockPath, timeoutMs = 1e3) {
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     let settled = false;
     const conn = net3.connect({ path: sockPath });
     const finish = (listening) => {
@@ -49942,7 +49944,7 @@ function socketHasListener(sockPath, timeoutMs = 1e3) {
       settled = true;
       clearTimeout(timer);
       conn.destroy();
-      resolve2(listening);
+      resolve3(listening);
     };
     const timer = setTimeout(() => finish(true), timeoutMs);
     timer.unref?.();
@@ -49954,7 +49956,7 @@ function socketHasListener(sockPath, timeoutMs = 1e3) {
   });
 }
 
-// endpoint-claim.ts
+// src/link/endpoint-claim.ts
 async function nameIsLive(name, xferDir) {
   const pid = readPeerMetadata(name, xferDir).pid;
   if (typeof pid === "number" && processAlive(pid)) return true;
@@ -50095,9 +50097,9 @@ async function startAdapterd(options) {
       console.error(`[xfer-adapterd] --on-handoff failed to spawn: ${errorText(err)}`);
       return;
     }
-    const done = new Promise((resolve2) => {
-      child.on("error", () => resolve2());
-      child.on("close", () => resolve2());
+    const done = new Promise((resolve3) => {
+      child.on("error", () => resolve3());
+      child.on("close", () => resolve3());
     }).then(() => {
       handoffChildren.delete(done);
     });
@@ -50158,7 +50160,7 @@ async function startAdapterd(options) {
     } catch (err) {
       meshNode = null;
       try {
-        await new Promise((resolve2) => server.close(() => resolve2()));
+        await new Promise((resolve3) => server.close(() => resolve3()));
       } catch {
       }
       try {
@@ -50176,7 +50178,7 @@ async function startAdapterd(options) {
   const close = async () => {
     if (!closed) closed = true;
     try {
-      await new Promise((resolve2) => server.close(() => resolve2()));
+      await new Promise((resolve3) => server.close(() => resolve3()));
     } catch {
     }
     try {
@@ -50212,7 +50214,7 @@ async function startAdapterd(options) {
   };
 }
 function listen(server, endpoint) {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     const onError = (error62) => reject(error62);
     server.once("error", onError);
     server.once("listening", () => {
@@ -50221,7 +50223,7 @@ function listen(server, endpoint) {
         fs11.chmodSync(endpoint, 384);
       } catch {
       }
-      resolve2();
+      resolve3();
     });
     server.listen(endpoint);
   });

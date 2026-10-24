@@ -2,14 +2,14 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
-import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
-import { MeshNode, type MeshNodeOptions } from "../mesh.ts";
-import type { MeshConfig } from "../mesh-config.ts";
-import { createRivetEngine } from "../mesh-engine.ts";
-import { createServer } from "../server.ts";
-import type { XferNotifyMessage } from "../types.ts";
-import { endpointForName, metadataForName } from "../utils.ts";
-import { claimEndpoint } from "../endpoint-claim.ts";
+import { MESH_CONFIG_PATH, XFER_DIR } from "../src/core/constants.ts";
+import { MeshNode, type MeshNodeOptions } from "../src/mesh/mesh.ts";
+import type { MeshConfig } from "../src/mesh/mesh-config.ts";
+import { createRivetEngine } from "../src/mesh/mesh-engine.ts";
+import { createServer } from "../src/session/server.ts";
+import type { XferNotifyMessage } from "../src/core/types.ts";
+import { endpointForName, metadataForName } from "../src/core/utils.ts";
+import { claimEndpoint } from "../src/link/endpoint-claim.ts";
 import { appendInbox, inboxPathForName, type InboxRecord } from "./inbox.ts";
 
 /** Where an inbound handoff goes, one step at a time (first = always). */

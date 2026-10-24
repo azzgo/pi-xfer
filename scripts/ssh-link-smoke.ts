@@ -16,8 +16,8 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { listLinks, listOwnLinks, sshDown, sshUp } from "../ssh-link.ts";
-import { encodeAgentName } from "../utils.ts";
+import { listLinks, listOwnLinks, sshDown, sshUp } from "../src/link/ssh-link.ts";
+import { encodeAgentName } from "../src/core/utils.ts";
 
 const assert = (cond: unknown, what: string): void => {
   if (!cond) throw new Error(`FAIL: ${what}`);

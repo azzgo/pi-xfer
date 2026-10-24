@@ -143,7 +143,7 @@ completion and validation while you type. Add one line at the top:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/azzgo/pi-xfer/main/mesh.config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/azzgo/pi-xfer/main/src/mesh/mesh.config.schema.json",
   "endpoint": "http://engine.example.com:6420/",
   "namespace": "default",
   "token": "!pass show mesh-token",

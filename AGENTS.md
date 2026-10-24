@@ -25,7 +25,7 @@ documents it points to.
   One documented exception: the `examples/` serverless node cannot be exercised any other way — a Durable Object has no local stand-in — so its verification is a **manual, one-off, written-down procedure** on a real deployment. It stays out of `npm test` and out of every script; the procedure lives in the example's docs, not in code.
   This is now **structural, not just a rule**: `mesh-guard.ts` arms itself whenever `NODE_TEST_CONTEXT` is set (a `node --test` worker, or anything it spawns) and then refuses every non-loopback endpoint from both outbound planes (`fetch` via `engineApi`, `rivetkit/client` via `createClient`) as well as the default mesh config path. `XFER_ALLOW_REMOTE=1` is the only opt-in and no test sets it — `mesh-guard.test.ts` asserts that repo-wide. A test that forgets to inject a stub fails loudly instead of reaching a deployment.
 - **No runtime npm dependencies** for the extension itself; rivetkit stays out of the dependency list (see the ADR above).
-- **Verify visible changes**: `npm test` green is not verification for UI or interactive changes — after editing `admin-*.ts` pages or `commands.ts` flows, run the `.agents/skills/verify/` skill (chrome-devtools MCP for the admin page, tmux for command smoke). web-picker userscript stays out of scope (manual).
+- **Verify visible changes**: `npm test` green is not verification for UI or interactive changes — after editing admin pages (`admin-main.ts`) or `src/commands.ts` flows, run the `.agents/skills/verify/` skill (chrome-devtools MCP for the admin page, tmux for command smoke). web-picker userscript stays out of scope (manual).
 - **Cross-machine verification has its own rules**: when a change involves a Link (or any two-machine transport), judging results is a separate skill — a running process never picks up new code, tmpdirs differ per machine, and mesh vs Link deliveries land in same-named files. See "Judging results across two machines" in `.agents/skills/verify/SKILL.md` and the three-line checklist in `docs/dev/ssh-link-verification.md` before trusting any cross-machine observation.
 - **One installed copy**: keep `npm:pi-xfer` as the only pi-xfer entry in `~/.pi/agent/settings.json` and upgrade it with `pi update --extensions`. Two copies in one session collide on `xfer_to` / `xfer_mesh_to` / `--xfer` and the second fails to load. Never `pi install <path to this repo>`; run the working tree with `pi -ne -e ./` (skip discovery, load this `index.ts`).
 - **Releases**: follow `docs/release.md` — `npm version` + `git push origin main --follow-tags`; never hand-edit the version and tag separately.
@@ -34,10 +34,11 @@ documents it points to.
 
 | Path | Role |
 |---|---|
-| `*.ts` (root) | extension source; `index.ts` is the entry point |
+| `index.ts` (root) | extension entry point (what `pi.extensions` points at) |
+| `src/` | extension source by domain: `core/` (shared kernel), `mesh/`, `link/`, `board/`, `session/`, `broker/`, `admin/` — tests live next to their modules |
 | `mesh-runtime.src/` | mesh engine source (bundled to `mesh-runtime.cjs`) |
 | `web-picker.src/` | userscript source (bundled to `web-picker.user.js`) |
-| `broker-main.ts`, `admin-main.ts` | daemon sources (bundled to `broker.cjs`, `admin.cjs` — what the managers spawn) |
+| `broker-main.ts`, `admin-main.ts` (root) | daemon sources (bundled to `broker.cjs`, `admin.cjs` — what the managers spawn) |
 | `docs/adr/`, `CONTEXT.md` | decisions and glossary — update only with cause, never casually |
 | `skills/xfer/` | the pi-side skill + its `scripts/xfer` wrapper — canonical here, deployed by symlink (never copied into dotfiles) |
 | `skills/xfer-agent/` | the non-pi host skill, rendered by `xfer-adapterd install` |

@@ -51,11 +51,11 @@ var net = __toESM(require("node:net"), 1);
 var os3 = __toESM(require("node:os"), 1);
 var path5 = __toESM(require("node:path"), 1);
 
-// constants.ts
+// src/core/constants.ts
 var os2 = __toESM(require("node:os"), 1);
 var path2 = __toESM(require("node:path"), 1);
 
-// mesh-guard.ts
+// src/mesh/mesh-guard.ts
 var os = __toESM(require("node:os"), 1);
 var path = __toESM(require("node:path"), 1);
 var MeshRemoteBlockedError = class extends Error {
@@ -117,7 +117,7 @@ function resolveMeshConfigPath(realPath, env = process.env) {
   return path.join(os.tmpdir(), `pi-xfer-test-${process.pid}-no-mesh.config.json`);
 }
 
-// constants.ts
+// src/core/constants.ts
 var XFER_DIR = path2.join(os2.homedir(), ".pi", "xfer");
 var MESH_CONFIG_PATH = resolveMeshConfigPath(path2.join(XFER_DIR, "mesh.config.json"));
 var MESH_CACHE_DIR = path2.join(XFER_DIR, "cache");
@@ -125,7 +125,7 @@ var CONNECT_TIMEOUT_MS = 5e3;
 var ACK_TIMEOUT_MS = 5e3;
 var MAX_FRAME_BYTES = 1024 * 1024;
 
-// wire.ts
+// src/core/wire.ts
 var WIRE_VERSION = 0;
 var WIRE = {
   V: WIRE_VERSION,
@@ -180,12 +180,12 @@ var ERR = {
 };
 var FROM_WEB_PICKER = "web-picker";
 
-// handoff-kind.ts
+// src/core/handoff-kind.ts
 function formatHandoffKind(kind) {
   return `kind: ${kind}`;
 }
 
-// handoff-doc.ts
+// src/core/handoff-doc.ts
 function followUpSection(fromTarget, brokerCliPath) {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
   const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "broker-main.ts";
@@ -358,11 +358,11 @@ function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath }
   return lines.join("\n") + "\n";
 }
 
-// mesh-config.ts
+// src/mesh/mesh-config.ts
 var import_node_child_process = require("node:child_process");
 var fs = __toESM(require("node:fs"), 1);
 
-// utils.ts
+// src/core/utils.ts
 var path3 = __toESM(require("node:path"), 1);
 function encodeAgentName(name) {
   return encodeURIComponent(name);
@@ -391,7 +391,7 @@ async function withTimeout(promise, ms) {
   }
 }
 
-// mesh-config.ts
+// src/mesh/mesh-config.ts
 var XFER_INSTANCE_ACTOR = "xfer-instance";
 function parseMeshConfig(raw) {
   if (typeof raw !== "object" || raw === null) {
@@ -632,7 +632,7 @@ async function resolveMeshConfig(config, options = {}) {
   return resolved;
 }
 
-// mesh-describer.ts
+// src/mesh/mesh-describer.ts
 var DESCRIBE_TIMEOUT_MS = 5e3;
 var GET_DESCRIPTION_ACTION = "getDescription";
 var describers = /* @__PURE__ */ new Map();
@@ -667,7 +667,7 @@ async function connect(configPath) {
   }
 }
 
-// targets.ts
+// src/core/targets.ts
 var fs2 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 var NULL_METADATA = { sessionName: null, cwd: null, status: null };
@@ -716,7 +716,7 @@ async function listTargetsWithDescriptions(xferDir = XFER_DIR, describe) {
   );
 }
 
-// ws-server.ts
+// src/broker/ws-server.ts
 var crypto = __toESM(require("node:crypto"), 1);
 var OPCODE_TEXT = 1;
 var OPCODE_CLOSE = 8;

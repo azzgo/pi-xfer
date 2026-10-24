@@ -202,7 +202,7 @@
     }
   }
 
-  // wire.ts
+  // src/core/wire.ts
   var WIRE_VERSION = 0;
   var WIRE = {
     V: WIRE_VERSION,

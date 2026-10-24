@@ -49,14 +49,14 @@ import * as net from "node:net";
 import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./constants.ts";
-import { ERR, FROM_WEB_PICKER, WIRE } from "./wire.ts";
-import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./handoff-doc.ts";
-import { createMeshDescriber } from "./mesh-describer.ts";
-import { listTargetsWithDescriptions } from "./targets.ts";
-import { encodeAgentName, isEntryPoint } from "./utils.ts";
-import { attachWsServer, type WsConnection } from "./ws-server.ts";
-import { WIRE_VERSION } from "./wire.ts";
+import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./src/core/constants.ts";
+import { ERR, FROM_WEB_PICKER, WIRE } from "./src/core/wire.ts";
+import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./src/core/handoff-doc.ts";
+import { createMeshDescriber } from "./src/mesh/mesh-describer.ts";
+import { listTargetsWithDescriptions } from "./src/core/targets.ts";
+import { encodeAgentName, isEntryPoint } from "./src/core/utils.ts";
+import { attachWsServer, type WsConnection } from "./src/broker/ws-server.ts";
+import { WIRE_VERSION } from "./src/core/wire.ts";
 
 /** Broker software version (welcome + /status + broker.json), from package.json. */
 export const VERSION: string = (() => {

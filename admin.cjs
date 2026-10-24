@@ -42,7 +42,7 @@ var fs8 = __toESM(require("node:fs"), 1);
 var http2 = __toESM(require("node:http"), 1);
 var path10 = __toESM(require("node:path"), 1);
 
-// board.ts
+// src/board/board.ts
 var fs = __toESM(require("node:fs"), 1);
 var os = __toESM(require("node:os"), 1);
 var path = __toESM(require("node:path"), 1);
@@ -188,21 +188,21 @@ var Board = class {
   }
 };
 
-// broker-manager.ts
+// src/broker/broker-manager.ts
 var import_node_child_process2 = require("node:child_process");
 var fs6 = __toESM(require("node:fs"), 1);
 var net2 = __toESM(require("node:net"), 1);
 var path7 = __toESM(require("node:path"), 1);
 
-// utils.ts
+// src/core/utils.ts
 var fs2 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 
-// constants.ts
+// src/core/constants.ts
 var os3 = __toESM(require("node:os"), 1);
 var path3 = __toESM(require("node:path"), 1);
 
-// mesh-guard.ts
+// src/mesh/mesh-guard.ts
 var os2 = __toESM(require("node:os"), 1);
 var path2 = __toESM(require("node:path"), 1);
 var MeshRemoteBlockedError = class extends Error {
@@ -264,7 +264,7 @@ function resolveMeshConfigPath(realPath, env = process.env) {
   return path2.join(os2.tmpdir(), `pi-xfer-test-${process.pid}-no-mesh.config.json`);
 }
 
-// constants.ts
+// src/core/constants.ts
 var XFER_DIR = path3.join(os3.homedir(), ".pi", "xfer");
 var MESH_CONFIG_PATH = resolveMeshConfigPath(path3.join(XFER_DIR, "mesh.config.json"));
 var MESH_CACHE_DIR = path3.join(XFER_DIR, "cache");
@@ -273,7 +273,7 @@ var ACK_TIMEOUT_MS = 5e3;
 var MAX_FRAME_BYTES = 1024 * 1024;
 var MESH_PROBE_TIMEOUT_MS = 2500;
 
-// utils.ts
+// src/core/utils.ts
 function encodeAgentName(name) {
   return encodeURIComponent(name);
 }
@@ -346,7 +346,7 @@ var net = __toESM(require("node:net"), 1);
 var os4 = __toESM(require("node:os"), 1);
 var path6 = __toESM(require("node:path"), 1);
 
-// wire.ts
+// src/core/wire.ts
 var WIRE_VERSION = 0;
 var WIRE = {
   V: WIRE_VERSION,
@@ -401,12 +401,12 @@ var ERR = {
 };
 var FROM_WEB_PICKER = "web-picker";
 
-// handoff-kind.ts
+// src/core/handoff-kind.ts
 function formatHandoffKind(kind) {
   return `kind: ${kind}`;
 }
 
-// handoff-doc.ts
+// src/core/handoff-doc.ts
 function followUpSection(fromTarget, brokerCliPath) {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
   const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "broker-main.ts";
@@ -579,7 +579,7 @@ function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath }
   return lines.join("\n") + "\n";
 }
 
-// mesh-config.ts
+// src/mesh/mesh-config.ts
 var import_node_child_process = require("node:child_process");
 var fs3 = __toESM(require("node:fs"), 1);
 var XFER_INSTANCE_ACTOR = "xfer-instance";
@@ -843,7 +843,7 @@ function deserializeMeshKey(serialized) {
   return parts;
 }
 
-// mesh-describer.ts
+// src/mesh/mesh-describer.ts
 var DESCRIBE_TIMEOUT_MS = 5e3;
 var GET_DESCRIPTION_ACTION = "getDescription";
 var describers = /* @__PURE__ */ new Map();
@@ -878,7 +878,7 @@ async function connect(configPath) {
   }
 }
 
-// targets.ts
+// src/core/targets.ts
 var fs4 = __toESM(require("node:fs"), 1);
 var path5 = __toESM(require("node:path"), 1);
 var NULL_METADATA = { sessionName: null, cwd: null, status: null };
@@ -927,7 +927,7 @@ async function listTargetsWithDescriptions(xferDir = XFER_DIR, describe) {
   );
 }
 
-// ws-server.ts
+// src/broker/ws-server.ts
 var crypto = __toESM(require("node:crypto"), 1);
 var OPCODE_TEXT = 1;
 var OPCODE_CLOSE = 8;
@@ -2060,7 +2060,7 @@ if (isMainModule()) {
   });
 }
 
-// broker-manager.ts
+// src/broker/broker-manager.ts
 var DEFAULT_BROKER_PORT = 4719;
 var PROBE_INTERVAL_MS = 50;
 var DEFAULT_READINESS_TIMEOUT_MS = 5e3;
@@ -2235,7 +2235,7 @@ ${lines.slice(-LOG_TAIL_LINES).join("\n")}`;
     }
   }
 };
-var BROKER_MAIN = path7.join(__dirname, "broker.cjs");
+var BROKER_MAIN = path7.join(__dirname, "../../broker.cjs");
 function readBrokerJson(xferDir) {
   try {
     const data = JSON.parse(fs6.readFileSync(path7.join(xferDir, "broker.json"), "utf-8"));
@@ -2354,7 +2354,7 @@ if (isMainModule2()) {
   });
 }
 
-// gc.ts
+// src/core/gc.ts
 var fs7 = __toESM(require("node:fs"), 1);
 var net3 = __toESM(require("node:net"), 1);
 var path8 = __toESM(require("node:path"), 1);
@@ -2535,11 +2535,11 @@ async function collectGarbage(xferDir) {
   return report;
 }
 
-// mesh-log.ts
+// src/mesh/mesh-log.ts
 var path9 = __toESM(require("node:path"), 1);
 var MESH_LOG_PATH = path9.join(XFER_DIR, "mesh.log");
 
-// mesh-engine.ts
+// src/mesh/mesh-engine.ts
 var NO_ENVOYS_ERROR = "no_envoys";
 function isNoEnvoys(error) {
   if (typeof error === "string") return error === NO_ENVOYS_ERROR;
@@ -2619,7 +2619,7 @@ function toMeshNodeInfo(actor) {
   };
 }
 
-// mesh-status.ts
+// src/mesh/mesh-status.ts
 var MESH_STATE_ORDER = ["Running", "Sleeping", "NoRunner", "Mismatch", "Pending", "Crashed", "Unknown"];
 var MESH_STATE_MARKS = {
   Running: { glyph: "●", label: "running" },

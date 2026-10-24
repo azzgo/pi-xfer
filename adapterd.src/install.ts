@@ -72,6 +72,7 @@ export function installAgentSkill(options: InstallOptions): InstallResult {
 export function findSkillsRoot(baseDir: string = import.meta.dirname): string {
   const candidates = [
     path.join(baseDir, "skills", "xfer-agent"),
+    path.join(baseDir, "..", "..", "skills", "xfer-agent"),
     path.join(baseDir, "..", "skills", "xfer-agent"),
     path.join(baseDir, "..", "..", "skills", "xfer-agent"),
   ];

@@ -31,8 +31,9 @@
     "node": ">=22"
   },
   "files": [
-    "*.ts",
-    "!*.test.ts",
+    "index.ts",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
     "broker.cjs",
     "broker.cjs.sha256",
     "admin.cjs",
@@ -50,7 +51,7 @@
   ],
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --import './ts-resolve-hook.mjs' --test './*.test.ts'",
+    "test": "node --import './ts-resolve-hook.mjs' --test './src/**/*.test.ts'",
     "prepare": "husky"
   },
   "peerDependencies": {

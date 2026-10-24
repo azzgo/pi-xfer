@@ -12,17 +12,17 @@ import * as fs from "node:fs";
 import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
-import { sendNotify } from "./client.ts";
-import { senderCwdStampFor, stampDocument } from "./sender-cwd-stamp.ts";
-import { stampHandoffKind } from "./handoff-kind.ts";
-import { registerXferCommand } from "./commands.ts";
-import { XferController } from "./controller.ts";
-import { MESH_CONFIG_PATH, XFER_DIR } from "./constants.ts";
-import { MeshNode } from "./mesh.ts";
-import type { XferNotifyOutcome } from "./types.ts";
-import { XferState } from "./state.ts";
-import { listPeers, msgId, readPeerMetadata } from "./utils.ts";
-import { sshDown } from "./ssh-link.ts";
+import { sendNotify } from "./src/session/client.ts";
+import { senderCwdStampFor, stampDocument } from "./src/session/sender-cwd-stamp.ts";
+import { stampHandoffKind } from "./src/core/handoff-kind.ts";
+import { registerXferCommand } from "./src/commands.ts";
+import { XferController } from "./src/session/controller.ts";
+import { MESH_CONFIG_PATH, XFER_DIR } from "./src/core/constants.ts";
+import { MeshNode } from "./src/mesh/mesh.ts";
+import type { XferNotifyOutcome } from "./src/core/types.ts";
+import { XferState } from "./src/session/state.ts";
+import { listPeers, msgId, readPeerMetadata } from "./src/core/utils.ts";
+import { sshDown } from "./src/link/ssh-link.ts";
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag("xfer", {

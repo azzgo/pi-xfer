@@ -16,14 +16,14 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { sendNotify } from "../client.ts";
-import { MESH_CONFIG_PATH, XFER_DIR } from "../constants.ts";
-import { loadMeshConfig, parseMeshConfig, resolveMeshConfig } from "../mesh-config.ts";
-import { stampHandoffKind, type HandoffKind } from "../handoff-kind.ts";
-import type { XferNotifyOutcome } from "../types.ts";
-import { senderCwdStampFor, stampDocument, type SenderCwdStamp } from "../sender-cwd-stamp.ts";
-import { listTargets } from "../targets.ts";
-import { endpointForName, isEntryPoint, metadataForName, msgId } from "../utils.ts";
+import { sendNotify } from "../src/session/client.ts";
+import { MESH_CONFIG_PATH, XFER_DIR } from "../src/core/constants.ts";
+import { loadMeshConfig, parseMeshConfig, resolveMeshConfig } from "../src/mesh/mesh-config.ts";
+import { stampHandoffKind, type HandoffKind } from "../src/core/handoff-kind.ts";
+import type { XferNotifyOutcome } from "../src/core/types.ts";
+import { senderCwdStampFor, stampDocument, type SenderCwdStamp } from "../src/session/sender-cwd-stamp.ts";
+import { listTargets } from "../src/core/targets.ts";
+import { endpointForName, isEntryPoint, metadataForName, msgId } from "../src/core/utils.ts";
 import { defaultAdapterName, startAdapterd, type AdapterdHandle, type AdapterdMeshOptions } from "./daemon.ts";
 import { inboxPathForName, listInbox, takeInbox, type InboxRecord } from "./inbox.ts";
 
@@ -326,7 +326,7 @@ async function runMeshSend(argv: string[], flags: Flags): Promise<void> {
   }
   const body = readDocument(file);
   if (body === null) return;
-  const { sendMeshHandoff } = await import("../mesh-engine.ts");
+  const { sendMeshHandoff } = await import("../src/mesh/mesh-engine.ts");
   const engine = str(flags.engine);
   let config;
   try {
@@ -385,7 +385,7 @@ async function runMeshDown(flags: Flags): Promise<void> {
     fail(`❌ mesh is not configured — ${errorText(err)}`);
     return;
   }
-  const { destroyMeshNode, listMeshNodes } = await import("../mesh-engine.ts");
+  const { destroyMeshNode, listMeshNodes } = await import("../src/mesh/mesh-engine.ts");
   try {
     const nodes = await listMeshNodes(config);
     const node = nodes.find((candidate) => candidate.name === name);

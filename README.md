@@ -75,6 +75,7 @@ Cross-machine has two paths, in this order: the **mesh** is the intended one (di
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
 - `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product
 - `web-picker.src/` + `web-picker.user.js` — userscript source and committed build product
+- `src/` — extension source by domain (`core/`, `mesh/`, `link/`, `board/`, `session/`, `broker/`, `admin/`), tests colocated; `index.ts` is the entry point
 - `broker-main.ts` + `broker.cjs`, `admin-main.ts` + `admin.cjs` — the two daemons, source and committed build products (`npm run build` produces all four)
 
 pi-xfer was formerly maintained inside [azzgo/dotfiles](https://github.com/azzgo/dotfiles) (`pi/agent/extensions/xfer/`); history preserved from the initial commit.
