@@ -188,13 +188,22 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           }
           const items: AutocompleteItem[] = [];
           for (const [pid, group] of groups) {
-            const names = group.map(l => l.name).join(", ");
             const hosts = [...new Set(group.map(l => l.host))].join(", ");
-            const label = group.length === 1 ? group[0].name : names;
+            const arrow = group[0].direction === "in" ? "←" : "→";
+            // A running ssh cannot drop one -L, so the unit of teardown is the
+            // process: the label names every forward it carries, and picking
+            // any one of them takes the whole group.
+            const label = group.length === 1
+              ? group[0].name
+              : `${group[0].name} +${group.length - 1}`;
             items.push({
               value: `ssh down ${group[0].name}`,
               label,
-              description: `${group[0].direction === "in" ? "←" : "→"} ${hosts} · ssh pid ${pid}${group.length > 1 ? ` · ${group.length} forwards (torn down together)` : ""}`,
+              description:
+                `${arrow} ${hosts} · ssh pid ${pid}` +
+                (group.length > 1
+                  ? ` · carries ${group.map(l => l.name).join(", ")} (one process — all go together)`
+                  : ""),
             });
           }
           if (items.length === 0) {
@@ -443,8 +452,15 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
 
         if (sub === "down") {
           if (rest.length > 0) {
-            ctx.ui.notify("Usage: /xfer ssh down [name|host] — bare tears down every Link this pi started", "error");
+            ctx.ui.notify("Usage: /xfer ssh down [<forward>|host] — bare tears down every Link this pi started", "error");
             return;
+          }
+          if (!host) {
+            const own = sshOps.own();
+            if (own.length === 0) {
+              ctx.ui.notify("⭕ No ssh Links of ours — nothing to tear down", "info");
+              return;
+            }
           }
           const ident = host;
           const { torn } = sshOps.down(ident);

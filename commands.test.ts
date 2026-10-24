@@ -838,10 +838,20 @@ describe("xfer command: /xfer ssh argument parsing", () => {
   });
 
   it("bare down tears everything this pi owns", async () => {
-    const ssh = stubSshLink();
+    const ssh = stubSshLink({
+      own: () => [{ name: "alpha", host: "pi-nas", pid: 11, owner: process.pid, direction: "in" }],
+    });
     const h = harness({ sshLink: ssh.ops });
     await h.handler("ssh down");
     assert.deepEqual(ssh.calls, ["down *"]);
+  });
+
+  it("bare down says so instead of calling down when nothing is owned", async () => {
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh down");
+    assert.match(h.notifications[0].message, /nothing to tear down/);
+    assert.deepEqual(ssh.calls, []);
   });
 
   it("down completion lists owned forwards, never plain ssh hosts", () => {
@@ -856,7 +866,10 @@ describe("xfer command: /xfer ssh argument parsing", () => {
     const items = h.completions("ssh down ") ?? [];
     const labels = items.map(i => i.label);
     assert.ok(labels.includes("self"));
-    assert.ok(labels.some(l => l.includes("alpha") && l.includes("beta")), "one row per ssh process, naming its group");
+    assert.ok(labels.some(l => l.startsWith("alpha +1")), "one row per ssh process, labelled with its group size");
+    const groupRow = items.find(i => i.label === "alpha +1");
+    assert.match(groupRow!.description, /carries alpha, beta/);
+    assert.match(groupRow!.description, /all go together/);
     assert.ok(!labels.some(l => /github|aliyun/.test(l)), "no unrelated ssh config hosts");
   });
 
