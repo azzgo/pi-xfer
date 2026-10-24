@@ -4,10 +4,15 @@
  * A **Link** is the local endpoint of an ssh-forwarded remote Node: a
  * `<name>.sock` in the top-level xfer dir plus a `.json` marked
  * `{ via: "ssh", host, pid }`. `/xfer ssh up <user@host>` spawns one
- * `ssh -N` process carrying both directions:
+ * `ssh -N` process in exactly one direction, chosen by the caller:
  *
- *   -L  one entry per remote sock found at probe time (snapshot semantics)
- *   -R  this pi's real name, landing in the remote's top-level xfer dir
+ *   -L  (`out`) one entry per remote sock found at probe time (snapshot)
+ *   -R  (`in`)  this pi's real name, landing in the remote's xfer dir
+ *
+ * The direction is never a middle value: each half has a different
+ * precondition — -R needs this pi's socket (always there), -L needs the
+ * remote's socks (only a probe knows). Asserting both at once would assume a
+ * symmetric situation the workflow never guarantees.
  *
  * The ssh process is a child of the extension process, so pi's death tears
  * the tunnel down and the Link sockets vanish — autodispose with no cleanup
@@ -181,8 +186,8 @@ export async function planSshUp(host: string, opts: SshLinkOptions): Promise<Ssh
 
 /**
  * Bring a Link up: kill any previous Link to the same host, spawn `ssh -N`
- * with both directions, write each Link `.json`. Sockets are created by ssh
- * itself, which is what makes them discoverable to `listPeers`.
+ * with the one requested direction, write each Link `.json`. Sockets are
+ * created by ssh itself, which is what makes them discoverable to `listPeers`.
  */
 export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpResult> {
   const plan = await planSshUp(host, opts);
