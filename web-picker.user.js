@@ -3255,6 +3255,77 @@
     };
   }
 
+  // web-picker.src/ui/draggable.js
+  function makeDraggable(el, handle, opts) {
+    const o = opts || {};
+    let drag = null;
+    function clampPos(x, y) {
+      const r = el.getBoundingClientRect();
+      return {
+        x: Math.max(4, Math.min(window.innerWidth - Math.max(48, r.width) - 4, x)),
+        y: Math.max(4, Math.min(window.innerHeight - Math.max(28, r.height) - 4, y))
+      };
+    }
+    function apply(x, y) {
+      const p = clampPos(x, y);
+      el.style.left = p.x + "px";
+      el.style.top = p.y + "px";
+      el.style.right = "auto";
+      el.style.transform = "none";
+    }
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest && e.target.closest("button, textarea, input, select")) return;
+      const r = el.getBoundingClientRect();
+      drag = { sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, target: e.target, moved: false };
+      e.preventDefault();
+    });
+    window.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) <= 4) return;
+      drag.moved = true;
+      apply(drag.ox + e.clientX - drag.sx, drag.oy + e.clientY - drag.sy);
+    }, true);
+    window.addEventListener("pointerup", (e) => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      if (!d.moved) {
+        if (o.onTap) o.onTap(d.target, e);
+        return;
+      }
+      if (!o.key) return;
+      try {
+        const r = el.getBoundingClientRect();
+        sessionStorage.setItem(o.key, JSON.stringify({ x: r.left, y: r.top }));
+      } catch (err) {
+      }
+    }, true);
+    window.addEventListener("pointercancel", () => {
+      drag = null;
+    }, true);
+    if (o.key) {
+      try {
+        const s = sessionStorage.getItem(o.key);
+        if (s) {
+          const p = JSON.parse(s);
+          if (typeof p.x === "number" && typeof p.y === "number") apply(p.x, p.y);
+        }
+      } catch (err) {
+      }
+    }
+    return {
+      // 视口变小（打开 devtools 等）后把浮层拉回可视区；隐藏中的浮层跳过，
+      // 由 setActive/openPanel 显示时补 clamp
+      clamp() {
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        const p = clampPos(r.left, r.top);
+        if (p.x !== r.left || p.y !== r.top) apply(p.x, p.y);
+      }
+    };
+  }
+
   // web-picker.src/ui/bag.js
   var PAGE_GROUP_MAX_OPEN = 50;
   function initBag(ctx) {
@@ -3263,7 +3334,7 @@
     const drawer = document.createElement("div");
     drawer.id = "bagdrawer";
     buildDrawer(drawer);
-    root.querySelector("#panel").parentElement.appendChild(drawer);
+    root.appendChild(drawer);
     function buildDrawer(el) {
       const bh = document.createElement("div");
       bh.className = "bh";
@@ -3472,6 +3543,7 @@
       elBagEntry.addEventListener("click", toggleBag);
     };
     drawer.querySelector("#bagclose").addEventListener("click", closeDrawer);
+    makeDraggable(drawer, drawer.querySelector(".bh"), {});
     elBagList.addEventListener("click", (e) => {
       const del = e.target && e.target.closest ? e.target.closest(".del") : null;
       if (del) {
@@ -3644,77 +3716,6 @@
       conn.connect();
     });
     elSCancel.addEventListener("click", closeSettings);
-  }
-
-  // web-picker.src/ui/draggable.js
-  function makeDraggable(el, handle, opts) {
-    const o = opts || {};
-    let drag = null;
-    function clampPos(x, y) {
-      const r = el.getBoundingClientRect();
-      return {
-        x: Math.max(4, Math.min(window.innerWidth - Math.max(48, r.width) - 4, x)),
-        y: Math.max(4, Math.min(window.innerHeight - Math.max(28, r.height) - 4, y))
-      };
-    }
-    function apply(x, y) {
-      const p = clampPos(x, y);
-      el.style.left = p.x + "px";
-      el.style.top = p.y + "px";
-      el.style.right = "auto";
-      el.style.transform = "none";
-    }
-    handle.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      if (e.target.closest && e.target.closest("button, textarea, input, select")) return;
-      const r = el.getBoundingClientRect();
-      drag = { sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, target: e.target, moved: false };
-      e.preventDefault();
-    });
-    window.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) <= 4) return;
-      drag.moved = true;
-      apply(drag.ox + e.clientX - drag.sx, drag.oy + e.clientY - drag.sy);
-    }, true);
-    window.addEventListener("pointerup", (e) => {
-      if (!drag) return;
-      const d = drag;
-      drag = null;
-      if (!d.moved) {
-        if (o.onTap) o.onTap(d.target, e);
-        return;
-      }
-      if (!o.key) return;
-      try {
-        const r = el.getBoundingClientRect();
-        sessionStorage.setItem(o.key, JSON.stringify({ x: r.left, y: r.top }));
-      } catch (err) {
-      }
-    }, true);
-    window.addEventListener("pointercancel", () => {
-      drag = null;
-    }, true);
-    if (o.key) {
-      try {
-        const s = sessionStorage.getItem(o.key);
-        if (s) {
-          const p = JSON.parse(s);
-          if (typeof p.x === "number" && typeof p.y === "number") apply(p.x, p.y);
-        }
-      } catch (err) {
-      }
-    }
-    return {
-      // 视口变小（打开 devtools 等）后把浮层拉回可视区；隐藏中的浮层跳过，
-      // 由 setActive/openPanel 显示时补 clamp
-      clamp() {
-        const r = el.getBoundingClientRect();
-        if (!r.width && !r.height) return;
-        const p = clampPos(r.left, r.top);
-        if (p.x !== r.left || p.y !== r.top) apply(p.x, p.y);
-      }
-    };
   }
 
   // web-picker.src/ui/fab.js

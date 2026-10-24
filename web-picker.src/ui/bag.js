@@ -9,6 +9,7 @@
 import { GM_TARGET } from '../constants.js';
 import { gm } from '../storage.js';
 import { escapeHtml } from '../dom-utils.js';
+import { makeDraggable } from './draggable.js';
 import { t } from '../i18n.js';
 import { setHTML, clearHTML } from '../tt.js';
 
@@ -27,7 +28,9 @@ export function initBag(ctx) {
   // writes through tt.js). buildDrawer() assembles nodes directly — the
   // template needs element refs anyway, so build-and-grab beats parse-and-query.
   buildDrawer(drawer);
-  root.querySelector('#panel').parentElement.appendChild(drawer);
+  // root is the shadow root itself — it has no parentElement; children of it
+  // (panel, fab, settings) are all direct nodes, so the drawer joins them there.
+  root.appendChild(drawer);
 
   function buildDrawer(el) {
     const bh = document.createElement('div'); bh.className = 'bh';
@@ -224,6 +227,10 @@ export function initBag(ctx) {
   ctx.setBagEntry = (el) => { elBagEntry = el; elBagEntry.addEventListener('click', toggleBag); };
 
   drawer.querySelector('#bagclose').addEventListener('click', closeDrawer);
+
+  // 抽屉可拖（handle = 标题栏）；位置不持久 —— 每次打开贴回面板左侧的默认位，
+  // 与面板的联动布局（right: 380px）由 CSS 默认值给出，拖走后面板移动不追随（v1 取舍）。
+  makeDraggable(drawer, drawer.querySelector('.bh'), {});
 
   // ---------- accordion + note edit + delete ----------
   elBagList.addEventListener('click', (e) => {
