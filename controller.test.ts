@@ -257,7 +257,7 @@ describe("inbound: document integrity against the sender's hash", () => {
     assert.equal(c.lastIntegrity, "verified");
   });
 
-  it("records `mismatch` when the body was altered in flight", () => {
+  it("records `mismatch` when the body was altered before arrival", () => {
     const c = controller();
     c.deliverInbound({
       type: "xfer-notify", msg_id: "i2", from: "remote", document: body,

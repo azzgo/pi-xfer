@@ -118,19 +118,19 @@ describe("ack reports payload integrity", () => {
     }
   };
 
-  it("says corrupt when the body did not match the sender's hash", async () => {
+  it("keeps outcome delivered even on mismatch — integrity rides separately", async () => {
     const ack = await roundTrip("mismatch");
-    assert.equal(ack.outcome, "corrupt");
-    assert.equal(ack.integrity, "mismatch");
+    assert.equal(ack.outcome, "delivered", "ADR-0020 four values are not extended");
+    assert.equal(ack.integrity, "mismatch", "the alteration is its own field");
   });
 
-  it("says delivered when the body matched", async () => {
+  it("reports verified when the body matched", async () => {
     const ack = await roundTrip("verified");
     assert.equal(ack.outcome, "delivered");
     assert.equal(ack.integrity, "verified");
   });
 
-  it("says delivered with no integrity field when nothing was checked", async () => {
+  it("carries no integrity field when nothing was checked", async () => {
     const ack = await roundTrip();
     assert.equal(ack.outcome, "delivered");
     assert.equal(ack.integrity, undefined);

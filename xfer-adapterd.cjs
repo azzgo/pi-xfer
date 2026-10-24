@@ -49458,10 +49458,7 @@ function sendNotify(target2, msg, xferDir) {
         }
         const ack = response;
         if (ack.type === "ack" && ack.msg_id === msg.msg_id) {
-          finish(
-            void 0,
-            ack.outcome === "delivered" ? "delivered" : ack.outcome === "corrupt" ? "corrupt" : "unknown"
-          );
+          finish(void 0, ack.outcome === "delivered" ? "delivered" : "unknown");
           return;
         }
       }
@@ -49907,7 +49904,7 @@ function createServer2(delivery) {
             JSON.stringify({
               type: "ack",
               msg_id: msg.msg_id,
-              outcome: integrity === "mismatch" ? "corrupt" : "delivered",
+              outcome: "delivered",
               ...integrity ? { integrity } : {}
             }) + "\n"
           );

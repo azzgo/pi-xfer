@@ -80,19 +80,13 @@ export interface XferNotifyMessage {
  * say `delivered`. `unknown` must never be presented as a reason to retry — a second
  * send is what turns an ambiguity into a real duplicate.
  */
-export type XferNotifyOutcome =
-  | "queued"
-  | "delivered"
-  /**
-   * The frame arrived but its body did not match the sender's `docSha256`.
-   * The handoff reached a session with different bytes than were sent — most
-   * likely an outbound redaction rewrote it. Distinct from `delivered` because
-   * the sender must be able to tell "it landed intact" from "it landed altered";
-   * folding this into `delivered` would repeat the mistake ADR-0020 fixed.
-   */
-  | "corrupt"
-  | "unknown"
-  | "not-delivered";
+export type XferNotifyOutcome = "queued" | "delivered" | "unknown" | "not-delivered";
+// Integrity deliberately lives OUTSIDE this union (ADR-0020 four values; see
+// server.ts): folding "the body arrived altered" in as a fifth outcome would
+// silently downgrade it wherever outcomes are enumerated — mcp-gateway grounds
+// unknown values to `unknown` with no test to catch it, and every consumer's
+// exhaustive switch becomes a lie. Instead the ack carries a separate
+// `integrity` field and the sender's own docSha256 lets it verify directly.
 
 /** This agent's identity for the current session. */
 export interface Identity {

@@ -57,7 +57,7 @@ export function createServer(delivery: InboundDelivery): net.Server {
             JSON.stringify({
               type: "ack",
               msg_id: msg.msg_id,
-              outcome: integrity === "mismatch" ? "corrupt" : "delivered",
+              outcome: "delivered",
               ...(integrity ? { integrity } : {}),
             }) + "\n",
           );
