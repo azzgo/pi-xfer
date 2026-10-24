@@ -768,7 +768,7 @@ function stubSshLink(overrides: Partial<import("./commands.js").SshLinkOperation
       calls.push(`up ${direction} ${host} ${(names ?? []).join(",")}`.trim());
       return { host, pid: 4242, direction, names: names ?? ["self"], rebuilt: [] };
     },
-    down: (host) => { calls.push(`down ${host ?? "*"}`); return []; },
+    down: (ident) => { calls.push(`down ${ident ?? "*"}`); return { torn: [] }; },
     plan: async (host, direction, names) => ({ host, remoteDir: "/remote", names: names ?? [] }),
     probe: async (host) => { calls.push(`probe ${host}`); return { dir: "/remote/.pi/xfer", names: ["alpha", "beta"] }; },
     status: () => "up",
@@ -830,11 +830,41 @@ describe("xfer command: /xfer ssh argument parsing", () => {
     assert.deepEqual(ssh.calls, []);
   });
 
-  it("down with a host is scoped to that host", async () => {
+  it("down takes a forward name or host as its identifier", async () => {
     const ssh = stubSshLink();
     const h = harness({ sshLink: ssh.ops });
-    await h.handler("ssh down pi-xfer");
-    assert.deepEqual(ssh.calls, ["down pi-xfer"]);
+    await h.handler("ssh down incus-xfer");
+    assert.deepEqual(ssh.calls, ["down incus-xfer"]);
+  });
+
+  it("bare down tears everything this pi owns", async () => {
+    const ssh = stubSshLink();
+    const h = harness({ sshLink: ssh.ops });
+    await h.handler("ssh down");
+    assert.deepEqual(ssh.calls, ["down *"]);
+  });
+
+  it("down completion lists owned forwards, never plain ssh hosts", () => {
+    const ssh = stubSshLink({
+      own: () => [
+        { name: "alpha", host: "pi-nas", pid: 11, owner: process.pid, direction: "in" },
+        { name: "beta", host: "pi-nas", pid: 11, owner: process.pid, direction: "in" },
+        { name: "self", host: "mac", pid: 22, owner: process.pid, direction: "out" },
+      ],
+    });
+    const h = harness({ sshLink: ssh.ops });
+    const items = h.completions("ssh down ") ?? [];
+    const labels = items.map(i => i.label);
+    assert.ok(labels.includes("self"));
+    assert.ok(labels.some(l => l.includes("alpha") && l.includes("beta")), "one row per ssh process, naming its group");
+    assert.ok(!labels.some(l => /github|aliyun/.test(l)), "no unrelated ssh config hosts");
+  });
+
+  it("down completion says so when this pi owns nothing", () => {
+    const h = harness({ sshLink: stubSshLink().ops });
+    const items = h.completions("ssh down ") ?? [];
+    assert.equal(items.length, 1);
+    assert.match(items[0].label, /none/);
   });
 });
 

@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { XFER_DIR } from "./constants.ts";
 import { readSenderCwdStamp, senderCwdInstruction } from "./sender-cwd-stamp.ts";
-import { readHandoffKind } from "./handoff-kind.ts";
+import { DEFAULT_HANDOFF_KIND, readHandoffKind } from "./handoff-kind.ts";
 import { createServer, listenServer } from "./server.ts";
 import { XferState } from "./state.ts";
 import type { XferNotifyMessage } from "./types.ts";
@@ -27,17 +27,31 @@ export class XferController {
   }
 
   /** Route one inbound frame into the session. */
-  /** Route one inbound frame into the session. `transport` labels non-local paths ("mesh"). */
-  deliverInbound(msg: XferNotifyMessage, transport?: "mesh"): void {
+  /**
+   * Route one inbound frame into the session. `transport` labels non-local
+   * paths ("mesh"). A frame carrying `document` instead of `file` (an ssh Link
+   * always does — the sender's tmp path is unreachable here) is materialised
+   * into a local tmp file first, so everything downstream reads a real path.
+   */
+  deliverInbound(msg: XferNotifyMessage, transport?: "mesh" | "ssh"): void {
     const { pi, state } = this;
+    if (msg.document !== undefined && !msg.file) {
+      const local = path.join(os.tmpdir(), `pi-xfer-${msg.msg_id}.md`);
+      try {
+        fs.writeFileSync(local, msg.document, { encoding: "utf-8", mode: 0o600 });
+        msg = { ...msg, file: local };
+      } catch { /* fall through: the body is still quoted below */ }
+    }
+    msg = { ...msg, file: msg.file ?? "" };
+    const transportLabel = transport ?? (msg.via === "ssh" ? "ssh" : undefined);
     const isIdle = state.isRuntimeIdle();
-    const via = transport ? ` · ${transport}` : "";
+    const via = transportLabel ? ` · ${transportLabel}` : "";
     // Agent senders stamp their cwd into the doc (P1-D); web-picker senders have
     // none — a browser has no working directory to anchor edits to.
-    const stamp = msg.from === FROM_WEB_PICKER ? null : readSenderCwdStamp(msg.file);
-    const isLocalSender = stamp !== null && transport !== "mesh" && stamp.machine === os.hostname();
+    const stamp = msg.from === FROM_WEB_PICKER || !msg.file ? null : readSenderCwdStamp(msg.file);
+    const isLocalSender = stamp !== null && transportLabel === undefined && stamp.machine === os.hostname();
     const cwdLine = stamp ? `\n${senderCwdInstruction(stamp, { local: isLocalSender })}\n` : "";
-    const kind = readHandoffKind(msg.file);
+    const kind = msg.file ? readHandoffKind(msg.file) : DEFAULT_HANDOFF_KIND;
     const body =
       `**Handoff**: \`${msg.msg_id}\` — kind: ${kind}\n\n` +
       `**Request**: ${msg.summary}\n\n` +
@@ -60,7 +74,12 @@ export class XferController {
             body +
             (kind === "task"
               ? `\n\nThis handoff is a **Task**: it asks you for output. Send exactly one reverse handoff to \`${msg.from}\` once you have a conclusion, and declare its kind deliberately — \`notification\` when it carries that conclusion, which closes the exchange, or \`task\` when you are blocked and need something further from \`${msg.from}\`. A bare acknowledgement is not a conclusion.`
-              : `\n\nThis handoff is a **Notification**: it asks you for nothing. Do not reply. Send a reverse handoff only if you are missing information you need, or if the document conflicts with fact — declare it \`task\` when you need something back.`)
+              : `\n\nThis handoff is a **Notification**: it asks you for nothing. Do not reply. Send a reverse handoff only if you are missing information you need, or if the document conflicts with fact — declare it \`task\` when you need something back.`) +
+            (transportLabel === "ssh"
+              ? `\n\nThis arrived over an **ssh Link**, which was opened in one direction only. ` +
+                `A reply may fail with "peer not found": that is the tunnel's shape, not the sender disappearing. ` +
+                `Check with \`/xfer ssh status\` before concluding anything is broken.`
+              : "")
           );
     pi.sendMessage({
       customType: "xfer-inbound",
@@ -73,7 +92,7 @@ export class XferController {
 
   /** Inbound socket server that routes `xfer-notify` into the session. */
   private createInboundServer(): net.Server {
-    return createServer({ deliver: (msg) => this.deliverInbound(msg) });
+    return createServer({ deliver: (msg) => this.deliverInbound(msg, msg.via === "ssh" ? "ssh" : undefined) });
   }
 
   private async listen(ctx: ExtensionContext): Promise<void> {

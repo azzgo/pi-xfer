@@ -32,6 +32,13 @@ Mesh（ADR 0013）为跨机 handoff 提供了注册/发现/路由/离线缓冲�
 - **Link 是一等词汇，不是 Peer**：`<name>.json` 写 `{ via: "ssh", host, pid }`——json 即账本，不另建注册表；`/xfer list` 显示瘦条目（`· via ssh host`，无 cwd/model）。探测远端用 `ssh host 'echo ${XFER_DIR:-$HOME/.pi/xfer}'`，一次往返拿目录+快照。
 - **gc 管文件，in/out/down 管进程**：gc 的 Link 分支只判 pid（不做 listener 探测——ssh 本地端永远 accept，探测无意义）；死 → 删 sock+json 并提示 `/xfer ssh in|out` 重建。gc 不 kill 进程。
 
+## 单向隧道对 handoff 的两条硬约束
+
+Link 的 socket 是本地的，但 socket 后面的人不在本机。ADR 0013 早已为 mesh 解决过同一个矛盾（跨机 `/tmp` 路径失效 → 文档内联进队列消息），Link 沿用同一结论，只是触发条件是"目标是 Link"而不是"传输是 mesh"：
+
+- **文档必须内联，不能只给路径**。发送侧先照旧写本地 tmp（本地观察、日志、返回值的 `Doc:` 都是它），但检测到目标是 Link（同一个 `readPeerMetadata` 判活里能读到 `via: "ssh"`）时，把正文拼进消息帧，收端写入**自己**的 tmp 再走既有 inbound 管线。收端因此永远拿到一个本机可读的路径，下游毫不知情。
+- **不假设反向通道**。`in` 与 `out` 各开半边，没有对侧配合就不存在回路。发送侧检测到目标是 Link 且 `kind: "task"` 时，在结果里明确警告"对方可能答不回来"；收端看到 `· ssh` 标记时也会被告知"回复失败是隧道的形状，不是对方消失"。产品层面**不禁止** `task`——禁止会是撒谎（有人确实两边都开了），但沉默地让 task 掉进虚空更糟。
+
 **明确不做**：路由、离线缓冲、自动发现（发现 = 对端目录快照）、adapterd 支持（pi 扩展专属）。
 
 ## Considered

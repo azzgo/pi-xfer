@@ -21,8 +21,18 @@ export interface XferNotifyMessage {
   type: "xfer-notify";
   msg_id: string;
   from: string;
-  file: string;
+  /**
+   * Absolute path on the SENDER's machine. Absent when the frame carries
+   * `document` instead (a Link always does — the receiver cannot open the
+   * sender's filesystem, ADR-0021).
+   */
+  file?: string;
+  /** Inline document body, used when `file` is not a valid receiver-side path. */
+  document?: string;
   summary: string;
+  /** Set when the socket itself is an ssh Link, so the receiver knows the
+   *  reverse channel may not exist. */
+  via?: "ssh";
 }
 
 

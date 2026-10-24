@@ -63,7 +63,7 @@ try {
   });
   assert(true, "-L tunnel connects end to end (local -> ssh -> remote listener)");
 
-  const down = sshDown("localhost", baseOpts);
+  const down = sshDown("localhost", baseOpts).torn;
   assert(down.length === 1, "sshDown tears down the -L entry");
   assert(!fs.existsSync(path.join(localDir, "remote-alpha.json")), "ledger json removed");
 
@@ -75,7 +75,7 @@ try {
   assert(!fs.existsSync(path.join(localDir, encodeAgentName("self") + ".json")), "in writes no self entry");
   const inLinks = listOwnLinks(baseOpts);
   assert(inLinks.length === 1 && inLinks[0].name === "remote-alpha", "ledger lists the imported node");
-  assert(sshDown("localhost", baseOpts).length === 1, "in Link tears down");
+  assert(sshDown("remote-alpha", baseOpts).torn.length === 1, "in Link tears down by forward name");
 
   // ── direction: out (export this pi) ──
   const outResult = await sshUp("localhost", { ...baseOpts, direction: "out" });
@@ -85,7 +85,7 @@ try {
   assert(!fs.existsSync(path.join(localDir, "remote-alpha.sock")), "out imports nothing");
   const outLinks = listOwnLinks(baseOpts);
   assert(outLinks.length === 1 && outLinks[0].direction === "out", "ledger records the out direction");
-  assert(sshDown("localhost", baseOpts).length === 1, "out Link tears down");
+  assert(sshDown("localhost", baseOpts).torn.length === 1, "out Link tears down by host");
 
   // ── in rejects an unknown remote name, naming what exists ──
   let rejected = "";
@@ -99,7 +99,7 @@ try {
 
   // ── a foreign pi's Link is not ours to tear down ──
   fs.writeFileSync(path.join(localDir, "foreign.json"), JSON.stringify({ via: "ssh", host: "localhost", pid: 999999, owner: 999999, direction: "in" }));
-  assert(sshDown(undefined, baseOpts).length === 0, "sshDown leaves a foreign Link alone");
+  assert(sshDown(undefined, baseOpts).torn.length === 0, "sshDown leaves a foreign Link alone");
   assert(listLinks(baseOpts).length === 1, "the foreign Link record survives");
   fs.unlinkSync(path.join(localDir, "foreign.json"));
   console.log("\nALL PASS");

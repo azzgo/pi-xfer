@@ -83,13 +83,13 @@ describe("ssh-link: sshDown", () => {
     writeLink(dir, "remote-a", "a@host1", deadPid());
     writeLink(dir, "remote-b", "b@host2", deadPid());
 
-    const torn = sshDown("a@host1", opts(dir));
+    const torn = sshDown("a@host1", opts(dir)).torn;
     assert.equal(torn.length, 1);
     assert.equal(fs.existsSync(path.join(dir, "remote-a.json")), false);
     assert.equal(fs.existsSync(path.join(dir, "remote-a.sock")), false);
     assert.equal(fs.existsSync(path.join(dir, "remote-b.json")), true);
 
-    const rest = sshDown(undefined, opts(dir));
+    const rest = sshDown(undefined, opts(dir)).torn;
     assert.equal(rest.length, 1);
     assert.equal(fs.existsSync(path.join(dir, "remote-b.sock")), false);
   });
@@ -97,13 +97,13 @@ describe("ssh-link: sshDown", () => {
   it("survives an already-dead pid", () => {
     const dir = tmpXferDir();
     writeLink(dir, "remote-a", "a@host1", deadPid());
-    assert.equal(sshDown("a@host1", opts(dir)).length, 1);
+    assert.equal(sshDown("a@host1", opts(dir)).torn.length, 1);
   });
 
   it("never touches a Link another pi process owns", () => {
     const dir = tmpXferDir();
     writeLink(dir, "theirs", "a@host1", process.pid + 999999, process.pid + 999999);
-    assert.equal(sshDown(undefined, opts(dir)).length, 0);
+    assert.equal(sshDown(undefined, opts(dir)).torn.length, 0);
     assert.equal(fs.existsSync(path.join(dir, "theirs.sock")), true);
     assert.equal(fs.existsSync(path.join(dir, "theirs.json")), true);
   });
@@ -146,3 +146,28 @@ async function collect(dir: string) {
   const { collectGarbage } = await import("./gc.js");
   return collectGarbage(dir);
 }
+
+describe("ssh-link: sshDown by forward name", () => {
+  it("tears down the whole ssh process group a name belongs to", () => {
+    const dir = tmpXferDir();
+    // One `in` importing two remote nodes: one ssh pid, two ledger entries.
+    writeLink(dir, "alpha", "pi-nas", 4242, process.pid);
+    writeLink(dir, "beta", "pi-nas", 4242, process.pid);
+    writeLink(dir, "self", "mac", 4343, process.pid, "out");
+
+    const result = sshDown("alpha", opts(dir));
+    assert.deepEqual(result.torn.map(l => l.name).sort(), ["alpha", "beta"]);
+    assert.equal(fs.existsSync(path.join(dir, "alpha.sock")), false);
+    assert.equal(fs.existsSync(path.join(dir, "beta.sock")), false);
+    assert.equal(fs.existsSync(path.join(dir, "self.sock")), true, "the other ssh process survives");
+  });
+
+  it("falls back to a host identifier", () => {
+    const dir = tmpXferDir();
+    writeLink(dir, "alpha", "pi-nas", 4242, process.pid);
+    writeLink(dir, "self", "mac", 4343, process.pid, "out");
+    const result = sshDown("mac", opts(dir));
+    assert.deepEqual(result.torn.map(l => l.name), ["self"]);
+    assert.equal(result.host, "mac");
+  });
+});

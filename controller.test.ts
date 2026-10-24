@@ -47,7 +47,7 @@ function notify(file: string, from = "alpha"): XferNotifyMessage {
   return { type: "xfer-notify", msg_id: "m1", from, file, summary: "Review src/server.ts" };
 }
 
-function deliver(msg: XferNotifyMessage, transport?: "mesh"): string {
+function deliver(msg: XferNotifyMessage, transport?: "mesh" | "ssh"): string {
   controller().deliverInbound(msg, transport);
   assert.equal(sent.length, 1);
   return sent[0]!.content;
@@ -159,5 +159,32 @@ describe("inbound routing: idle vs busy", () => {
 
   it("steers when the session is busy", () => {
     assert.equal(routed({ idle: false, pending: false }), "steer");
+  });
+});
+
+describe("inbound: ssh Link frames carry their document inline", () => {
+  it("materialises the document locally when the frame has no readable file", () => {
+    const body = "# Handoff\n\ninline body\n";
+    controller().deliverInbound(
+      { type: "xfer-notify", msg_id: "link-1", from: "remote-alpha", document: body, summary: "do it", via: "ssh" },
+      "ssh",
+    );
+    const text = sent.at(-1)!.content;
+    assert.match(text, /Xfer from \*\*remote-alpha\*\* · ssh/);
+    const docPath = /\*\*Doc\*\*: `([^`]+)`/.exec(text)?.[1];
+    assert.ok(docPath, "the envelope names a local doc path");
+    assert.equal(fs.readFileSync(docPath!, "utf-8"), body, "the body landed in a local tmp file");
+    assert.match(text, /ssh Link/);
+    assert.match(text, /peer not found/);
+  });
+
+  it("never treats a Link sender as local even when hostnames match", () => {
+    const body = `# Handoff\n\n`;
+    controller().deliverInbound(
+      { type: "xfer-notify", msg_id: "link-2", from: "remote-alpha", document: body, summary: "x", via: "ssh" },
+      "ssh",
+    );
+    const text = sent.at(-1)!.content;
+    assert.doesNotMatch(text, /make all file edits here/);
   });
 });

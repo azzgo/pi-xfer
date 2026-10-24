@@ -46,7 +46,7 @@ export interface SshLinkOperations {
   /** Only the Links this pi process created — what `down` acts on. */
   own(): LinkInfo[];
   up(host: string, direction: LinkDirection, names?: string[]): Promise<SshUpResult>;
-  down(host: string | undefined): LinkInfo[];
+  down(ident: string | undefined): { torn: LinkInfo[]; host?: string };
   plan(host: string, direction: LinkDirection, names?: string[]): Promise<SshUpPlan>;
   /** Read-only remote probe (the `in` candidate list): creates no tunnel. */
   probe(host: string): Promise<{ dir: string; names: string[] }>;
@@ -166,7 +166,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           { value: "ssh out", label: "out", description: "Export this pi (-R): /xfer ssh out <host> [name]" },
           { value: "ssh list", label: "list", description: "Read-only probe of a host: /xfer ssh list <host>" },
           { value: "ssh status", label: "status", description: "Links this pi maintains, with liveness" },
-          { value: "ssh down", label: "down", description: "Tear down this pi's Links: /xfer ssh down [host]" },
+          { value: "ssh down", label: "down", description: "Tear down a forward this pi owns: /xfer ssh down [name|host]" },
         ];
 
         if (tokens.length === 1) {
@@ -175,9 +175,37 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
 
         const hostToken = tokens[1] ?? "";
+
+        if (sub === "down") {
+          const ownLinks = sshOps.own();
+          // down takes a FORWARD, so it completes Links this pi owns — not
+          // every host in ~/.ssh/config, which is what made it confusing.
+          const groups = new Map<number, typeof ownLinks>();
+          for (const link of ownLinks) {
+            const group = groups.get(link.pid) ?? [];
+            group.push(link);
+            groups.set(link.pid, group);
+          }
+          const items: AutocompleteItem[] = [];
+          for (const [pid, group] of groups) {
+            const names = group.map(l => l.name).join(", ");
+            const hosts = [...new Set(group.map(l => l.host))].join(", ");
+            const label = group.length === 1 ? group[0].name : names;
+            items.push({
+              value: `ssh down ${group[0].name}`,
+              label,
+              description: `${group[0].direction === "in" ? "←" : "→"} ${hosts} · ssh pid ${pid}${group.length > 1 ? ` · ${group.length} forwards (torn down together)` : ""}`,
+            });
+          }
+          if (items.length === 0) {
+            return [{ value: "ssh down", label: "(none)", description: "This pi maintains no Links" }];
+          }
+          const filtered = items.filter(i => i.label.startsWith(hostToken) || i.value.endsWith(` ${hostToken}`));
+          return filtered.length > 0 ? filtered : items;
+        }
+
         const hosts = [...new Set([...listSshHosts(), ...cachedHosts(xferDir)])];
         if (tokens.length === 2) {
-          // No host yet: `down` accepts none, the others need one.
           const items = hosts
             .filter(h => h.startsWith(hostToken))
             .map(h => ({ value: `ssh ${sub} ${h}`, label: h, description: "ssh host" }));
@@ -295,7 +323,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "       /xfer ssh out <host> [name]     — export this pi (-R)\n" +
           "       /xfer ssh list <host>           — what <host> can offer (read-only probe)\n" +
           "       /xfer ssh status                — Links this pi maintains, with liveness\n" +
-          "       /xfer ssh down [host]           — tear down this pi's Links";
+          "       /xfer ssh down [name|host]      — tear down a forward this pi owns (bare: all of them)";
 
         if (!sub || sub === "help") {
           ctx.ui.notify(
@@ -306,7 +334,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             "                                      reaches you by name (default: your xfer name)\n" +
             "   /xfer ssh list <host>            — read-only: <host>'s xfer dir and its sockets\n" +
             "   /xfer ssh status                 — the Links this pi maintains (+ liveness)\n" +
-            "   /xfer ssh down [host]            — tear down Links THIS pi started\n\n" +
+            "   /xfer ssh down [name|host]       — tear down a forward THIS pi started;\n" +
+            "                                      name it (a socket name) or by host; bare = all\n\n" +
             "Direction is always explicit: in needs remote names, out only needs this pi.\n" +
             "A Link dies with the pi that created it; other pis' Links are untouchable here.",
             "info",
@@ -413,19 +442,24 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
 
         if (sub === "down") {
-          if (rest.length > 1) {
-            ctx.ui.notify("Usage: /xfer ssh down [host]", "error");
+          if (rest.length > 0) {
+            ctx.ui.notify("Usage: /xfer ssh down [name|host] — bare tears down every Link this pi started", "error");
             return;
           }
-          const torn = sshOps.down(host);
-          const others = sshOps.list().filter(l => host === undefined || l.host === host);
-          const foreignNote = others.length > 0
-            ? `\n${others.length} Link(s) belong to another pi process — left alone`
-            : "";
+          const ident = host;
+          const { torn } = sshOps.down(ident);
+          const stillMine = sshOps.own().filter(l => ident === undefined || l.host === ident || l.name === ident);
+          const foreign = sshOps.list().filter(l => !sshOps.own().some(o => o.name === l.name && o.host === l.host));
+          const notes = [
+            stillMine.length > 0 ? `${stillMine.length} still up (another ssh process)` : "",
+            foreign.length > 0 ? `${foreign.length} Link(s) belong to another pi process — left alone` : "",
+          ].filter(Boolean);
           ctx.ui.notify(
             torn.length
-              ? `🛑 Tore down ${torn.length} of our Link(s): ${torn.map(l => `${l.name} (${l.host})`).join(", ")}${foreignNote}`
-              : host ? `⭕ No Link of ours to ${host}${foreignNote}` : `⭕ No ssh Links of ours${foreignNote}`,
+              ? `🛑 Tore down ${torn.length} forward(s): ${torn.map(l => `${l.name} ${l.direction === "in" ? "←" : "→"} ${l.host}`).join(", ")}` +
+                (notes.length ? `\n${notes.join("\n")}` : "")
+              : `${ident ? `⭕ No Link this pi owns matches "${ident}"` : "⭕ No ssh Links of ours"}` +
+                (notes.length ? `\n${notes.join("\n")}` : ""),
             "info",
           );
           return;

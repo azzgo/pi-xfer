@@ -355,12 +355,32 @@ function writeLinkJson(name: string, host: string, pid: number, direction: LinkD
 }
 
 /**
- * Tear down Links **this process** maintains, optionally narrowed to one host.
- * A Link another pi started is not ours to kill: it dies with its own owner,
+ * Tear down Links **this process** maintains.
+ *
+ * `ident` is either a Link name (`in` names each imported socket, so it is the
+ * natural identifier — no hash needed) or a host. When it names a Link, the
+ * whole ssh process behind it goes: a running ssh cannot drop one -L, so
+ * one `in` with several names is torn down as a group. `torn` reports every
+ * entry that went with it.
+ *
+ * A Link another pi started is never ours to kill: it dies with its own owner,
  * and gc reaps the leftovers if that owner already exited.
  */
-export function sshDown(host: string | undefined, opts: SshLinkOptions): LinkInfo[] {
-  const targets = listOwnLinks(opts).filter(l => host === undefined || l.host === host);
-  for (const link of targets) killLink(link, opts);
-  return targets;
+export function sshDown(ident: string | undefined, opts: SshLinkOptions): { torn: LinkInfo[]; host?: string } {
+  const own = listOwnLinks(opts);
+  if (ident === undefined) {
+    for (const link of own) killLink(link, opts);
+    return { torn: own };
+  }
+  const byName = own.filter(l => l.name === ident);
+  if (byName.length > 0) {
+    // Same pid ⇒ same ssh process ⇒ everything it carries goes together.
+    const pids = new Set(byName.map(l => l.pid));
+    const group = own.filter(l => pids.has(l.pid));
+    for (const link of group) killLink(link, opts);
+    return { torn: group };
+  }
+  const byHost = own.filter(l => l.host === ident);
+  for (const link of byHost) killLink(link, opts);
+  return { torn: byHost, host: ident };
 }

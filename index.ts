@@ -20,7 +20,7 @@ import { MESH_CONFIG_PATH, XFER_DIR } from "./constants.ts";
 import { MeshNode } from "./mesh.ts";
 import type { XferNotifyOutcome } from "./types.ts";
 import { XferState } from "./state.ts";
-import { listPeers, msgId } from "./utils.ts";
+import { listPeers, msgId, readPeerMetadata } from "./utils.ts";
 import { sshDown } from "./ssh-link.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -36,6 +36,35 @@ export default function (pi: ExtensionAPI) {
     configPath: MESH_CONFIG_PATH,
     deliver: (msg) => controller.deliverInbound(msg, "mesh"),
   });
+
+  /**
+   * What kind of target a socket name is, decided from the same metadata the
+   * liveness check already reads. An ssh Link's socket is local but the agent
+   * behind it is not: its filesystem is unreachable, so the document must ride
+   * inside the frame, and its reverse channel may not exist at all (ADR-0021).
+   */
+  function targetKind(target: string): { link: boolean; alive: boolean } {
+    const meta = readPeerMetadata(target);
+    let alive = false;
+    if (meta.pid !== undefined) {
+      try { process.kill(meta.pid, 0); alive = true; } catch { alive = false; }
+    }
+    return { link: meta.via === "ssh", alive };
+  }
+
+  /**
+   * A Link exists in one direction only unless the other side opened the
+   * mirror. Nothing on this machine can tell which, so a `task` sent over a
+   * Link may be delivered into a session that has no route back.
+   */
+  function linkTaskWarning(target: string): string {
+    return (
+      `"${target}" is an ssh Link. The tunnel was opened in one direction, so this ` +
+      `agent cannot prove the target can send back: a \`task\` may be answered into ` +
+      `the void. Prefer \`kind: "notification"\` unless you have confirmed the reverse ` +
+      `Link exists (on that machine: /xfer ssh status, or /xfer ssh out <this-host>).`
+    );
+  }
 
   /** Working-directory anchor stamped into every handoff doc this session sends (P1-D). */
   function thisCwdStamp() {
@@ -116,13 +145,20 @@ export default function (pi: ExtensionAPI) {
         });
       }
 
+      // A Link's peer lives on another machine: `tmpFile` is meaningless there,
+      // so the body rides in the frame and the receiver materialises its own
+      // copy. Local peers keep the path-only frame.
+      const kindOf = targetKind(target);
+      const linkTarget = kindOf.link;
+
       let outcome: XferNotifyOutcome;
       try {
         outcome = await sendNotify(target, {
           type: "xfer-notify",
           msg_id: mid,
           from: senderName,
-          file: tmpFile,
+          file: linkTarget ? undefined : tmpFile,
+          ...(linkTarget ? { document, via: "ssh" } : {}),
           summary,
         });
       } catch (err: any) {
@@ -148,20 +184,31 @@ export default function (pi: ExtensionAPI) {
       }
 
       // 3. done, return immediately (no wait)
+      const linkNote =
+        linkTarget && kind === "task"
+          ? `\n\n⚠️ ${linkTaskWarning(target)}`
+          : linkTarget
+            ? `\n\nThis target is an ssh Link: the document travelled inline (the target cannot read this machine's files), and no reverse channel is assumed.`
+            : "";
+      const docLine = linkTarget
+        ? `Doc: delivered inline (local copy at ${tmpFile})`
+        : `Doc: ${tmpFile}`;
       return {
         content: [{
           type: "text",
-          text: `✅ ${outcome} to "${target}" (handoff_id: ${mid})\n\nDoc: ${tmpFile}\n\n` +
+          text: `✅ ${outcome} to "${target}" (handoff_id: ${mid})\n\n${docLine}\n\n` +
                 `Delivered means handed to the target's session — not that it has been read.\n\n` +
                 (kind === "task"
                   ? `Task handoff — the target returns a conclusion once it has one.`
-                  : `Notification handoff — no reply expected unless the target is missing information.`),
+                  : `Notification handoff — no reply expected unless the target is missing information.`) +
+                linkNote,
         }],
         details: {
           target,
           handoff_id: mid,
           document: tmpFile,
           outcome,
+          ...(linkTarget ? { transport: "ssh-link" } : {}),
         },
         structuredContent: { handoff_id: mid, target, document: tmpFile, outcome },
       };
