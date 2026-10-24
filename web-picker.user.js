@@ -1374,7 +1374,7 @@
           return;
         }
         if (!f || typeof f.type !== "string") return;
-        if (f.type === PROTOCOL.KIND_WELCOME) {
+        if (f.type === WIRE.KIND_WELCOME) {
           setState("on");
           if (!silent) gm2.set(autoLinkKey(location.origin), true);
           gm2.set(policyBlockedKey(location.origin), false);
@@ -1388,7 +1388,7 @@
           if (deps.onWelcome) deps.onWelcome();
           return;
         }
-        if (f.type === PROTOCOL.KIND_ACK) {
+        if (f.type === WIRE.KIND_ACK) {
           const p = pending.get(f.id);
           if (p && p.kind === "submit") {
             pending.delete(f.id);
@@ -1399,7 +1399,7 @@
           }
           return;
         }
-        if (f.type === PROTOCOL.KIND_ERROR) {
+        if (f.type === WIRE.KIND_ERROR) {
           const p = pending.get(f.id);
           if (p) {
             pending.delete(f.id);
@@ -1409,7 +1409,7 @@
           }
           return;
         }
-        if (f.type === PROTOCOL.KIND_TARGETS_RESULT) {
+        if (f.type === WIRE.KIND_TARGETS_RESULT) {
           const p = pending.get(f.id);
           if (p && p.kind === "targets") {
             pending.delete(f.id);
@@ -1417,7 +1417,7 @@
           }
           return;
         }
-        if (f.type === PROTOCOL.KIND_PAGE_REQUEST) {
+        if (f.type === WIRE.KIND_PAGE_REQUEST) {
           debugLog2("page.request", f.id, f.tool && f.tool.op);
           onPageRequest(f);
           return;

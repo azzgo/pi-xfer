@@ -25,6 +25,7 @@
 import { GM_BROKER, DEFAULT_BROKER_URL } from './constants.js';
 import { t } from './i18n.js';
 import {
+  PROTOCOL,
   frameHello, frameSubmit, frameCompose, frameTargetsList,
   frameStage, frameBagList, frameBagSubmit,
 } from './protocol.js';
