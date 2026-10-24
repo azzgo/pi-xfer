@@ -121,6 +121,7 @@ export async function planGc(xferDir: string): Promise<GcReport> {
     let pid: number | undefined;
     let linkHost: string | undefined;
     let reverseMarker = false;
+    let importMarker = false;
     try {
       const raw: unknown = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
       const rec = raw as Record<string, unknown> | null;
@@ -128,7 +129,22 @@ export async function planGc(xferDir: string): Promise<GcReport> {
       if (typeof candidate === "number") pid = candidate;
       if (rec?.via === "ssh" && typeof rec.host === "string") linkHost = rec.host;
       reverseMarker = rec?.role === "reverse";
+      importMarker = rec?.role === "import";
     } catch { /* handled below */ }
+
+    if (importMarker && !reverseMarker) {
+      // An `import` record is written by THIS machine for a socket it brought
+      // in over a Link. It has no pid for the same reason a reverse marker has
+      // none — the process lives on the other machine — so liveness is the
+      // socket's own: ours is a plain endpoint that goes silent when the tunnel
+      // dies. Unlike a reverse marker, this one IS ours to clear.
+      if (!(await socketHasListener(sockPath))) {
+        zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link" });
+      } else {
+        alive.push(stem);
+      }
+      continue;
+    }
 
     if (reverseMarker) {
       // A reverse marker (ADR-0021) is written BY the other machine and carries

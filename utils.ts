@@ -76,7 +76,7 @@ export function readPeerMetadata(xferName: string, xferDir: string = XFER_DIR): 
         ? {
             via: "ssh" as const,
             host: typeof value.host === "string" ? value.host : "",
-            ...(value.role === "reverse" ? { role: "reverse" as const } : {}),
+            ...(value.role === "reverse" || value.role === "import" ? { role: value.role } : {}),
           }
         : {}),
     };

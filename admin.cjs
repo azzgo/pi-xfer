@@ -307,7 +307,7 @@ function readPeerMetadata(xferName, xferDir = XFER_DIR) {
       ...value.via === "ssh" ? {
         via: "ssh",
         host: typeof value.host === "string" ? value.host : "",
-        ...value.role === "reverse" ? { role: "reverse" } : {}
+        ...value.role === "reverse" || value.role === "import" ? { role: value.role } : {}
       } : {}
     };
   } catch {
@@ -2221,6 +2221,7 @@ async function planGc(xferDir) {
     let pid;
     let linkHost;
     let reverseMarker = false;
+    let importMarker = false;
     try {
       const raw = JSON.parse(fs7.readFileSync(jsonPath, "utf-8"));
       const rec = raw;
@@ -2228,7 +2229,16 @@ async function planGc(xferDir) {
       if (typeof candidate === "number") pid = candidate;
       if (rec?.via === "ssh" && typeof rec.host === "string") linkHost = rec.host;
       reverseMarker = rec?.role === "reverse";
+      importMarker = rec?.role === "import";
     } catch {
+    }
+    if (importMarker && !reverseMarker) {
+      if (!await socketHasListener(sockPath)) {
+        zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link" });
+      } else {
+        alive.push(stem);
+      }
+      continue;
     }
     if (reverseMarker) {
       zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link", linkHost, reportOnly: true });

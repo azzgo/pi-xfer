@@ -57,6 +57,13 @@ try {
   assert(fs.existsSync(path.join(remoteDir, "mac-xfer.sock")), "-R landed this pi on the remote");
   assert(fs.existsSync(path.join(localDir, "mac-xfer.sock")), "this pi's own socket is the -R target");
 
+  // The imported socket gets its own marker HERE, so this side knows the peer
+  // is a Link (inline the document) rather than a plain local peer.
+  const importMarker = JSON.parse(fs.readFileSync(path.join(localDir, "alpha.json"), "utf-8"));
+  assert(importMarker.role === "import", "the imported socket got a role:import marker");
+  assert(importMarker.via === "ssh", "…marked as an ssh Link");
+  assert(importMarker.pid === undefined, "…with no local pid, since the process is remote");
+
   const reverseMarker = JSON.parse(fs.readFileSync(path.join(remoteDir, "mac-xfer.json"), "utf-8"));
   assert(reverseMarker.role === "reverse", "the remote got a role:reverse marker");
   assert(reverseMarker.via === "ssh", "…marked as an ssh Link");
@@ -90,6 +97,7 @@ try {
   const down = (await sshDown("alpha", opts)).torn;
   assert(down.length === 1, "naming one forward tears down its whole host Link");
   assert(!fs.existsSync(path.join(localDir, "alpha.sock")), "alpha landing removed");
+  assert(!fs.existsSync(path.join(localDir, "alpha.json")), "its import marker removed with it");
   assert(!fs.existsSync(path.join(localDir, "beta.sock")), "beta landing removed with it");
   assert(!fs.existsSync(path.join(localDir, ".link.localhost.json")), "ledger removed");
   assert(listLinks(opts).length === 0, "no Links left");

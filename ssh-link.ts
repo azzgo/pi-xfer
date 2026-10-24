@@ -149,6 +149,10 @@ function killLink(link: LinkInfo, opts: SshLinkOptions): void {
   try { process.kill(link.pid, "SIGTERM"); } catch { /* already gone */ }
   for (const name of link.names) {
     try { fs.unlinkSync(localSock(name, opts)); } catch { /* best effort */ }
+    // The import marker is ours (this pi wrote it for a socket it created), so
+    // it goes with the socket — otherwise it lingers as a "reverse" record that
+    // only gc could ever report, claiming a Link that no longer exists.
+    try { fs.unlinkSync(metadataForName(name, opts.xferDir)); } catch { /* best effort */ }
   }
   try { fs.unlinkSync(ledgerPath(link.host, opts)); } catch { /* best effort */ }
 }
@@ -343,6 +347,7 @@ export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpRe
   await waitForRemoteSock(host, remoteSock(plan.reverseAs), opts.keyPath);
 
   writeLedger(plan, child.pid!, opts);
+  writeImportedMarkers(plan, opts);
   await writeReverseMarker(plan, opts);
 
   return {
@@ -412,6 +417,40 @@ async function waitForRemoteSock(host: string, sockPath: string, keyPath?: strin
     }
   }
   throw new Error(`ssh ${host}: -R landing ${sockPath} never appeared`);
+}
+
+/**
+ * Write a `<name>.json` marker for every imported socket on THIS machine.
+ *
+ * Without it, the local peer is a bare socket: `readPeerMetadata` returns `{}`,
+ * `isLinkTarget` says "not a Link", and every handoff addressed to it goes out
+ * as a path the far side can never open — the exact failure this transport
+ * exists to avoid, just in the other direction. A Link is symmetric: the remote
+ * gets a reverse marker from us, and we get an import marker for each node we
+ * brought in.
+ *
+ * No pid: the process behind this socket lives on the OTHER machine, so a pid
+ * here would name an unrelated local process and make gc judge liveness wrongly.
+ */
+function writeImportedMarkers(plan: SshUpPlan, opts: SshLinkOptions): void {
+  for (const name of plan.names) {
+    const file = metadataForName(name, opts.xferDir);
+    const body = `${JSON.stringify({
+      xferName: name,
+      via: "ssh",
+      host: plan.host,
+      // `import` = recorded by THIS machine for a socket it imported; gc may
+      // clear it when the owning Link ledger is gone.
+      role: "import",
+    }, null, 2)}\n`;
+    const temp = `${file}.tmp-${process.pid}`;
+    try {
+      fs.writeFileSync(temp, body, { encoding: "utf-8", mode: 0o600 });
+      fs.renameSync(temp, file);
+    } catch {
+      try { fs.unlinkSync(temp); } catch { /* best effort */ }
+    }
+  }
 }
 
 function writeLedger(plan: SshUpPlan, pid: number, opts: SshLinkOptions): void {

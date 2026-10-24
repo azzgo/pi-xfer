@@ -182,7 +182,7 @@ function readPeerMetadata(xferName, xferDir = XFER_DIR) {
       ...value.via === "ssh" ? {
         via: "ssh",
         host: typeof value.host === "string" ? value.host : "",
-        ...value.role === "reverse" ? { role: "reverse" } : {}
+        ...value.role === "reverse" || value.role === "import" ? { role: value.role } : {}
       } : {}
     };
   } catch {

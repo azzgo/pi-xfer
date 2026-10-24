@@ -15,11 +15,14 @@ export interface PeerInfo {
   via?: "ssh";
   host?: string;
   /**
-   * `reverse` marks a socket this machine received from the other end of a
-   * Link: the other machine exported it here, and the record was written over
-   * ssh. It is not a local agent — it has no pid here by design.
+   * Which side wrote this record, and therefore who cleans it up:
+   * - `reverse` — written BY the other machine over ssh for the socket it
+   *   exported here. Only that machine may delete it; this one only reports it.
+   * - `import` — written by THIS machine for a socket it imported from the
+   *   other side. Ours to delete when the owning Link goes away.
+   * Neither carries a pid: the process behind the socket lives elsewhere.
    */
-  role?: "reverse";
+  role?: "reverse" | "import";
 }
 
 /** `xfer-notify` frame sent over the peer socket (one-way handoff). */

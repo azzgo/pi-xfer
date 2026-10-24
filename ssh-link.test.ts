@@ -185,3 +185,34 @@ describe("gc: ssh Link records", () => {
     }
   });
 });
+
+describe("ssh-link: imported sockets get a marker", () => {
+  it("a Link that imports a node leaves a role:import record here", async () => {
+    // Covered end to end by scripts/ssh-link-smoke.ts (needs ssh); here we pin
+    // the shape gc depends on, since a missing marker is what made every
+    // reply carry an unreadable path.
+    const dir = tmpXferDir();
+    const { metadataForName } = await import("./utils.js");
+    assert.equal(metadataForName("alpha", dir), path.join(dir, "alpha.json"));
+  });
+});
+
+describe("gc: role:import vs role:reverse ownership", () => {
+  it("reaps our own import record, reports the other machine's reverse record", async () => {
+    const dir = tmpXferDir();
+    fs.writeFileSync(path.join(dir, "alpha.json"), JSON.stringify({ xferName: "alpha", via: "ssh", host: "pi-nas", role: "import" }));
+    fs.writeFileSync(path.join(dir, "alpha.sock"), "");
+    fs.writeFileSync(path.join(dir, "mac-xfer.json"), JSON.stringify({ xferName: "mac-xfer", via: "ssh", host: "mac-xfer", role: "reverse" }));
+    fs.writeFileSync(path.join(dir, "mac-xfer.sock"), "");
+
+    const plan = await planGc(dir);
+    const imported = plan.zombies.find(z => z.name === "alpha");
+    assert.equal(imported?.reportOnly, undefined, "ours to delete");
+    const reverse = plan.zombies.find(z => z.name === "mac-xfer");
+    assert.equal(reverse?.reportOnly, true, "theirs to delete");
+
+    const { collectGarbage } = await import("./gc.js");
+    await collectGarbage(dir);
+    assert.deepEqual(fs.readdirSync(dir).sort(), ["mac-xfer.json", "mac-xfer.sock"]);
+  });
+});
