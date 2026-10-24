@@ -354,7 +354,7 @@ describe("xfer command: gc subcommand", () => {
       await h.handler("gc");
       assert.equal(h.notifications.length, 1);
       assert.equal(h.notifications[0].type, "info");
-      assert.match(h.notifications[0].message, /Removed 1 zombie/);
+      assert.match(h.notifications[0].message, /Removed 1:/);
       assert.match(h.notifications[0].message, /ghost — dead-pid \(pid \d+\)/);
       assert.match(h.notifications[0].message, /kept 0 live peer/);
       assert.ok(!fs.existsSync(path.join(dir, "ghost.sock")), "zombie sock removed");

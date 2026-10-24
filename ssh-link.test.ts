@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { planGc } from "./gc.js";
 import { linkStatus, listLinks, listOwnLinks, sshDown, type SshLinkOptions } from "./ssh-link.js";
 
@@ -125,5 +125,63 @@ describe("ssh-link: sshDown", () => {
     assert.equal((await sshDown(undefined, opts(dir))).torn.length, 1);
     assert.equal(fs.existsSync(path.join(dir, ".link.h2.json")), true);
     assert.equal(fs.existsSync(path.join(dir, "b.sock")), true);
+  });
+});
+
+describe("gc: ssh Link records", () => {
+  it("reports a role:reverse marker and never deletes it", async () => {
+    const dir = tmpXferDir();
+    fs.writeFileSync(
+      path.join(dir, "mac-xfer.json"),
+      JSON.stringify({ xferName: "mac-xfer", via: "ssh", host: "mac-xfer", role: "reverse" }),
+    );
+    fs.writeFileSync(path.join(dir, "mac-xfer.sock"), "");
+
+    const plan = await planGc(dir);
+    const hit = plan.zombies.find(z => z.name === "mac-xfer");
+    assert.ok(hit, "reported");
+    assert.equal(hit!.reason, "dead-link");
+    assert.equal(hit!.reportOnly, true, "flagged as not ours to delete");
+
+    const { collectGarbage } = await import("./gc.js");
+    await collectGarbage(dir);
+    assert.equal(fs.existsSync(path.join(dir, "mac-xfer.json")), true, "the record survives: its owner is elsewhere");
+  });
+
+  it("judges a Link ledger by its ssh pid and owns its sockets", async () => {
+    const dir = tmpXferDir();
+    fs.writeFileSync(
+      path.join(dir, ".link.pi-nas.json"),
+      JSON.stringify({ host: "pi-nas", pid: deadPid(), owner: process.pid, names: ["alpha", "beta"], reverseAs: "me", remoteDir: "/remote" }),
+    );
+    fs.writeFileSync(path.join(dir, "alpha.sock"), "");
+    fs.writeFileSync(path.join(dir, "beta.sock"), "");
+
+    const plan = await planGc(dir);
+    const hit = plan.zombies.find(z => z.reason === "dead-link" && !z.reportOnly);
+    assert.ok(hit, "the dead Link is reported");
+    assert.equal(hit!.ownedSockets?.length, 2, "both imported sockets are attributed to it");
+    assert.ok(!plan.zombies.some(z => z.reason === "orphan-sock"), "and not double-reported as orphans");
+
+    const { collectGarbage } = await import("./gc.js");
+    await collectGarbage(dir);
+    assert.deepEqual(fs.readdirSync(dir), [], "ledger and every socket it owned are gone");
+  });
+
+  it("keeps a Link whose ssh process is alive, even if its sockets look stale", async () => {
+    const dir = tmpXferDir();
+    const child = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 20000)"], { detached: true, stdio: "ignore" });
+    child.unref();
+    const pid = child.pid!;
+    try {
+      fs.writeFileSync(
+        path.join(dir, ".link.pi-nas.json"),
+        JSON.stringify({ host: "pi-nas", pid, owner: process.pid, names: ["alpha"], reverseAs: "me", remoteDir: "/remote" }),
+      );
+      const plan = await planGc(dir);
+      assert.ok(!plan.zombies.some(z => z.reason === "dead-link"), "not reaped while ssh lives");
+    } finally {
+      try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
+    }
   });
 });

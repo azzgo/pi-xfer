@@ -866,14 +866,26 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           ctx.ui.notify(`🧹 No zombie sockets — ${report.alive.length} live peer(s)`, "info");
           return;
         }
-        const lines = report.zombies.map((z) => {
-          const pid = z.pid !== undefined ? `pid ${z.pid}` : "no metadata";
-          const linkHint = z.reason === "dead-link" && z.linkHost ? `\n    ↳ ssh Link to ${z.linkHost} died — rerun /xfer ssh up ${z.linkHost} to rebuild, or /xfer ssh down ${z.linkHost} to drop it` : "";
-          return `  ${z.name} — ${z.reason} (${pid})${linkHint}`;
-        });
+        const reaped = report.zombies.filter(z => !z.reportOnly);
+        const reported = report.zombies.filter(z => z.reportOnly);
+        const line = (z: typeof report.zombies[number]): string => {
+          const pid = z.pid !== undefined ? `pid ${z.pid}` : "no local pid";
+          if (z.reportOnly) {
+            return `  ${z.name} — a Link endpoint from another machine (${pid})\n` +
+              `    left in place: its owner removes it when its Link closes.\n` +
+              `    If it is stale, that machine should run /xfer ssh down.`;
+          }
+          return `  ${z.name} — ${z.reason} (${pid})` +
+            (z.reason === "dead-link" && z.linkHost
+              ? `\n    ssh tunnel killed; reconnect with /xfer ssh in ${z.linkHost}`
+              : "");
+        };
+        const parts = [
+          reaped.length > 0 ? `Removed ${reaped.length}:\n${reaped.map(line).join("\n")}` : "",
+          reported.length > 0 ? `Reported ${reported.length} (not ours to delete):\n${reported.map(line).join("\n")}` : "",
+        ].filter(Boolean);
         ctx.ui.notify(
-          `🧹 Removed ${report.zombies.length} zombie(s):\n${lines.join("\n")}\n` +
-          `kept ${report.alive.length} live peer(s)`,
+          `🧹 ${parts.join("\n\n")}\nkept ${report.alive.length} live peer(s)`,
           "info",
         );
         return;

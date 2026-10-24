@@ -140,7 +140,11 @@ async function peersCheck(deps: DoctorDeps): Promise<DoctorCheck> {
   const listed = online.length > 0 ? `${online.length} online: ${online.map((p) => p.xferName).join(", ")}` : "no peers online (only this session)";
   if (zombies.length > 0) {
     const names = zombieNames.join(", ");
-    return { name: "Peers", status: "warn", detail: `${listed}; ${zombies.length} zombie socket(s): ${names}`, fix: "/xfer gc" };
+    // Only locally-owned leftovers are `/xfer gc`'s to clear; a reverse marker
+    // belongs to another machine's pi, so pointing at gc there would mislead.
+    const clearable = zombies.filter(z => !z.reportOnly);
+    const fix = clearable.length > 0 ? "/xfer gc" : "on the other machine: /xfer ssh down";
+    return { name: "Peers", status: "warn", detail: `${listed}; ${zombies.length} zombie socket(s): ${names}`, fix };
   }
   return { name: "Peers", status: "pass", detail: listed };
 }

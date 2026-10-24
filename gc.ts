@@ -30,6 +30,13 @@ export interface GcZombie {
   reason: GcReason;
   /** Set for a reaped ssh Link: rebuild hint for the gc output (ADR-0021). */
   linkHost?: string;
+  /**
+   * Found but not ours to delete (a `role: reverse` marker). Its owner is a pi
+   * on another machine, so `collectGarbage` only reports it.
+   */
+  reportOnly?: boolean;
+  /** Sockets a Link ledger declares; all are dead once its ssh process is. */
+  ownedSockets?: string[];
 }
 
 export interface GcReport {
@@ -94,10 +101,14 @@ export async function planGc(xferDir: string): Promise<GcReport> {
 
   const jsonStems = new Set<string>();
   const sockStems = new Set<string>();
+  const linkLedgers: string[] = [];
   for (const entry of entries) {
     // NB: no isFile() filter — unix sockets are S_IFSOCK specials, so a real
     // `<name>.sock` reports isFile() === false and would be skipped.
-    if (entry.isFile() && entry.name.endsWith(".json") && !GC_SKIP_JSON.has(entry.name)) {
+    if (entry.isFile() && entry.name.startsWith(".link.") && entry.name.endsWith(".json")) {
+      // Our own Link ledger (ADR-0021): keyed by host, judged in its own pass.
+      linkLedgers.push(entry.name);
+    } else if (entry.isFile() && entry.name.endsWith(".json") && !GC_SKIP_JSON.has(entry.name)) {
       jsonStems.add(entry.name.slice(0, -".json".length));
     } else if (entry.name.endsWith(".sock")) {
       sockStems.add(entry.name.slice(0, -".sock".length));
@@ -125,11 +136,12 @@ export async function planGc(xferDir: string): Promise<GcReport> {
       // only honest signal is whether anything still answers behind it. A dead
       // tunnel leaves the file connectable but silent — that is what the
       // listener probe distinguishes, unlike an `in` Link's own ledger.
-      if (!(await socketHasListener(sockPath))) {
-        zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link", linkHost });
-      } else {
-        alive.push(stem);
-      }
+      // It belongs to a pi on the other machine, and this machine cannot observe
+      // whether that pi lives: the endpoint may answer, refuse, or linger as the
+      // tunnel flaps. Deleting it here once erased a live Link's record and
+      // silently downgraded every later send to a path the receiver could not
+      // read. So: report, never delete — its writer removes it on teardown.
+      zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link", linkHost, reportOnly: true });
       continue;
     }
 
@@ -163,7 +175,50 @@ export async function planGc(xferDir: string): Promise<GcReport> {
     }
   }
 
+  // A Link ledger declares the sockets it owns, so it judges them: a dead ssh
+  // process means every socket it created here is dead, even though the files
+  // still look connectable on disk. Runs before the generic socket pass so those
+  // sockets are not also reported as orphan-sock.
+  const claimedByLink = new Set<string>();
+  for (const file of linkLedgers) {
+    const jsonPath = path.join(xferDir, file);
+    const label = decodeURIComponent(file.slice(".link.".length, -".json".length));
+    let host: string | undefined;
+    let pid: number | undefined;
+    let names: string[] = [];
+    try {
+      const rec = JSON.parse(fs.readFileSync(jsonPath, "utf-8")) as Record<string, unknown>;
+      if (typeof rec.host === "string") host = rec.host;
+      if (typeof rec.pid === "number") pid = rec.pid;
+      if (Array.isArray(rec.names)) names = rec.names.filter((n): n is string => typeof n === "string");
+    } catch { /* unreadable: leave it for a human */ }
+
+    const sockets = names.map(n => path.join(xferDir, `${encodeURIComponent(n)}.sock`));
+    for (const name of names) claimedByLink.add(name);
+
+    if (pid !== undefined && !processAlive(pid)) {
+      // Keep only the entries that still exist, so the report is about reality.
+      const owned = sockets.filter(p => fs.existsSync(p));
+      zombies.push({
+        name: label,
+        sockPath: owned[0] ?? path.join(xferDir, `.link-${label}.sock`),
+        jsonPath,
+        pid,
+        reason: "dead-link",
+        ...(host ? { linkHost: host } : {}),
+        ...(owned.length > 0 ? { ownedSockets: owned } : {}),
+      });
+      for (const name of names) {
+        const at = alive.indexOf(name);
+        if (at >= 0) alive.splice(at, 1);
+      }
+    } else {
+      alive.push(label);
+    }
+  }
+
   for (const stem of sockStems) {
+    if (claimedByLink.has(stem)) continue; // judged by its Link ledger
     if (jsonStems.has(stem)) continue; // already handled with its metadata
     const sockPath = path.join(xferDir, `${stem}.sock`);
     if (await socketHasListener(sockPath)) {
@@ -180,7 +235,18 @@ export async function planGc(xferDir: string): Promise<GcReport> {
 export async function collectGarbage(xferDir: string): Promise<GcReport> {
   const report = await planGc(xferDir);
   for (const zombie of report.zombies) {
-    try { fs.unlinkSync(zombie.sockPath); } catch { /* already gone */ }
+    // A reverse marker is not ours: deleting it desynchronises another machine.
+    if (zombie.reportOnly) continue;
+    // A Link ledger and its ssh process are one thing. Deleting the ledger while
+    // the process lives orphans the tunnel on both ends, with nothing left to
+    // reap it — so the pid goes first, and only the pid this ledger names.
+    if (zombie.linkHost !== undefined && zombie.pid !== undefined) {
+      try { process.kill(zombie.pid, "SIGTERM"); } catch { /* already gone */ }
+    }
+    const sockets = zombie.ownedSockets ?? [zombie.sockPath];
+    for (const sock of sockets) {
+      try { fs.unlinkSync(sock); } catch { /* already gone */ }
+    }
     if (zombie.jsonPath) {
       try { fs.unlinkSync(zombie.jsonPath); } catch { /* already gone */ }
     }

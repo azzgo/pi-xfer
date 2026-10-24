@@ -2205,8 +2205,11 @@ async function planGc(xferDir) {
   }
   const jsonStems = /* @__PURE__ */ new Set();
   const sockStems = /* @__PURE__ */ new Set();
+  const linkLedgers = [];
   for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith(".json") && !GC_SKIP_JSON.has(entry.name)) {
+    if (entry.isFile() && entry.name.startsWith(".link.") && entry.name.endsWith(".json")) {
+      linkLedgers.push(entry.name);
+    } else if (entry.isFile() && entry.name.endsWith(".json") && !GC_SKIP_JSON.has(entry.name)) {
       jsonStems.add(entry.name.slice(0, -".json".length));
     } else if (entry.name.endsWith(".sock")) {
       sockStems.add(entry.name.slice(0, -".sock".length));
@@ -2228,11 +2231,7 @@ async function planGc(xferDir) {
     } catch {
     }
     if (reverseMarker) {
-      if (!await socketHasListener(sockPath)) {
-        zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link", linkHost });
-      } else {
-        alive.push(stem);
-      }
+      zombies.push({ name: stem, sockPath, jsonPath, reason: "dead-link", linkHost, reportOnly: true });
       continue;
     }
     if (linkHost !== void 0) {
@@ -2257,7 +2256,43 @@ async function planGc(xferDir) {
       alive.push(stem);
     }
   }
+  const claimedByLink = /* @__PURE__ */ new Set();
+  for (const file of linkLedgers) {
+    const jsonPath = path8.join(xferDir, file);
+    const label = decodeURIComponent(file.slice(".link.".length, -".json".length));
+    let host;
+    let pid;
+    let names = [];
+    try {
+      const rec = JSON.parse(fs7.readFileSync(jsonPath, "utf-8"));
+      if (typeof rec.host === "string") host = rec.host;
+      if (typeof rec.pid === "number") pid = rec.pid;
+      if (Array.isArray(rec.names)) names = rec.names.filter((n) => typeof n === "string");
+    } catch {
+    }
+    const sockets = names.map((n) => path8.join(xferDir, `${encodeURIComponent(n)}.sock`));
+    for (const name of names) claimedByLink.add(name);
+    if (pid !== void 0 && !processAlive(pid)) {
+      const owned = sockets.filter((p) => fs7.existsSync(p));
+      zombies.push({
+        name: label,
+        sockPath: owned[0] ?? path8.join(xferDir, `.link-${label}.sock`),
+        jsonPath,
+        pid,
+        reason: "dead-link",
+        ...host ? { linkHost: host } : {},
+        ...owned.length > 0 ? { ownedSockets: owned } : {}
+      });
+      for (const name of names) {
+        const at = alive.indexOf(name);
+        if (at >= 0) alive.splice(at, 1);
+      }
+    } else {
+      alive.push(label);
+    }
+  }
   for (const stem of sockStems) {
+    if (claimedByLink.has(stem)) continue;
     if (jsonStems.has(stem)) continue;
     const sockPath = path8.join(xferDir, `${stem}.sock`);
     if (await socketHasListener(sockPath)) {
@@ -2271,9 +2306,19 @@ async function planGc(xferDir) {
 async function collectGarbage(xferDir) {
   const report = await planGc(xferDir);
   for (const zombie of report.zombies) {
-    try {
-      fs7.unlinkSync(zombie.sockPath);
-    } catch {
+    if (zombie.reportOnly) continue;
+    if (zombie.linkHost !== void 0 && zombie.pid !== void 0) {
+      try {
+        process.kill(zombie.pid, "SIGTERM");
+      } catch {
+      }
+    }
+    const sockets = zombie.ownedSockets ?? [zombie.sockPath];
+    for (const sock of sockets) {
+      try {
+        fs7.unlinkSync(sock);
+      } catch {
+      }
     }
     if (zombie.jsonPath) {
       try {
