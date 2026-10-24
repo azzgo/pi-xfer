@@ -297,8 +297,24 @@ export async function planSshUp(host: string, opts: SshLinkOptions): Promise<Ssh
 
   const reverseAs = existing?.reverseAs ?? opts.myName;
   if (!reverseAs) throw new Error("cannot expose this pi without a name — /xfer name <name> first");
-  // The reverse landing must not shadow a node already living on the remote,
-  // unless that node is a previous landing of ours.
+
+  // The -R landing must not be one of the names this same tunnel imports: both
+  // forwards would then claim the SAME remote path, and `-L local/X:remote/X`
+  // plus `-R remote/X:local/X` is a loop that ssh cannot sort out.
+  //
+  // The check used to be skipped whenever an existing Link was being extended —
+  // exactly the case where it matters, because a second `in` can add a name
+  // that collides with the landing established by the first.
+  if (names.includes(reverseAs)) {
+    throw new Error(
+      `cannot import "${reverseAs}" from ${host}: that is also the name this pi exposes itself under, ` +
+      `so the -L and -R forwards would fight over one remote socket. ` +
+      `Rename this pi first: /xfer name <another-name>`,
+    );
+  }
+  // On a FIRST link the landing must also not shadow a node already on the
+  // remote. When extending an existing Link the landing is already established
+  // (ssh owns that socket), so the remote legitimately lists it.
   if (!existing && remote.names.includes(reverseAs)) {
     throw new Error(
       `${host} already has a node named "${reverseAs}" — rename this pi with /xfer name <name> before linking`,

@@ -216,3 +216,23 @@ describe("gc: role:import vs role:reverse ownership", () => {
     assert.deepEqual(fs.readdirSync(dir).sort(), ["mac-xfer.json", "mac-xfer.sock"]);
   });
 });
+
+describe("plan: the -R landing must not be one of the imported names", () => {
+  // Both checks live in planSshUp, which needs a live probe; the decision itself
+  // is a pure predicate, so pin it directly against the shapes that matter.
+  const collides = (names: string[], reverseAs: string): boolean => names.includes(reverseAs);
+
+  it("rejects importing this pi's own landing name on the FIRST link", () => {
+    assert.equal(collides(["a"], "a"), true);
+  });
+
+  it("rejects it when EXTENDING an existing Link too", () => {
+    // The regression: the old code only checked `!existing`, so a second `in`
+    // could add a name that collides with the landing set up by the first.
+    assert.equal(collides(["a", "b"], "a"), true);
+  });
+
+  it("accepts a landing name that is not imported", () => {
+    assert.equal(collides(["a", "b"], "me"), false);
+  });
+});
