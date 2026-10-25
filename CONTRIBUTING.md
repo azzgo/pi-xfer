@@ -24,6 +24,9 @@ the way it is.
   enforces byte-identical output, so a stale artifact fails CI.
 - **No new runtime dependencies.** The extension ships with none; rivetkit is bundled, not
   installed. `examples/` keeps its own `package.json` and is not published.
+- **Documents are bilingual.** Every human-facing document has a `.zh.md` Chinese mirror, and
+  both sides change in the same commit. The rule is [`docs/i18n.md`](docs/i18n.md); `npm test`
+  checks pairing and structure, but the translation itself is a review matter.
 
 ## Adding a host
 

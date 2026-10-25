@@ -4,6 +4,14 @@ You are working on **pi-xfer**, a pi coding-agent extension for cross-context ha
 This file is a map, not a rulebook — the authoritative guidance lives in the
 documents it points to.
 
+**This repository is bilingual.** Every document it points to below also exists
+as a Chinese mirror at the same path with `.zh.md` in place of `.md`. English is
+canonical; the Chinese file mirrors it, and **both sides move in the same
+commit** — an English edit without its `.zh.md` counterpart is an unfinished
+change, not a follow-up. The full rule (shared assets, verbatim code, link
+rewriting, what is deliberately not paired) is `docs/i18n.md`; the mechanical
+half is enforced by `src/docs-pairs.test.ts` in `npm test`.
+
 ## Read in this order
 
 1. **`README.md`** — what the extension is, install, capabilities table
@@ -29,6 +37,15 @@ documents it points to.
 - **Cross-machine verification has its own rules**: when a change involves a Link (or any two-machine transport), judging results is a separate skill — a running process never picks up new code, tmpdirs differ per machine, and mesh vs Link deliveries land in same-named files. See "Judging results across two machines" in `.agents/skills/verify/SKILL.md` and the three-line checklist in `docs/dev/ssh-link-verification.md` before trusting any cross-machine observation.
 - **One installed copy**: keep `npm:pi-xfer` as the only pi-xfer entry in `~/.pi/agent/settings.json` and upgrade it with `pi update --extensions`. Two copies in one session collide on `xfer_to` / `xfer_mesh_to` / `--xfer` and the second fails to load. Never `pi install <path to this repo>`; run the working tree with `pi -ne -e ./` (skip discovery, load this `index.ts`).
 - **Releases**: follow `docs/release.md` — `npm version` + `git push origin main --follow-tags`; never hand-edit the version and tag separately.
+- **Bilingual documentation**: every paired document has a `.zh.md` twin, and a change to one is a change to both — same commit, same review. Concretely:
+  - Edit the English file first, then bring the Chinese mirror to the same state. Never "translate later".
+  - Keep structure identical (heading count, fenced-block count, image count) and **code fences byte-identical** — commands, flags, paths, config keys, identifiers and URLs are never translated.
+  - Point relative links at the `.zh.md` counterpart; keep the same set of document links on both sides.
+  - Assets (`docs/guides/assets/`) are shared: reference the same file from both sides, never copy or translate it.
+  - Glossary terms stay in English inside Chinese prose (`CONTEXT.md` fixes them; they are names, not words).
+  - Not paired, on purpose: `skills/**`, `.agents/skills/**`, `.pi/**`, `.pig/**` — see `docs/i18n.md` for why.
+  - `README.zh.md` uses the Bilibili cut (<https://www.bilibili.com/video/BV1oQWc6fEn9>) where `README.md` links YouTube.
+  - When adding a new document, add its `.zh.md` in the same commit; `src/docs-pairs.test.ts` fails on a missing pair, structural drift, a mistranslated code block, or a Chinese file whose links do not point at counterparts.
 
 ## Layout pointers
 
@@ -41,5 +58,6 @@ documents it points to.
 | `daemon/` | daemon sources (`broker-main.ts`, `admin-main.ts` — bundled to `broker.cjs`, `admin.cjs`, what the managers spawn) |
 | `tests/` | module tests for the unbundled web-picker sources (the colocated `*.test.ts` under `src/` cover everything else) |
 | `docs/adr/`, `CONTEXT.md` | decisions and glossary — update only with cause, never casually |
+| `*.zh.md` beside every paired document | the Chinese mirror; `docs/i18n.md` is the rule, `src/docs-pairs.test.ts` the guard |
 | `skills/xfer/` | the pi-side skill + its `scripts/xfer` wrapper — canonical here, deployed by symlink (never copied into dotfiles) |
 | `skills/xfer-agent/` | the non-pi host skill, rendered by `xfer-adapterd install` |
