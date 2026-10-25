@@ -80,9 +80,9 @@ Merge these two buttons
 ## Follow-up channel
 
 The sending browser tab is still online. Collect page data by calling its fixed tool ops via the broker CLI — the command waits and prints the result JSON on stdout:
-\`node broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]\`
+\`node daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]\`
 Ops (fixed table): page.info · dom.query {selector, maxCount?, styleProps?} · dom.html {selector?, maxLength?, maxDepth?} · console.logs {lastN?, sinceTs?, level?} · network.log {lastN?, urlFilter?} · framework.inspect {selector, props?, maxDepth?} · page.wait {selector} (read) · dom.click {selector} / dom.setValue {selector, value} (write — only when the origin has page-write authorization; a refusal answers denied_op). Example:
-\`node broker-main.ts page-tool dotfiles_q1 dom.query '{"selector":"button.primary","maxCount":5}'\`
+\`node daemon/broker-main.ts page-tool dotfiles_q1 dom.query '{"selector":"button.primary","maxCount":5}'\`
 A timeout or no_tabs exits 1 with an error on stderr — after a page reload wait a few seconds for the userscript auto-reconnect and retry (≤3 times). Multiple calls may be issued in parallel. After changing code, verify by re-querying: dom.query the target elements and check console.logs for new errors.
 
 ---
@@ -162,7 +162,7 @@ describe("renderHandoffDoc", () => {
     const lineCount = section.split("\n").length;
     assert.ok(lineCount <= 10, `follow-up section has ${lineCount} lines, expected <= 10`);
     assert.equal(
-      doc.includes('`node broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
+      doc.includes('`node daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
       true,
       "expected the page-tool command example",
     );
@@ -171,16 +171,16 @@ describe("renderHandoffDoc", () => {
 
   it("uses fromTarget in the page-tool example, placeholder when absent", () => {
     const withTarget = renderHandoffDoc(input({ fromTarget: "session-a" }));
-    assert.equal(withTarget.includes('`node broker-main.ts page-tool session-a <op> [paramsJSON]`'), true);
+    assert.equal(withTarget.includes('`node daemon/broker-main.ts page-tool session-a <op> [paramsJSON]`'), true);
     const withoutTarget = renderHandoffDoc(input({ fromTarget: undefined }));
-    assert.equal(withoutTarget.includes('`node broker-main.ts page-tool <session-socket> <op> [paramsJSON]`'), true);
+    assert.equal(withoutTarget.includes('`node daemon/broker-main.ts page-tool <session-socket> <op> [paramsJSON]`'), true);
     assert.equal(withoutTarget.includes("undefined"), false);
   });
 
   it("embeds the broker CLI absolute path so the agent never has to search for it", () => {
-    const doc = renderHandoffDoc(input({ brokerCliPath: "/Users/me/dev/dotfiles/pi/agent/extensions/xfer/broker-main.ts" }));
+    const doc = renderHandoffDoc(input({ brokerCliPath: "/Users/me/dev/dotfiles/pi/agent/extensions/xfer/daemon/broker-main.ts" }));
     assert.equal(
-      doc.includes('`node /Users/me/dev/dotfiles/pi/agent/extensions/xfer/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
+      doc.includes('`node /Users/me/dev/dotfiles/pi/agent/extensions/xfer/daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
       true,
       "expected the absolute broker CLI path in the command",
     );

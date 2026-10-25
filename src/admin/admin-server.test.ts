@@ -12,7 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { Board } from "../board/board.ts";
-import { createAdminServer, type AdminEvent, type AdminServer, type AdminServerOptions } from "../../admin-main.js";
+import { createAdminServer, type AdminEvent, type AdminServer, type AdminServerOptions } from "../../daemon/admin-main.js";
 import type { MeshConfig } from "../mesh/mesh-config.ts";
 import type { MeshNode } from "../mesh/mesh.ts";
 import { serializeMeshKey } from "../mesh/mesh-config.ts";

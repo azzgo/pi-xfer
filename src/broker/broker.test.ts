@@ -16,7 +16,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { VERSION } from "../../broker-main.js";
+import { VERSION } from "../../daemon/broker-main.js";
 import { decodeFrame, OPCODE_CLOSE, OPCODE_TEXT, type DecodedFrame } from "./ws-server.ts";
 
 // ---------- resolve hook (same as `npm test`) ----------
@@ -36,7 +36,7 @@ function resolveHook(): string {
 }
 
 const RESOLVE_HOOK = resolveHook();
-const BROKER_MAIN = path.join(import.meta.dirname, "../../broker-main.ts");
+const BROKER_MAIN = path.join(import.meta.dirname, "../../daemon/broker-main.ts");
 
 // ---------- daemon spawn harness ----------
 

@@ -21,7 +21,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { runPageTool, startBroker, type BrokerHandle } from "../../broker-main.js";
+import { runPageTool, startBroker, type BrokerHandle } from "../../daemon/broker-main.js";
 import { decodeFrame, OPCODE_CLOSE, OPCODE_TEXT, type DecodedFrame } from "./ws-server.ts";
 
 // ---------- resolve hook (same as `npm test`) ----------
@@ -41,7 +41,7 @@ function resolveHook(): string {
 }
 
 const RESOLVE_HOOK = resolveHook();
-const BROKER_MAIN = path.join(import.meta.dirname, "../../broker-main.ts");
+const BROKER_MAIN = path.join(import.meta.dirname, "../../daemon/broker-main.ts");
 
 // ---------- in-process broker harness ----------
 
@@ -250,7 +250,7 @@ interface CliResult {
   stderr: string;
 }
 
-/** Run `node broker-main.ts page-tool … --xfer-dir <dir>` and collect the outcome. */
+/** Run `node daemon/broker-main.ts page-tool … --xfer-dir <dir>` and collect the outcome. */
 async function runCli(xferDir: string, args: string[]): Promise<CliResult> {
   const child = spawn(
     process.execPath,
@@ -543,6 +543,6 @@ describe("page-tool flow", () => {
     tmpDirs.push(dir);
     const { code, stderr } = await runCli(dir, ["alpha"]);
     assert.equal(code, 1);
-    assert.match(stderr, /usage: node broker-main\.ts page-tool/);
+    assert.match(stderr, /usage: node daemon\/broker-main\.ts page-tool/);
   });
 });

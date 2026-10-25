@@ -14,7 +14,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { startBroker, type BrokerHandle } from "../../broker-main.js";
+import { startBroker, type BrokerHandle } from "../../daemon/broker-main.js";
 import { decodeFrame, OPCODE_TEXT, type DecodedFrame } from "./ws-server.ts";
 
 // ---------- in-process broker harness (same shape as page-tool.test.ts) ----------

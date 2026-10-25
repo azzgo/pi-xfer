@@ -29,7 +29,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// admin-main.ts
+// daemon/admin-main.ts
 var admin_main_exports = {};
 __export(admin_main_exports, {
   DEFAULT_ADMIN_PORT: () => DEFAULT_ADMIN_PORT,
@@ -339,7 +339,7 @@ function listPeers(myName, xferDir = XFER_DIR) {
   }
 }
 
-// broker-main.ts
+// daemon/broker-main.ts
 var fs5 = __toESM(require("node:fs"), 1);
 var http = __toESM(require("node:http"), 1);
 var net = __toESM(require("node:net"), 1);
@@ -409,7 +409,7 @@ function formatHandoffKind(kind) {
 // src/core/handoff-doc.ts
 function followUpSection(fromTarget, brokerCliPath) {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
-  const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "broker-main.ts";
+  const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "daemon/broker-main.ts";
   return [
     "## Follow-up channel",
     "",
@@ -1152,7 +1152,7 @@ Sec-WebSocket-Accept: ${acceptKey(key)}\r
   });
 }
 
-// broker-main.ts
+// daemon/broker-main.ts
 var VERSION = (() => {
   try {
     return JSON.parse(fs5.readFileSync(path6.join(__dirname, "package.json"), "utf-8")).version ?? "?";
@@ -1387,7 +1387,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
       // follow-up command directly runnable (compose passes it too — the two
       // render paths must not drift).
       fromTarget: targetName,
-      brokerCliPath: path6.join(__dirname, "broker-main.ts")
+      brokerCliPath: path6.join(__dirname, "../broker-main.ts")
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -1452,7 +1452,7 @@ function handleAnnotationCompose(connection, frame) {
       picks,
       record: record ?? void 0,
       fromTarget: targetName,
-      brokerCliPath: path6.join(__dirname, "broker-main.ts")
+      brokerCliPath: path6.join(__dirname, "../broker-main.ts")
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -1557,7 +1557,7 @@ function handleBagSubmit(connection, frame, xferDir) {
   const doc = path6.join(os4.tmpdir(), `pi-xfer-${msgId}.md`);
   let content;
   try {
-    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path6.join(__dirname, "broker-main.ts") });
+    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path6.join(__dirname, "../broker-main.ts") });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed staged markers: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -1959,12 +1959,12 @@ async function runPageToolCommand(args) {
     }
   }
   if (tabId === void 0) {
-    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
+    console.error("usage: node daemon/broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
     console.error("  --tab is mandatory (ADR-0022): the tabId carried by the handoff / submit ack");
     process.exit(1);
   }
   if (typeof target !== "string" || target.trim() === "" || typeof op !== "string" || op.trim() === "") {
-    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
+    console.error("usage: node daemon/broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
     process.exit(1);
   }
   const xferDir = parseArgs(process.argv.slice(2)).xferDir;
@@ -2635,7 +2635,7 @@ function poolLabel(pool) {
   return name === "default" ? "(default)" : name;
 }
 
-// admin-main.ts
+// daemon/admin-main.ts
 var DEFAULT_ADMIN_PORT = 7788;
 var EXTENSION_VERSION = (() => {
   try {

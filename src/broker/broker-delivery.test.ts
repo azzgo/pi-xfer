@@ -44,7 +44,7 @@ function resolveHook(): string {
 }
 
 const RESOLVE_HOOK = resolveHook();
-const BROKER_MAIN = path.join(import.meta.dirname, "../../broker-main.ts");
+const BROKER_MAIN = path.join(import.meta.dirname, "../../daemon/broker-main.ts");
 
 // ---------- daemon spawn harness ----------
 

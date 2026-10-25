@@ -18,7 +18,7 @@ page side:
   (`annotation.compose` → `ack{prompt}` — render only, nothing is written or
   delivered) and copies it to the clipboard. Non-pi coding agents that have
   bash but no xfer can then receive the same handoff: paste the prompt and
-  they can call `node broker-main.ts page-tool <target> <op>` for follow-up
+  they can call `node daemon/broker-main.ts page-tool <target> <op>` for follow-up
   page queries themselves.
 - **Page tools (v1.6 + v1.12 write ops)** — agent tool calls arrive as
   `page.request{tool:{op, params}}` frames and run against this page:
@@ -186,7 +186,7 @@ warns and falls back to an ephemeral port — `/xfer broker start` toasts the
 actual port, and it is always recorded in `broker.json`.
 
 Until the `/xfer broker` command group is wired you can run the daemon
-directly: `node pi/agent/extensions/xfer/broker-main.ts`. Page-tool calls go
+directly: `node pi/agent/extensions/xfer/daemon/broker-main.ts`. Page-tool calls go
 through the same daemon (HTTP `/page-tool` + CLI `page-tool`), so no separate
 oracle is needed.
 
@@ -201,7 +201,7 @@ oracle is needed.
    the toast shows the `handoff_id` and the target session receives a
    `📨 [Xfer from web-picker]` handoff.
 4. **Page-tool round trip** — with the tab connected, from any shell:
-   `node pi/agent/extensions/xfer/broker-main.ts page-tool <session-name> page.info`
+   `node pi/agent/extensions/xfer/daemon/broker-main.ts page-tool <session-name> page.info`
    → the broker prints the result JSON (`url`, `title`, `viewport`, …). Try
    `dom.query '{"selector":"a","maxCount":3}'` or `console.logs`. The broker log
    shows `[page.request r… ] → tab <id>: …` and `[page.response r…] ok=true`.

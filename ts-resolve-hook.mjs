@@ -1,5 +1,5 @@
 // Resolve/load hooks for `node --test` AND the spawned daemons
-// (broker-main.ts / admin-main.ts / mesh CLI): relative .js specifiers fall
+// (daemon/broker-main.ts / daemon/admin-main.ts / mesh CLI): relative .js specifiers fall
 // back to .ts when the .js file doesn't exist, and .ts sources are stripped
 // here via node:module's stripTypeScriptTypes instead of node's built-in
 // stripping — the built-in refuses every file under node_modules

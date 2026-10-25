@@ -168,7 +168,7 @@ export async function buildWebPicker(outfile = join(here, '..', 'web-picker.user
  * The banner defines the values; `define` rewrites the two expressions onto them
  * — define only accepts entity names or literals, hence the banner variable for
  * the url rather than an inline call. Sources stay plain ESM and run unchanged
- * under `node --import ts-resolve-hook.mjs broker-main.ts`.
+ * under `node --import ts-resolve-hook.mjs daemon/broker-main.ts`.
  */
 const importMetaBanner = `
 var __xferImportMetaUrl = require("node:url").pathToFileURL(__filename).href;
@@ -202,14 +202,14 @@ export async function buildDaemon(entry, outfile) {
   writeFileSync(`${outfile}.sha256`, `${createHash('sha256').update(readFileSync(outfile)).digest('hex')}\n`);
 }
 
-/** Rebuild broker.cjs (or any outfile) from broker-main.ts. */
+/** Rebuild broker.cjs (or any outfile) from daemon/broker-main.ts. */
 export function buildBrokerDaemon(outfile = join(here, '..', 'broker.cjs')) {
-  return buildDaemon('broker-main.ts', outfile);
+  return buildDaemon('daemon/broker-main.ts', outfile);
 }
 
-/** Rebuild admin.cjs (or any outfile) from admin-main.ts. */
+/** Rebuild admin.cjs (or any outfile) from daemon/admin-main.ts. */
 export function buildAdminDaemon(outfile = join(here, '..', 'admin.cjs')) {
-  return buildDaemon('admin-main.ts', outfile);
+  return buildDaemon('daemon/admin-main.ts', outfile);
 }
 
 async function main() {

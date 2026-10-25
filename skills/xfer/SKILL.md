@@ -115,7 +115,7 @@ name its tab explicitly (ADR-0022 — the tabId is in the handoff's page
 sections / the submit ack's `routedTabId`):
 
 ```sh
-node <broker-main.ts path> page-tool <target> <op> [paramsJSON] --tab <tabId>
+node <daemon/broker-main.ts path> page-tool <target> <op> [paramsJSON] --tab <tabId>
 ```
 
 - **`missing_tab`** — you called without `--tab`. Read the tabId from the

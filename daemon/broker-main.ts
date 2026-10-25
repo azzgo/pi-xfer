@@ -40,7 +40,7 @@
  * masquerade as the broker. The real port always lands in broker.json.
  *
  * Zero dependencies: node:* + ./ws-server.js + ./constants.js only. Runs
- * directly (`node broker-main.ts [--port N] [--xfer-dir DIR]`); also exports
+ * directly (`node daemon/broker-main.ts [--port N] [--xfer-dir DIR]`); also exports
  * its pieces for in-process embedding and future unit tests.
  */
 import * as fs from "node:fs";
@@ -49,14 +49,14 @@ import * as net from "node:net";
 import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "./src/core/constants.ts";
-import { ERR, FROM_WEB_PICKER, WIRE } from "./src/core/wire.ts";
-import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPick, type HandoffRecord } from "./src/core/handoff-doc.ts";
-import { createMeshDescriber } from "./src/mesh/mesh-describer.ts";
-import { listTargetsWithDescriptions } from "./src/core/targets.ts";
-import { encodeAgentName, isEntryPoint } from "./src/core/utils.ts";
-import { attachWsServer, type WsConnection } from "./src/broker/ws-server.ts";
-import { WIRE_VERSION } from "./src/core/wire.ts";
+import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "../src/core/constants.ts";
+import { ERR, FROM_WEB_PICKER, WIRE } from "../src/core/wire.ts";
+import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPick, type HandoffRecord } from "../src/core/handoff-doc.ts";
+import { createMeshDescriber } from "../src/mesh/mesh-describer.ts";
+import { listTargetsWithDescriptions } from "../src/core/targets.ts";
+import { encodeAgentName, isEntryPoint } from "../src/core/utils.ts";
+import { attachWsServer, type WsConnection } from "../src/broker/ws-server.ts";
+import { WIRE_VERSION } from "../src/core/wire.ts";
 
 /** Broker software version (welcome + /status + broker.json), from package.json. */
 export const VERSION: string = (() => {
@@ -386,7 +386,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
       // follow-up command directly runnable (compose passes it too — the two
       // render paths must not drift).
       fromTarget: targetName,
-      brokerCliPath: path.join(import.meta.dirname, "broker-main.ts"),
+      brokerCliPath: path.join(import.meta.dirname, "../broker-main.ts"),
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -471,7 +471,7 @@ function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
       picks: picks as HandoffPick[],
       record: record ?? undefined,
       fromTarget: targetName,
-      brokerCliPath: path.join(import.meta.dirname, "broker-main.ts"),
+      brokerCliPath: path.join(import.meta.dirname, "../broker-main.ts"),
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -653,7 +653,7 @@ function handleBagSubmit(connection: WsConnection, frame: Frame, xferDir: string
   const doc = path.join(os.tmpdir(), `pi-xfer-${msgId}.md`);
   let content: string;
   try {
-    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path.join(import.meta.dirname, "broker-main.ts") });
+    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path.join(import.meta.dirname, "../broker-main.ts") });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed staged markers: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -1108,7 +1108,7 @@ function httpPostJson(port: number, pathname: string, body: unknown): Promise<{ 
 }
 
 /**
- * `node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]` —
+ * `node daemon/broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]` —
  * reads broker.json (port) from the daemon's xfer dir, POSTs /page-tool, waits
  * for the outcome and prints the result JSON (stdout, exit 0), or an error
  * (stderr, exit 1) for missing_tab / tab_unreachable / timeout / broker down.
@@ -1168,12 +1168,12 @@ async function runPageToolCommand(args: string[]): Promise<void> {
     }
   }
   if (tabId === undefined) {
-    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
+    console.error("usage: node daemon/broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
     console.error("  --tab is mandatory (ADR-0022): the tabId carried by the handoff / submit ack");
     process.exit(1);
   }
   if (typeof target !== "string" || target.trim() === "" || typeof op !== "string" || op.trim() === "") {
-    console.error("usage: node broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
+    console.error("usage: node daemon/broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]");
     process.exit(1);
   }
 

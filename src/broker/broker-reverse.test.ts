@@ -22,7 +22,7 @@ import {
   runPageTool,
   startBroker,
   type BrokerHandle,
-} from "../../broker-main.js";
+} from "../../daemon/broker-main.js";
 import { decodeFrame, OPCODE_CLOSE, OPCODE_TEXT, type DecodedFrame } from "./ws-server.ts";
 
 // ---------- in-process broker harness ----------

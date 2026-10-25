@@ -121,7 +121,7 @@ export interface RenderHandoffDocInput {
  */
 function followUpSection(fromTarget: string | undefined, brokerCliPath: string | undefined): string[] {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
-  const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "broker-main.ts";
+  const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "daemon/broker-main.ts";
   return [
     "## Follow-up channel",
     "",

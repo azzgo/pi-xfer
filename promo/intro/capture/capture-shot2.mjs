@@ -117,7 +117,7 @@ let t0 = 0;
     const brokerLogPath = path.join(tmp, "broker.log");
     const brokerLog = fs.openSync(brokerLogPath, "a");
     const broker = spawn(process.execPath, [
-      path.join(REPO, "broker-main.ts"), "--port", "0", "--xfer-dir", path.join(homeDir, ".pi", "xfer"),
+      path.join(REPO, "daemon", "broker-main.ts"), "--port", "0", "--xfer-dir", path.join(homeDir, ".pi", "xfer"),
     ], { stdio: ["ignore", brokerLog, brokerLog] });
     cleanups.push(() => { broker.kill("SIGTERM"); fs.closeSync(brokerLog); });
     const brokerInfo = await waitFor(() => {

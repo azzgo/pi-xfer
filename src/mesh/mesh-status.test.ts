@@ -202,12 +202,12 @@ describe("mesh status: one vocabulary for every surface", () => {
   it("is the only module that spells a verdict glyph", async () => {
     const fs = await import("node:fs");
     const root = import.meta.dirname;
-    const surfaces = [["commands.ts", "../commands.ts"], ["admin-main.ts", "../../admin-main.ts"]]
+    const surfaces = [["commands.ts", "../commands.ts"], ["admin-main.ts", "../../daemon/admin-main.ts"]]
       .filter(([, p]) => fs.existsSync(`${root}/${p}`))
       .map(([name]) => name);
     assert.deepEqual(surfaces.sort(), ["admin-main.ts", "commands.ts"], "sanity: both surfaces exist");
     for (const name of surfaces) {
-      const source = fs.readFileSync(new URL(name === "commands.ts" ? "../commands.ts" : "../../admin-main.ts", import.meta.url), "utf-8");
+      const source = fs.readFileSync(new URL(name === "commands.ts" ? "../commands.ts" : "../../daemon/admin-main.ts", import.meta.url), "utf-8");
       const verdictShapes = MESH_STATE_ORDER
         .map((state) => `${MESH_STATE_MARKS[state].glyph} ${MESH_STATE_MARKS[state].label}`)
         .filter((shape) => source.includes(shape));

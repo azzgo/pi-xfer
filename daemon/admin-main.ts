@@ -25,15 +25,15 @@
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
-import { Board } from "./src/board/board.ts";
-import { BrokerManager } from "./src/broker/broker-manager.ts";
-import { MESH_PROBE_TIMEOUT_MS, XFER_DIR } from "./src/core/constants.ts";
-import { collectGarbage } from "./src/core/gc.ts";
-import { deriveMeshNodeState, listMeshNodes, listMeshState, meshPoolName, type MeshActorStatus, type MeshNodeState, type MeshRunnerInfo } from "./src/mesh/mesh-engine.ts";
-import { MESH_STATE_MARKS, MESH_STATE_ORDER, poolLabel } from "./src/mesh/mesh-status.ts";
-import { loadMeshConfig, resolveMeshConfig } from "./src/mesh/mesh-config.ts";
-import { MeshNode } from "./src/mesh/mesh.ts";
-import { isEntryPoint, listPeers, withTimeout } from "./src/core/utils.ts";
+import { Board } from "../src/board/board.ts";
+import { BrokerManager } from "../src/broker/broker-manager.ts";
+import { MESH_PROBE_TIMEOUT_MS, XFER_DIR } from "../src/core/constants.ts";
+import { collectGarbage } from "../src/core/gc.ts";
+import { deriveMeshNodeState, listMeshNodes, listMeshState, meshPoolName, type MeshActorStatus, type MeshNodeState, type MeshRunnerInfo } from "../src/mesh/mesh-engine.ts";
+import { MESH_STATE_MARKS, MESH_STATE_ORDER, poolLabel } from "../src/mesh/mesh-status.ts";
+import { loadMeshConfig, resolveMeshConfig } from "../src/mesh/mesh-config.ts";
+import { MeshNode } from "../src/mesh/mesh.ts";
+import { isEntryPoint, listPeers, withTimeout } from "../src/core/utils.ts";
 
 /** Default admin TCP port (mirrors admin-manager.ts DEFAULT_ADMIN_PORT). */
 export const DEFAULT_ADMIN_PORT = 7788;

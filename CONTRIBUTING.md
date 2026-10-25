@@ -18,8 +18,8 @@ the way it is.
   this structurally — it arms whenever `NODE_TEST_CONTEXT` is set and refuses every
   non-loopback endpoint, so a test that forgets to inject a stub fails loudly instead of
   quietly talking to someone's deployment.
-- **If you touch `web-picker.src/`, `mesh-runtime.src/`, `broker-main.ts`, or
-  `admin-main.ts`, run `npm run build` and commit the artifacts** — `web-picker.user.js`,
+- **If you touch `web-picker.src/`, `mesh-runtime.src/`, `daemon/broker-main.ts`, or
+  `daemon/admin-main.ts`, run `npm run build` and commit the artifacts** — `web-picker.user.js`,
   `mesh-runtime.cjs`, `broker.cjs`, `admin.cjs`, and the `.sha256` files. A freshness test
   enforces byte-identical output, so a stale artifact fails CI.
 - **No new runtime dependencies.** The extension ships with none; rivetkit is bundled, not

@@ -111,7 +111,7 @@ export class XferController {
             `\n\nThe sender is the Web Picker userscript, NOT an agent: it has no xfer socket and cannot answer. ` +
             `Do NOT call xfer_to with target "${FROM_WEB_PICKER}" — it fails with "peer not found".\n\n` +
             `To query the page back, run the broker page-tool CLI (full op table in the doc's "Follow-up channel" section), e.g.:\n` +
-            `\`node ${path.join(import.meta.dirname, "broker-main.ts")} page-tool ${state.identity?.name ?? "<own-name>"} dom.query '{"selector":"button","maxCount":5}'\``
+            `\`node ${path.join(import.meta.dirname, "../../daemon/broker-main.ts")} page-tool ${state.identity?.name ?? "<own-name>"} dom.query '{"selector":"button","maxCount":5}'\``
           )
         : (
             `📨 [Xfer from **${msg.from}**${via}]\n\n` +
