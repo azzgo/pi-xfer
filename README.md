@@ -74,7 +74,7 @@ Cross-machine has two paths, in this order: the **mesh** is the intended one (di
 - `docs/adr/` — decision records (mesh transport, board scope, web-picker record philosophy)
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
 - `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product
-- `web-picker.src/` + `web-picker.user.js` — userscript source and committed build product
+- `web-picker.src/` + `web-picker.user.js` — userscript source and committed build product (module tests in `tests/`)
 - `src/` — extension source by domain (`core/`, `mesh/`, `link/`, `board/`, `session/`, `broker/`, `admin/`), tests colocated; `index.ts` is the entry point
 - `daemon/broker-main.ts` + `broker.cjs`, `daemon/admin-main.ts` + `admin.cjs` — the two daemons, source and committed build products (`npm run build` produces all four)
 

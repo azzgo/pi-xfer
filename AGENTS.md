@@ -39,6 +39,7 @@ documents it points to.
 | `mesh-runtime.src/` | mesh engine source (bundled to `mesh-runtime.cjs`) |
 | `web-picker.src/` | userscript source (bundled to `web-picker.user.js`) |
 | `daemon/` | daemon sources (`broker-main.ts`, `admin-main.ts` — bundled to `broker.cjs`, `admin.cjs`, what the managers spawn) |
+| `tests/` | module tests for the unbundled web-picker sources (the colocated `*.test.ts` under `src/` cover everything else) |
 | `docs/adr/`, `CONTEXT.md` | decisions and glossary — update only with cause, never casually |
 | `skills/xfer/` | the pi-side skill + its `scripts/xfer` wrapper — canonical here, deployed by symlink (never copied into dotfiles) |
 | `skills/xfer-agent/` | the non-pi host skill, rendered by `xfer-adapterd install` |
