@@ -4,7 +4,7 @@
 // created is what makes the userscript connection layer testable at all.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createBrokerConn, autoLinkKey, policyBlockedKey } from './web-picker.src/broker-conn.js';
+import { createBrokerConn, autoLinkKey, policyBlockedKey } from '../web-picker.src/broker-conn.js';
 
 // ---- node-env stubs (module expects browser globals) ----
 

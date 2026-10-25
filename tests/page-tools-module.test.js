@@ -3,8 +3,8 @@
 // in node against a minimal DOM stub.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPageTools, writeOpsKey } from './web-picker.src/page-tools.js';
-import { PAGE_OPS } from './web-picker.src/wire.js';
+import { createPageTools, writeOpsKey } from '../web-picker.src/page-tools.js';
+import { PAGE_OPS } from '../web-picker.src/wire.js';
 
 const gmStore = new Map();
 const gmStub = {
