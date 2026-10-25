@@ -54,7 +54,7 @@ import { ERR, FROM_WEB_PICKER, WIRE } from "../src/core/wire.ts";
 import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPick, type HandoffRecord } from "../src/core/handoff-doc.ts";
 import { createMeshDescriber } from "../src/mesh/mesh-describer.ts";
 import { listTargetsWithDescriptions } from "../src/core/targets.ts";
-import { encodeAgentName, isEntryPoint } from "../src/core/utils.ts";
+import { encodeAgentName, isEntryPoint, pidAlive } from "../src/core/utils.ts";
 import { attachWsServer, type WsConnection } from "../src/broker/ws-server.ts";
 import { WIRE_VERSION } from "../src/core/wire.ts";
 
@@ -149,15 +149,7 @@ export function parseArgs(argv: string[]): BrokerOptions {
   return { port, xferDir };
 }
 
-/** Is `pid` a live process? EPERM (exists, other user) counts as alive. */
-export function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
+export { pidAlive };
 
 /** tmp + rename, mode 0600 — the state.ts writeMetadata pattern. */
 function writeFileAtomic(filePath: string, content: string): void {
@@ -386,7 +378,7 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
       // follow-up command directly runnable (compose passes it too — the two
       // render paths must not drift).
       fromTarget: targetName,
-      brokerCliPath: path.join(import.meta.dirname, "../broker-main.ts"),
+      brokerCliPath: brokerCliPath(),
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -471,7 +463,7 @@ function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
       picks: picks as HandoffPick[],
       record: record ?? undefined,
       fromTarget: targetName,
-      brokerCliPath: path.join(import.meta.dirname, "../broker-main.ts"),
+      brokerCliPath: brokerCliPath(),
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -653,7 +645,7 @@ function handleBagSubmit(connection: WsConnection, frame: Frame, xferDir: string
   const doc = path.join(os.tmpdir(), `pi-xfer-${msgId}.md`);
   let content: string;
   try {
-    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path.join(import.meta.dirname, "../broker-main.ts") });
+    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: brokerCliPath() });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed staged markers: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -1212,6 +1204,22 @@ async function runPageToolCommand(args: string[]): Promise<void> {
   process.exit(1);
 }
 
+
+/**
+ * The path a handoff doc names for follow-up page-tool calls. The daemon may
+ * run as `daemon/broker-main.ts` (repo tree, or the shipped source) or as
+ * `dist/broker.cjs` (npm install); in the bundle `import.meta.dirname` is
+ * `dist/`, so `../broker-main.ts` would name a file that does not exist. The
+ * shim keeps one path that is always runnable: the bundle when present, else
+ * the source next to it.
+ */
+function brokerCliPath(): string {
+  const source = path.join(import.meta.dirname, "broker-main.ts");
+  if (fs.existsSync(source)) return source;
+  const bundled = path.join(import.meta.dirname, "..", "dist", "broker.cjs");
+  if (fs.existsSync(bundled)) return bundled;
+  return path.join(import.meta.dirname, "..", "broker-main.ts");
+}
 
 /** CLI entry: parse args, handle EADDRINUSE, install clean-exit handlers. */
 export async function main(): Promise<void> {

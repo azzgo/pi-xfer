@@ -59,3 +59,9 @@ pi update --extensions
   `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`) are
   declared as `peerDependencies` with `"*"` ranges — never `dependencies`,
   never bundled.
+- `files` must cover every module the extension imports plus the daemon
+  sources (`daemon/*.ts`) and the committed `dist/` bundles. A missing entry
+  is invisible in the repo tree — `daemon/` once was — and only shows up as
+  `Cannot find module` on an npm install, after which the extension never
+  registers its flags and `pi --xfer <name>` reports `Unknown option: --xfer`.
+  `src/package-files.test.ts` walks the import graph and fails on any gap.

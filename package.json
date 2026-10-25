@@ -34,6 +34,7 @@
     "index.ts",
     "src/**/*.ts",
     "!src/**/*.test.ts",
+    "daemon/*.ts",
     "dist/broker.cjs",
     "dist/broker.cjs.sha256",
     "dist/admin.cjs",

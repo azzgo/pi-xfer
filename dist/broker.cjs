@@ -186,9 +186,9 @@ function formatHandoffKind(kind) {
 }
 
 // src/core/handoff-doc.ts
-function followUpSection(fromTarget, brokerCliPath) {
+function followUpSection(fromTarget, brokerCliPath2) {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
-  const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "daemon/broker-main.ts";
+  const cli = brokerCliPath2?.trim() ? brokerCliPath2.trim() : "daemon/broker-main.ts";
   return [
     "## Follow-up channel",
     "",
@@ -272,7 +272,7 @@ function recordSection(rec) {
   }
   return lines;
 }
-function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brokerCliPath }) {
+function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brokerCliPath: brokerCliPath2 }) {
   const lines = [
     "# Web annotation handoff",
     "",
@@ -295,7 +295,7 @@ function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brok
   ];
   for (const pick of picks) lines.push(...pickSection(pick));
   if (record) lines.push(...recordSection(record));
-  lines.push(...followUpSection(fromTarget, brokerCliPath), "");
+  lines.push(...followUpSection(fromTarget, brokerCliPath2), "");
   lines.push(
     "---",
     "",
@@ -306,7 +306,7 @@ function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brok
   );
   return lines.join("\n") + "\n";
 }
-function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath }) {
+function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath: brokerCliPath2 }) {
   const pages = /* @__PURE__ */ new Map();
   for (const item of items) {
     const key = `${item.url}|${item.title}`;
@@ -348,7 +348,7 @@ function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath }
     `Every page section above carries its tabId. Follow up with \`page-tool <target> <op> --tab <tabId>\` — tabIds come from this doc, never guessed. If a call answers tab_unreachable, that page is closed: do NOT retry — stop and ask the human to reopen the page (title/url above) or reconnect the picker. Staged markers may come from pages other than the one this bag was sent from.`,
     ""
   );
-  lines.push(...followUpSection(fromTarget, brokerCliPath), "");
+  lines.push(...followUpSection(fromTarget, brokerCliPath2), "");
   lines.push(
     "---",
     "",
@@ -378,6 +378,14 @@ function isEntryPoint(names) {
   const invoked = process.argv[1];
   if (!invoked) return false;
   return names.includes(path3.basename(invoked));
+}
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
 }
 async function withTimeout(promise, ms) {
   let timer;
@@ -990,14 +998,6 @@ function parseArgs(argv) {
   const xferDir = flag("--xfer-dir") ?? process.env.XFER_DIR ?? XFER_DIR;
   return { port, xferDir };
 }
-function pidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
-  }
-}
 function writeFileAtomic(filePath, content) {
   const temp = `${filePath}.tmp-${process.pid}`;
   try {
@@ -1176,7 +1176,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
       // follow-up command directly runnable (compose passes it too — the two
       // render paths must not drift).
       fromTarget: targetName,
-      brokerCliPath: path5.join(__dirname, "../broker-main.ts")
+      brokerCliPath: brokerCliPath()
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -1241,7 +1241,7 @@ function handleAnnotationCompose(connection, frame) {
       picks,
       record: record ?? void 0,
       fromTarget: targetName,
-      brokerCliPath: path5.join(__dirname, "../broker-main.ts")
+      brokerCliPath: brokerCliPath()
     });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed picks: ${error instanceof Error ? error.message : String(error)}`);
@@ -1346,7 +1346,7 @@ function handleBagSubmit(connection, frame, xferDir) {
   const doc = path5.join(os3.tmpdir(), `pi-xfer-${msgId}.md`);
   let content;
   try {
-    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: path5.join(__dirname, "../broker-main.ts") });
+    content = renderBagHandoffDoc({ msgId, prompt, items: bag, fromTarget: targetName, brokerCliPath: brokerCliPath() });
   } catch (error) {
     sendError(connection, frame, ERR_INVALID_PAYLOAD, `malformed staged markers: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -1787,6 +1787,13 @@ async function runPageToolCommand(args) {
   }
   console.error(`[broker] page-tool failed: ${typeof body.error === "string" ? body.error : `http ${response.status}`}`);
   process.exit(1);
+}
+function brokerCliPath() {
+  const source = path5.join(__dirname, "broker-main.ts");
+  if (fs3.existsSync(source)) return source;
+  const bundled = path5.join(__dirname, "..", "dist", "broker.cjs");
+  if (fs3.existsSync(bundled)) return bundled;
+  return path5.join(__dirname, "..", "broker-main.ts");
 }
 async function main() {
   const args = process.argv.slice(2);

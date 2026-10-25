@@ -60,6 +60,16 @@ export function isEntryPoint(names: string[]): boolean {
   return names.includes(path.basename(invoked));
 }
 
+/** Is `pid` a live process? EPERM (exists, other user) counts as alive. */
+export function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 export function readPeerMetadata(xferName: string, xferDir: string = XFER_DIR): Partial<PeerInfo> {
   try {
     const raw: unknown = JSON.parse(fs.readFileSync(path.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));

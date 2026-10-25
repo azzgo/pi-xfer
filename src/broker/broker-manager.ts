@@ -42,8 +42,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { isEntryPoint } from "../core/utils.ts";
-import { pidAlive } from "../../daemon/broker-main.ts";
+import { isEntryPoint, pidAlive } from "../core/utils.ts";
 import { XFER_DIR } from "../core/constants.ts";
 /** Default broker TCP port (mirrors broker-main.ts DEFAULT_PORT). */
 export const DEFAULT_BROKER_PORT = 4719;
