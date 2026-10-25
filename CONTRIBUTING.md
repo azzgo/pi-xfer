@@ -19,8 +19,8 @@ the way it is.
   non-loopback endpoint, so a test that forgets to inject a stub fails loudly instead of
   quietly talking to someone's deployment.
 - **If you touch `web-picker.src/`, `mesh-runtime.src/`, `daemon/broker-main.ts`, or
-  `daemon/admin-main.ts`, run `npm run build` and commit the artifacts** — `web-picker.user.js`,
-  `mesh-runtime.cjs`, `broker.cjs`, `admin.cjs`, and the `.sha256` files. A freshness test
+  `daemon/admin-main.ts`, run `npm run build` and commit the artifacts** — `dist/web-picker.user.js`,
+  `dist/mesh-runtime.cjs`, `dist/broker.cjs`, `dist/admin.cjs`, and the `.sha256` files. A freshness test
   enforces byte-identical output, so a stale artifact fails CI.
 - **No new runtime dependencies.** The extension ships with none; rivetkit is bundled, not
   installed. `examples/` keeps its own `package.json` and is not published.

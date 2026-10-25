@@ -198,7 +198,7 @@ export class AdminManager {
 // ---------- helpers (mirrors broker-manager.ts) ----------
 
 /** The committed daemon bundle (built from admin-main.ts by `npm run build`). */
-const ADMIN_MAIN = path.join(import.meta.dirname, "../../admin.cjs");
+const ADMIN_MAIN = path.join(import.meta.dirname, "../../dist/admin.cjs");
 
 function readAdminJson(xferDir: string): AdminInfo | null {
   try {

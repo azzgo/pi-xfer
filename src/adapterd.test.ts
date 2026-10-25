@@ -287,7 +287,7 @@ describe("adapterd mesh adoption", () => {
 });
 
 describe("xfer-adapterd CLI smoke", () => {
-  const bundle = path.join(import.meta.dirname, "../xfer-adapterd.cjs");
+  const bundle = path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs");
 
   it("up --once serves a send, then exits 0 with the record in the inbox", async () => {
     const dir = freshDir();
@@ -434,7 +434,7 @@ describe("xfer-adapterd CLI smoke", () => {
     assert.match(stderr, /no adapter daemon found/);
   });
 describe("xfer-adapterd CLI: probing never leaves a daemon behind", () => {
-  const bundle = path.join(import.meta.dirname, "../xfer-adapterd.cjs");
+  const bundle = path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs");
 
   /**
    * `up --help` used to ignore the flag, bind a socket, and block forever — a
@@ -482,7 +482,7 @@ describe("xfer-adapterd CLI: probing never leaves a daemon behind", () => {
 });
 
 describe("adapterd CLI: inbox with an explicit --name", () => {
-  const bundle = path.join(import.meta.dirname, "../xfer-adapterd.cjs");
+  const bundle = path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs");
   const dirs: string[] = [];
   after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
   const freshDir = (): string => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-adapterd-inbox-")); dirs.push(d); return d; };
@@ -518,7 +518,7 @@ describe("adapterd CLI: inbox with an explicit --name", () => {
 });
 
 describe("xfer-adapterd CLI: list", () => {
-  const bundle = path.join(import.meta.dirname, "../xfer-adapterd.cjs");
+  const bundle = path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs");
   const dirs: string[] = [];
   after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
   const freshDir = (): string => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-adapterd-list-")); dirs.push(d); return d; };
@@ -603,7 +603,7 @@ describe("xfer-adapterd CLI: list", () => {
 });
 
 describe("xfer-adapterd CLI: the outcome a failed send leaves behind", () => {
-  const bundle = path.join(import.meta.dirname, "../xfer-adapterd.cjs");
+  const bundle = path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs");
   const dirs: string[] = [];
   after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
   const freshDir = (): string => { const d = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-adapterd-outcome-")); dirs.push(d); return d; };

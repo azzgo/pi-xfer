@@ -266,7 +266,7 @@ export class BrokerManager {
 // ---------- helpers ----------
 
 /** The committed daemon bundle (built from broker-main.ts by `npm run build`). */
-const BROKER_MAIN = path.join(import.meta.dirname, "../../broker.cjs");
+const BROKER_MAIN = path.join(import.meta.dirname, "../../dist/broker.cjs");
 
 /** broker.json parsed + shape-checked, or null when missing/invalid. */
 function readBrokerJson(xferDir: string): BrokerInfo | null {

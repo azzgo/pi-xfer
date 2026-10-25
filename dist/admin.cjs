@@ -2235,7 +2235,7 @@ ${lines.slice(-LOG_TAIL_LINES).join("\n")}`;
     }
   }
 };
-var BROKER_MAIN = path7.join(__dirname, "../../broker.cjs");
+var BROKER_MAIN = path7.join(__dirname, "../../dist/broker.cjs");
 function readBrokerJson(xferDir) {
   try {
     const data = JSON.parse(fs6.readFileSync(path7.join(xferDir, "broker.json"), "utf-8"));

@@ -28,7 +28,7 @@ export const MESH_RUNTIME_BUNDLE = "mesh-runtime.cjs";
  * Load the committed rivetkit runtime bundle (mesh-runtime.cjs, built by
  * `npm run build`). Throws with recovery guidance when missing.
  */
-export const MESH_RUNTIME_DIR = path.resolve(import.meta.dirname, "../..");
+export const MESH_RUNTIME_DIR = path.resolve(import.meta.dirname, "../../dist");
 export async function loadMeshRuntimeBundle(dir = MESH_RUNTIME_DIR): Promise<any> {
   const bundleUrl = url.pathToFileURL(path.join(dir, MESH_RUNTIME_BUNDLE)).href;
   try {

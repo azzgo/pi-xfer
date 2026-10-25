@@ -140,7 +140,7 @@ ADR 0007).
 **Easiest** — open the raw URL in a browser with Tampermonkey enabled; the
 `.user.js` suffix triggers the install prompt automatically:
 
-<https://raw.githubusercontent.com/azzgo/pi-xfer/main/web-picker.user.js>
+<https://raw.githubusercontent.com/azzgo/pi-xfer/main/dist/web-picker.user.js>
 
 Manual: open Tampermonkey → Dashboard → **+** (Create a new script), replace
 the editor content with the **entire contents of `web-picker.user.js`**, save

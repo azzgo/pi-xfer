@@ -1211,7 +1211,7 @@ describe("mesh runtime bundle", () => {
   });
 
   it("the bundle lives next to the extension source", () => {
-    assert.ok(fs.existsSync(path.join(import.meta.dirname, "../..", MESH_RUNTIME_BUNDLE)));
+    assert.ok(fs.existsSync(path.join(import.meta.dirname, "../../dist", MESH_RUNTIME_BUNDLE)));
   });
 });
 

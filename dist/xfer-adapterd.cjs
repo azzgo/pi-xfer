@@ -49587,7 +49587,7 @@ init_mesh_engine();
 init_mesh_log();
 init_utils();
 var MESH_RUNTIME_BUNDLE = "mesh-runtime.cjs";
-var MESH_RUNTIME_DIR = path9.resolve(__dirname, "../..");
+var MESH_RUNTIME_DIR = path9.resolve(__dirname, "../../dist");
 async function loadMeshRuntimeBundle(dir = MESH_RUNTIME_DIR) {
   const bundleUrl = url2.pathToFileURL(path9.join(dir, MESH_RUNTIME_BUNDLE)).href;
   try {

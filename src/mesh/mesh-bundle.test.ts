@@ -12,7 +12,7 @@ import { describe, it } from "node:test";
  */
 describe("mesh runtime bundle consistency", () => {
   it("mesh-runtime.cjs matches its committed .sha256 checksum", () => {
-    const bundlePath = path.join(import.meta.dirname, "../../mesh-runtime.cjs");
+    const bundlePath = path.join(import.meta.dirname, "../../dist/mesh-runtime.cjs");
     const checksumPath = `${bundlePath}.sha256`;
     assert.ok(fs.existsSync(bundlePath), "mesh-runtime.cjs missing — run `npm run build` in the xfer extension directory and commit it");
     assert.ok(fs.existsSync(checksumPath), "mesh-runtime.cjs.sha256 missing — run `npm run build` in the xfer extension directory and commit it");

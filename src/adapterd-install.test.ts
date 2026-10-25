@@ -73,7 +73,7 @@ describe("xfer-agent installer", () => {
 
   it("the bundle install command writes a usable skill and launch command", async () => {
     const into = freshDir();
-    const bundle = path.join(import.meta.dirname, "../xfer-adapterd.cjs");
+    const bundle = path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs");
     const child = spawn(
       process.execPath,
       [bundle, "install", "--host", "generic", "--into", into, "--name", "agent-cli"],
@@ -92,7 +92,7 @@ describe("xfer-agent installer", () => {
 
 describe("adapterd install CLI: mesh flag", () => {
   it("is local-only by default and joins the mesh only when asked", async () => {
-    const bundle = path.join(import.meta.dirname, "../xfer-adapterd.cjs");
+    const bundle = path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs");
     const run = async (...args: string[]): Promise<{ code: number | null; stdout: string }> => {
       const into = freshDir();
       const child = spawn(process.execPath, [bundle, "install", "--host", "generic", "--into", into, "--name", "agent-cli", ...args],

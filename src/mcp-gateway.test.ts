@@ -397,7 +397,7 @@ describe("mcp-gateway: mesh send end to end on loopback", () => {
       assert.ok(runnerConfig.ok, `runner-config: ${runnerConfig.status} ${await runnerConfig.text()}`);
       fs.writeFileSync(configPath, JSON.stringify({ endpoint, namespace: "default", token }));
 
-      const adapterd = path.join(import.meta.dirname, "../../xfer-adapterd.cjs");
+      const adapterd = path.join(import.meta.dirname, "../../dist/xfer-adapterd.cjs");
       const result = await speak(
         ["--name", "loopback-sender", "--dir", dir, "--xfer-adapterd", adapterd],
         [call(2, "xfer_mesh_send", { target: "phone", summary: "loopback probe", document: "kind: notification\nprobe", kind: "notification" })],

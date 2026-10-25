@@ -8,8 +8,8 @@ pushed `v*` tag.
 
 1. All changes are committed to `main` and `npm test` is green.
 2. Build products are fresh: if `web-picker.src/` or `mesh-runtime.src/`
-   changed, run `npm run build` and commit `web-picker.user.js` and
-   `mesh-runtime.cjs` + `.sha256`.
+   changed, run `npm run build` and commit `dist/web-picker.user.js` and
+   `dist/mesh-runtime.cjs` + `.sha256`.
 
 ## Steps
 

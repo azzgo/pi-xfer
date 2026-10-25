@@ -43,7 +43,7 @@ Full walkthrough in [`docs/guides/quickstart.md`](docs/guides/quickstart.md) · 
 | **Web picker** | Tampermonkey userscript + local broker: pick page elements, record interaction spans, submit as handoff (see `docs/dev/web-picker.md`) |
 | **MCP gateway** | `mcp-gateway.mjs` — a stdio MCP server exposing `xfer_send` / `xfer_mesh_send` / `xfer_list` to any MCP host, by forking the adapter CLI. Binds no socket: send-only, so it is not listed in `/xfer list` (see `docs/guides/mcp-gateway.md`) |
 
-Install the userscript straight from the raw URL (the `.user.js` suffix triggers Tampermonkey's install prompt): <https://raw.githubusercontent.com/azzgo/pi-xfer/main/web-picker.user.js>
+Install the userscript straight from the raw URL (the `.user.js` suffix triggers Tampermonkey's install prompt): <https://raw.githubusercontent.com/azzgo/pi-xfer/main/dist/web-picker.user.js>
 
 ## Positioning
 
@@ -73,10 +73,10 @@ Cross-machine has two paths, in this order: the **mesh** is the intended one (di
 - `docs/guides/` — user guides ([quickstart](docs/guides/quickstart.md), [mesh setup](docs/guides/mesh-setup.md), [agent host setup](docs/guides/agent-host-setup.md), [serverless Cloudflare node](docs/guides/cf-serverless-node.md), [MCP gateway](docs/guides/mcp-gateway.md))
 - `docs/adr/` — decision records (mesh transport, board scope, web-picker record philosophy)
 - `CONTEXT.md` — glossary (Mesh, Node, Board, Card, Marker, …)
-- `mesh-runtime.src/` + `mesh-runtime.cjs` — bundled mesh engine, source and committed build product
-- `web-picker.src/` + `web-picker.user.js` — userscript source and committed build product (module tests in `tests/`)
+- `mesh-runtime.src/` + `dist/mesh-runtime.cjs` — bundled mesh engine, source and committed build product
+- `web-picker.src/` + `dist/web-picker.user.js` — userscript source and committed build product (module tests in `tests/`)
 - `src/` — extension source by domain (`core/`, `mesh/`, `link/`, `board/`, `session/`, `broker/`, `admin/`), tests colocated; `index.ts` is the entry point
-- `daemon/broker-main.ts` + `broker.cjs`, `daemon/admin-main.ts` + `admin.cjs` — the two daemons, source and committed build products (`npm run build` produces all four)
+- `daemon/broker-main.ts` + `dist/broker.cjs`, `daemon/admin-main.ts` + `dist/admin.cjs` — the two daemons, source and committed build products (`npm run build` produces all five, into `dist/`)
 
 pi-xfer was formerly maintained inside [azzgo/dotfiles](https://github.com/azzgo/dotfiles) (`pi/agent/extensions/xfer/`); history preserved from the initial commit.
 
@@ -92,7 +92,7 @@ To run the working tree instead of the installed `npm:pi-xfer` copy, start pi
 with `pi -ne -e ./` — `-ne` skips extension discovery so the installed copy
 cannot load beside this one and collide on `xfer_to` / `xfer_mesh_to` / `--xfer`.
 
-The committed bundles (`broker.cjs`, `admin.cjs`, `mesh-runtime.cjs`, `web-picker.user.js`) are built with esbuild targeting **Node 20+**; the extension host runs on whatever Node pi requires (`engines: >=22`). `npm test` fails if a committed bundle is stale — run `npm run build` and commit the artifacts.
+The committed bundles under `dist/` (`broker.cjs`, `admin.cjs`, `mesh-runtime.cjs`, `web-picker.user.js`) are built with esbuild targeting **Node 20+**; the extension host runs on whatever Node pi requires (`engines: >=22`). `npm test` fails if a committed bundle is stale — run `npm run build` and commit the artifacts.
 
 Contributions and host presets: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

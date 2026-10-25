@@ -141,7 +141,7 @@ export function resolveOptions(argv) {
 }
 
 function defaultAdapterdPath() {
-  return path.join(import.meta.dirname, "xfer-adapterd.cjs");
+  return path.join(import.meta.dirname, "dist", "xfer-adapterd.cjs");
 }
 
 /**

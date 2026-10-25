@@ -18,13 +18,13 @@ describe("committed artifact freshness", () => {
    * bundle and fail with a bogus "stale" claim.
    */
   const scratch = (name: string): string =>
-    path.join(import.meta.dirname, "..", `${name}.fresh.test.tmp-${process.pid}`);
+    path.join(import.meta.dirname, "..", "dist", `${name}.fresh.test.tmp-${process.pid}`);
   it("mesh-runtime.cjs rebuilds byte-identical from mesh-runtime.src/", async () => {
     const rebuilt = scratch("mesh-runtime.cjs");
     try {
       await buildMeshRuntime(rebuilt);
       assert.equal(
-        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../mesh-runtime.cjs"))),
+        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../dist/mesh-runtime.cjs"))),
         true,
         "mesh-runtime.cjs is stale — run `npm run build` and commit both the bundle and its .sha256",
       );
@@ -38,7 +38,7 @@ describe("committed artifact freshness", () => {
     try {
       await buildAdapterd(rebuilt);
       assert.equal(
-        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../xfer-adapterd.cjs"))),
+        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../dist/xfer-adapterd.cjs"))),
         true,
         "xfer-adapterd.cjs is stale — run `npm run build` and commit both the bundle and its .sha256",
       );
@@ -52,7 +52,7 @@ describe("committed artifact freshness", () => {
     try {
       await buildBrokerDaemon(rebuilt);
       assert.equal(
-        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../broker.cjs"))),
+        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../dist/broker.cjs"))),
         true,
         "broker.cjs is stale — run `npm run build` and commit both the bundle and its .sha256",
       );
@@ -67,7 +67,7 @@ describe("committed artifact freshness", () => {
     try {
       await buildAdminDaemon(rebuilt);
       assert.equal(
-        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../admin.cjs"))),
+        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../dist/admin.cjs"))),
         true,
         "admin.cjs is stale — run `npm run build` and commit both the bundle and its .sha256",
       );
@@ -82,7 +82,7 @@ describe("committed artifact freshness", () => {
     try {
       await buildWebPicker(rebuilt);
       assert.equal(
-        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../web-picker.user.js"))),
+        fs.readFileSync(rebuilt).equals(fs.readFileSync(path.join(import.meta.dirname, "../dist/web-picker.user.js"))),
         true,
         "web-picker.user.js is stale — run `npm run build` and commit it",
       );

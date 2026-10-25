@@ -57,7 +57,7 @@ For an npm-installed pi-xfer the path is
 |---|---|---|
 | `--name <n>` | **yes** | The sender name stamped on every handoff. Never derived — not from cwd, not from an env var. |
 | `--dir <d>` | no | Where peer sockets live. Defaults to `~/.pi/xfer`. Tests point it at a fresh temp dir. |
-| `--xfer-adapterd <path>` | no | The CLI to fork. Defaults to the `xfer-adapterd.cjs` beside this file; tests point it at a stub. |
+| `--xfer-adapterd <path>` | no | The CLI to fork. Defaults to `dist/xfer-adapterd.cjs` beside this file; tests point it at a stub. |
 
 **`--name` is required and never derived.** A send-only gateway binds nothing,
 so a name collision cannot be caught the way a duplicate daemon is

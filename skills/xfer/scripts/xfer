@@ -37,7 +37,7 @@ function expand(p) {
 function bundleCandidates() {
   const home = os.homedir();
   return [
-    path.join(home, "dev", "personal", "pi-xfer", "xfer-adapterd.cjs"),
+    path.join(home, "dev", "personal", "pi-xfer", "dist", "xfer-adapterd.cjs"),
     path.join(XFER_DIR, "xfer-adapterd.cjs"),
     path.join(home, ".local/share/mise/installs/node/*/lib/node_modules/pi-xfer/xfer-adapterd.cjs"),
     path.join(home, ".nvm/versions/node/*/lib/node_modules/pi-xfer/xfer-adapterd.cjs"),
