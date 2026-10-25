@@ -431,7 +431,9 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         <!-- Boundaries (behind everything) -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="This machine" x="30" y="30" width="980" height="320" rx="12" class="c-region" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="1" data-composition-frame-label="Other machines" x="30" y="470" width="1030" height="116" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="1" data-composition-frame-label="Other machines — over the mesh" x="30" y="470" width="650" height="116" rx="12" class="c-region" stroke-width="1"/>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="2" data-composition-frame-label="Other machines — over ssh" x="770" y="470" width="290" height="116" rx="12" class="c-region" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <g data-graph-role="automatic-crossover" style="--step:0">
@@ -527,8 +529,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         <text x="870" y="107" class="t-muted" font-size="9" text-anchor="middle">Cursor, bots, any MCP host</text>
         </g>
 
-        <g id="node-peer-mesh" data-node-id="peer-mesh" data-node-label="Agent on another machine" tabindex="0" role="button" aria-label="Focus Agent on another machine, reachable while it sleeps, Other machines" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="reachable while it sleeps" data-node-context="Other machines">
-          <title>Agent on another machine · reachable while it sleeps · Other machines</title>
+        <g id="node-peer-mesh" data-node-id="peer-mesh" data-node-label="Agent on another machine" tabindex="0" role="button" aria-label="Focus Agent on another machine, reachable while it sleeps, Other machines — over the mesh" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="reachable while it sleeps" data-node-context="Other machines — over the mesh">
+          <title>Agent on another machine · reachable while it sleeps · Other machines — over the mesh</title>
           <rect x="420" y="500" width="230" height="66" rx="6" class="c-mask"/>
           <rect x="420" y="500" width="230" height="66" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="person" class="semantic-sigil s-frontend" transform="translate(426 506) scale(0.6875)">
@@ -538,8 +540,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         <text x="535" y="547" class="t-muted" font-size="9" text-anchor="middle">reachable while it sleeps</text>
         </g>
 
-        <g id="node-peer-ssh" data-node-id="peer-ssh" data-node-label="Agent on an ssh host" tabindex="0" role="button" aria-label="Focus Agent on an ssh host, point-to-point, while the Link is up, Other machines" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="point-to-point, while the Link is up" data-node-context="Other machines">
-          <title>Agent on an ssh host · point-to-point, while the Link is up · Other machines</title>
+        <g id="node-peer-ssh" data-node-id="peer-ssh" data-node-label="Agent on an ssh host" tabindex="0" role="button" aria-label="Focus Agent on an ssh host, point-to-point, while the Link is up, Other machines — over ssh" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="point-to-point, while the Link is up" data-node-context="Other machines — over ssh">
+          <title>Agent on an ssh host · point-to-point, while the Link is up · Other machines — over ssh</title>
           <rect x="800" y="500" width="230" height="66" rx="6" class="c-mask"/>
           <rect x="800" y="500" width="230" height="66" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="person" class="semantic-sigil s-frontend" transform="translate(806 506) scale(0.6875)">
@@ -549,8 +551,8 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
         <text x="915" y="547" class="t-muted" font-size="9" text-anchor="middle">point-to-point, while the Link is up</text>
         </g>
 
-        <g id="node-engine" data-node-id="engine" data-node-label="Mesh server" tabindex="0" role="button" aria-label="Focus Mesh server, discovery + durable queue, Other machines" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="discovery + durable queue" data-node-context="Other machines">
-          <title>Mesh server · discovery + durable queue · Other machines</title>
+        <g id="node-engine" data-node-id="engine" data-node-label="Mesh server" tabindex="0" role="button" aria-label="Focus Mesh server, discovery + durable queue, Other machines — over the mesh" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="discovery + durable queue" data-node-context="Other machines — over the mesh">
+          <title>Mesh server · discovery + durable queue · Other machines — over the mesh</title>
           <rect x="60" y="500" width="200" height="66" rx="6" class="c-mask"/>
           <rect x="60" y="500" width="200" height="66" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(66 506) scale(0.6875)">
@@ -600,9 +602,14 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
           <text data-boundary-label="" x="38" y="53" class="t-cloud" font-size="9" font-weight="600">This machine</text>
         </g>
 
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="region" data-composition-frame-label="Other machines">
-          <rect data-graph-role="structural-frame-label-mask" x="34" y="480" width="85.6" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="38" y="493" class="t-cloud" font-size="9" font-weight="600">Other machines</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="region" data-composition-frame-label="Other machines — over the mesh">
+          <rect data-graph-role="structural-frame-label-mask" x="34" y="480" width="172" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="38" y="493" class="t-cloud" font-size="9" font-weight="600">Other machines — over the mesh</text>
+        </g>
+
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="2" data-composition-frame-kind="region" data-composition-frame-label="Other machines — over ssh">
+          <rect data-graph-role="structural-frame-label-mask" x="774" y="480" width="145" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="778" y="493" class="t-cloud" font-size="9" font-weight="600">Other machines — over ssh</text>
         </g>
 
         <!-- Legend -->
