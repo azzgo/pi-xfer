@@ -8,3 +8,4 @@ npm-debug.log*
 .DS_Store
 .husky/_
 docs/guides/assets/.archify/architecture-xfer-quickstart/visual-check/
+.archify/

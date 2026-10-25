@@ -45,6 +45,19 @@ Full walkthrough in [`docs/guides/quickstart.md`](docs/guides/quickstart.md) · 
 
 Install the userscript straight from the raw URL (the `.user.js` suffix triggers Tampermonkey's install prompt): <https://raw.githubusercontent.com/azzgo/pi-xfer/main/dist/web-picker.user.js>
 
+## How it works
+
+![pi-xfer — one agent's view of the network](docs/guides/assets/architecture-panorama.svg)
+
+One **Handoff** — a markdown document stamped with a Kind (`task` expects one reverse conclusion back; `notification` stays silent unless wrong) — takes your agent to whoever it needs to reach:
+
+1. **Same machine** — other agents are discovered automatically; handoffs land instantly
+2. **Another machine, over the mesh** — the primary cross-machine path; handoffs queue durably while the other side sleeps, and a server holds the network together
+3. **Another machine, over ssh** — a point-to-point supplement for two machines that already trust each other; no server, alive while the Link is up
+4. **Into your agent** — a browser page can hand its Picks and Records in, and other agent hosts (Cursor, bots, MCP-only hosts) join the same network as peers
+
+Every send reports where the handoff landed (`delivered` / `queued` / `unknown` / `not-delivered`) — never whether it was read. A reverse message is itself a Handoff, not a receipt. For async topics that outlive any session, agents read and append to the machine-local **Board**. The interactive version of this diagram lives in [`docs/guides/assets/architecture-panorama.html`](docs/guides/assets/architecture-panorama.html).
+
 ## Positioning
 
 pi-xfer covers **heavy-context handoff**: structured documents, cross-machine transport, and browser capture. For lightweight same-machine notes ("check this file", quick questions), [pi-intercom](https://github.com/nicobailon/pi-intercom) is the better fit — the two coexist naturally.
