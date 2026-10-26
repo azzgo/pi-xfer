@@ -275,6 +275,9 @@ function readPackageVersion(extensionRoot) {
     return null;
   }
 }
+function readModulePackageVersion(moduleDirname) {
+  return readPackageVersion(moduleDirname) ?? readPackageVersion(path3.join(moduleDirname, "..")) ?? "?";
+}
 
 // src/core/utils.ts
 function encodeAgentName(name) {
@@ -530,7 +533,7 @@ ${lines.slice(-LOG_TAIL_LINES).join("\n")}`;
 var BROKER_MAIN = path5.join(__dirname, "../../dist/broker.cjs");
 function versionDriftNote(brokerVersion) {
   const installed = readPackageVersion(path5.join(__dirname, "../.."));
-  if (installed === null || brokerVersion === "" || brokerVersion === installed) return null;
+  if (installed === null || brokerVersion === "" || brokerVersion === "?" || brokerVersion === installed) return null;
   return `  drift: started by ${brokerVersion}, this install is ${installed} — run /xfer broker stop then /xfer broker start so its handoff docs name a live page-tool path`;
 }
 function readBrokerJson(xferDir) {
@@ -1198,13 +1201,7 @@ function poolLabel(pool) {
 
 // daemon/admin-main.ts
 var DEFAULT_ADMIN_PORT = 7788;
-var EXTENSION_VERSION = (() => {
-  try {
-    return JSON.parse(fs7.readFileSync(path8.join(__dirname, "package.json"), "utf-8")).version ?? "?";
-  } catch {
-    return "?";
-  }
-})();
+var EXTENSION_VERSION = readModulePackageVersion(__dirname);
 var MESH_DOWN_TIMEOUT_MS = 3e4;
 var EventHub = class {
   clients = /* @__PURE__ */ new Set();

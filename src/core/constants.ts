@@ -33,3 +33,15 @@ export function readPackageVersion(extensionRoot: string): string | null {
     return null;
   }
 }
+
+/**
+ * package.json's version, looked up from a module that may sit one level below
+ * the extension root. The daemons run either as `dist/broker.cjs` /
+ * `dist/admin.cjs` (bundles, dirname = `dist/`) or as `daemon/*.ts` (repo tree,
+ * dirname = `daemon/`), and the package root is one level up in both cases —
+ * `dist/package.json` does not exist, and reading it silently produced `?`,
+ * which then made the version-drift check fire on a perfectly healthy install.
+ */
+export function readModulePackageVersion(moduleDirname: string): string {
+  return readPackageVersion(moduleDirname) ?? readPackageVersion(path.join(moduleDirname, "..")) ?? "?";
+}

@@ -182,6 +182,31 @@ describe("BrokerManager start", () => {
     assert.ok(statusText.includes(String(info.port)), `status should contain the port, got:\n${statusText}`);
     assert.ok(statusText.includes(String(info.pid)), `status should contain the pid, got:\n${statusText}`);
     assert.ok(statusText.includes(info.version), `status should contain the version, got:\n${statusText}`);
+
+    // Regression: the daemon used to read `<dirname>/package.json`, so a bundle
+    // (dirname = dist/) reported "?" and status claimed version drift on a
+    // healthy install. A freshly started daemon must report a real version and
+    // no drift line.
+    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../..", "package.json"), "utf-8")) as {
+      version: string;
+    };
+    assert.equal(info.version, pkg.version, `spawned daemon reports its real version, got ${info.version}`);
+    assert.equal(statusText.includes("drift:"), false, `healthy install must not claim drift, got:\n${statusText}`);
+  });
+
+  it("status stays silent about drift when the daemon reports an unknown version", async () => {
+    const dir = freshXferDir();
+    // A broker.json from a daemon that could not read its own package.json.
+    const manager = makeManager(dir);
+    await manager.start();
+    const state = readBrokerJson(dir);
+    fs.writeFileSync(
+      path.join(dir, "broker.json"),
+      JSON.stringify({ ...state, version: "?" }, null, 2),
+    );
+    const statusText = await manager.status();
+    assert.ok(statusText.includes("alive"), statusText);
+    assert.equal(statusText.includes("drift:"), false, `an unknown version is not drift, got:\n${statusText}`);
   });
 
   it("start(portOverride) pins the requested port", async () => {

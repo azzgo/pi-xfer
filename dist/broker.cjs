@@ -47,13 +47,14 @@ __export(broker_main_exports, {
   startBroker: () => startBroker
 });
 module.exports = __toCommonJS(broker_main_exports);
-var fs3 = __toESM(require("node:fs"), 1);
+var fs4 = __toESM(require("node:fs"), 1);
 var http = __toESM(require("node:http"), 1);
 var net = __toESM(require("node:net"), 1);
 var os3 = __toESM(require("node:os"), 1);
 var path5 = __toESM(require("node:path"), 1);
 
 // src/core/constants.ts
+var fs = __toESM(require("node:fs"), 1);
 var os2 = __toESM(require("node:os"), 1);
 var path2 = __toESM(require("node:path"), 1);
 
@@ -126,6 +127,17 @@ var MESH_CACHE_DIR = path2.join(XFER_DIR, "cache");
 var CONNECT_TIMEOUT_MS = 5e3;
 var ACK_TIMEOUT_MS = 5e3;
 var MAX_FRAME_BYTES = 1024 * 1024;
+function readPackageVersion(extensionRoot) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path2.join(extensionRoot, "package.json"), "utf-8"));
+    return typeof raw.version === "string" && raw.version !== "" ? raw.version : null;
+  } catch {
+    return null;
+  }
+}
+function readModulePackageVersion(moduleDirname) {
+  return readPackageVersion(moduleDirname) ?? readPackageVersion(path2.join(moduleDirname, "..")) ?? "?";
+}
 
 // src/core/wire.ts
 var WIRE_VERSION = 0;
@@ -366,7 +378,7 @@ function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath: 
 
 // src/mesh/mesh-config.ts
 var import_node_child_process = require("node:child_process");
-var fs = __toESM(require("node:fs"), 1);
+var fs2 = __toESM(require("node:fs"), 1);
 
 // src/core/utils.ts
 var path3 = __toESM(require("node:path"), 1);
@@ -469,7 +481,7 @@ The token field also accepts "$MESH_TOKEN" (an environment variable) or "!pass s
 function loadMeshConfig(configPath) {
   let text;
   try {
-    text = fs.readFileSync(configPath, "utf-8");
+    text = fs2.readFileSync(configPath, "utf-8");
   } catch {
     throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
   }
@@ -682,12 +694,12 @@ async function connect(configPath) {
 }
 
 // src/core/targets.ts
-var fs2 = __toESM(require("node:fs"), 1);
+var fs3 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 var NULL_METADATA = { sessionName: null, cwd: null, status: null };
 function readSiblingMetadata(metadataPath) {
   try {
-    const raw = JSON.parse(fs2.readFileSync(metadataPath, "utf-8"));
+    const raw = JSON.parse(fs3.readFileSync(metadataPath, "utf-8"));
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NULL_METADATA;
     const value = raw;
     return {
@@ -704,7 +716,7 @@ function readSiblingMetadata(metadataPath) {
 function listTargets(xferDir = XFER_DIR) {
   let entries;
   try {
-    entries = fs2.readdirSync(xferDir);
+    entries = fs3.readdirSync(xferDir);
   } catch {
     return [];
   }
@@ -956,13 +968,7 @@ Sec-WebSocket-Accept: ${acceptKey(key)}\r
 }
 
 // daemon/broker-main.ts
-var VERSION = (() => {
-  try {
-    return JSON.parse(fs3.readFileSync(path5.join(__dirname, "package.json"), "utf-8")).version ?? "?";
-  } catch {
-    return "?";
-  }
-})();
+var VERSION = readModulePackageVersion(__dirname);
 var PROTOCOL_VERSION = WIRE_VERSION;
 var {
   KIND_HELLO: WIRE_HELLO,
@@ -1008,15 +1014,15 @@ function parseArgs(argv) {
 function writeFileAtomic(filePath, content) {
   const temp = `${filePath}.tmp-${process.pid}`;
   try {
-    fs3.writeFileSync(temp, content, { encoding: "utf-8", mode: 384 });
-    fs3.renameSync(temp, filePath);
+    fs4.writeFileSync(temp, content, { encoding: "utf-8", mode: 384 });
+    fs4.renameSync(temp, filePath);
     try {
-      fs3.chmodSync(filePath, 384);
+      fs4.chmodSync(filePath, 384);
     } catch {
     }
   } catch (error) {
     try {
-      fs3.unlinkSync(temp);
+      fs4.unlinkSync(temp);
     } catch {
     }
     throw error;
@@ -1024,7 +1030,7 @@ function writeFileAtomic(filePath, content) {
 }
 function readPidFile(xferDir) {
   try {
-    const raw = fs3.readFileSync(path5.join(xferDir, "broker.pid"), "utf-8").trim();
+    const raw = fs4.readFileSync(path5.join(xferDir, "broker.pid"), "utf-8").trim();
     const pid = Number.parseInt(raw, 10);
     return Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
@@ -1034,7 +1040,7 @@ function readPidFile(xferDir) {
 function unlinkBrokerFiles(xferDir) {
   for (const name of ["broker.pid", "broker.json"]) {
     try {
-      fs3.unlinkSync(path5.join(xferDir, name));
+      fs4.unlinkSync(path5.join(xferDir, name));
     } catch {
     }
   }
@@ -1071,7 +1077,7 @@ function nextRequestId() {
 function pushXferNotify(xferDir, target, msg) {
   return new Promise((resolve, reject) => {
     const endpoint = path5.join(xferDir, `${encodeAgentName(target)}.sock`);
-    if (!fs3.existsSync(endpoint)) {
+    if (!fs4.existsSync(endpoint)) {
       reject(Object.assign(new Error(`peer "${target}" not found`), { code: ERR_TARGET_NOT_FOUND }));
       return;
     }
@@ -1193,7 +1199,7 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
     return;
   }
   try {
-    fs3.writeFileSync(doc, content, { mode: 384 });
+    fs4.writeFileSync(doc, content, { mode: 384 });
   } catch (error) {
     sendError(connection, frame, ERR_DELIVERY_FAILED, `cannot write doc: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -1378,7 +1384,7 @@ function handleBagSubmit(connection, frame, xferDir) {
     return;
   }
   try {
-    fs3.writeFileSync(doc, content, { mode: 384 });
+    fs4.writeFileSync(doc, content, { mode: 384 });
   } catch (error) {
     sendError(connection, frame, ERR_DELIVERY_FAILED, `cannot write doc: ${error instanceof Error ? error.message : String(error)}`);
     return;
@@ -1668,7 +1674,7 @@ async function startBroker(options) {
     });
   });
   const port = boundPort();
-  fs3.mkdirSync(options.xferDir, { recursive: true, mode: 448 });
+  fs4.mkdirSync(options.xferDir, { recursive: true, mode: 448 });
   writeBrokerFiles(options.xferDir, port, startedAt);
   function boundPort() {
     const address = server.address();
@@ -1787,7 +1793,7 @@ async function runPageToolCommand(args) {
   const xferDir = parseArgs(process.argv.slice(2)).xferDir;
   let port;
   try {
-    const raw = JSON.parse(fs3.readFileSync(path5.join(xferDir, "broker.json"), "utf-8"));
+    const raw = JSON.parse(fs4.readFileSync(path5.join(xferDir, "broker.json"), "utf-8"));
     const info = raw;
     if (typeof info.port !== "number" || info.port <= 0 || info.port > 65535) throw new Error("bad port");
     port = info.port;
@@ -1837,13 +1843,13 @@ function resolveBrokerCliPath(dirname, exists, fallback) {
 function brokerCliPath() {
   return resolveBrokerCliPath(
     __dirname,
-    (candidate) => fs3.existsSync(candidate),
+    (candidate) => fs4.existsSync(candidate),
     process.argv[1] ?? path5.join(__dirname, "broker.cjs")
   );
 }
 function checkBrokerCliPath() {
   const resolved = brokerCliPath();
-  if (fs3.existsSync(resolved)) {
+  if (fs4.existsSync(resolved)) {
     console.log(`[boot] page-tool CLI: ${resolved}`);
     return;
   }

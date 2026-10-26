@@ -167,7 +167,7 @@ async function brokerCheck(
     }
     // A daemon from a previous install keeps its startup dirname and version:
     // every doc it writes names a page-tool path from a layout that is gone.
-    if (info.version && extensionVersion && info.version !== extensionVersion) {
+    if (info.version && info.version !== "?" && extensionVersion && info.version !== extensionVersion) {
       return {
         name: "Broker",
         status: "warn",

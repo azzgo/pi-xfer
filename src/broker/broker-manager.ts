@@ -278,7 +278,10 @@ const BROKER_MAIN = path.join(import.meta.dirname, "../../dist/broker.cjs");
  */
 function versionDriftNote(brokerVersion: string): string | null {
   const installed = readPackageVersion(path.join(import.meta.dirname, "../.."));
-  if (installed === null || brokerVersion === "" || brokerVersion === installed) return null;
+  // "?" means the daemon could not read its own package.json — an unknown is
+  // not evidence of drift, and claiming drift on a healthy install sends the
+  // user chasing a restart that changes nothing.
+  if (installed === null || brokerVersion === "" || brokerVersion === "?" || brokerVersion === installed) return null;
   return `  drift: started by ${brokerVersion}, this install is ${installed} — run /xfer broker stop then /xfer broker start so its handoff docs name a live page-tool path`;
 }
 /** broker.json parsed + shape-checked, or null when missing/invalid. */

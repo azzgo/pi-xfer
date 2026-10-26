@@ -49,7 +49,7 @@ import * as net from "node:net";
 import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "../src/core/constants.ts";
+import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, readModulePackageVersion, XFER_DIR } from "../src/core/constants.ts";
 import { ERR, FROM_WEB_PICKER, WIRE } from "../src/core/wire.ts";
 import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPageInfo, type HandoffPick, type HandoffRecord } from "../src/core/handoff-doc.ts";
 import { createMeshDescriber } from "../src/mesh/mesh-describer.ts";
@@ -58,14 +58,12 @@ import { encodeAgentName, isEntryPoint, pidAlive } from "../src/core/utils.ts";
 import { attachWsServer, type WsConnection } from "../src/broker/ws-server.ts";
 import { WIRE_VERSION } from "../src/core/wire.ts";
 
-/** Broker software version (welcome + /status + broker.json), from package.json. */
-export const VERSION: string = (() => {
-  try {
-    return (JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "package.json"), "utf-8")) as { version?: string }).version ?? "?";
-  } catch {
-    return "?";
-  }
-})();
+/**
+ * Broker software version (welcome + /status + broker.json), from package.json.
+ * Resolved from either bundle dirname (`dist/`) or source dirname (`daemon/`) —
+ * see readModulePackageVersion.
+ */
+export const VERSION: string = readModulePackageVersion(import.meta.dirname);
 /** Protocol revision spoken on the wire (v0, per the mock protocol oracle). */
 const PROTOCOL_VERSION = WIRE_VERSION;
 

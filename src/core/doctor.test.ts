@@ -44,7 +44,7 @@ function installedVersion(): string {
   return pkg.version;
 }
 
-function stubBroker(info: { port: number; pid: number } | null | Error): Pick<BrokerManager, "probe"> {
+function stubBroker(info: { port: number; pid: number; version?: string } | null | Error): Pick<BrokerManager, "probe"> {
   return {
     probe: async () => {
       if (info instanceof Error) throw info;
@@ -335,6 +335,26 @@ describe("doctor: rendering", () => {
     assert.equal(report.warned, 1);
     assert.equal(report.failed, 0);
     assert.equal(doctorSeverity(report), "warning");
+  });
+
+  it("does not cry drift when the daemon could not read its own version", async () => {
+    // A daemon that reports "?" has an unknown version, not a different one.
+    // Treating an unknown as drift sent users chasing a restart that could not
+    // change anything — the check must stay silent.
+    const report = await runDoctor(deps({ broker: stubBroker({ port: 4719, pid: process.pid, version: "?" }) }));
+    const broker = checkFor(report, "Broker");
+    assert.equal(broker.status, "pass");
+    assert.match(broker.detail, /running on port 4719/);
+    assert.equal(broker.fix, undefined);
+  });
+
+  it("warns when a live daemon runs a different version than this install", async () => {
+    const report = await runDoctor(deps({ broker: stubBroker({ port: 4719, pid: process.pid, version: "0.0.1" }) }));
+    const broker = checkFor(report, "Broker");
+    assert.equal(broker.status, "warn");
+    assert.match(broker.detail, /0\.0\.1/);
+    assert.match(broker.detail, new RegExp(installedVersion().replace(/\./g, "\\.")));
+    assert.match(broker.fix ?? "", /broker stop/);
   });
 
   it("omits warning and failure counts when there are none", () => {
