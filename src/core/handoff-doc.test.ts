@@ -38,7 +38,7 @@ function input(overrides: Partial<RenderHandoffDocInput> = {}): RenderHandoffDoc
   return {
     msgId: "m1",
     prompt: "Merge these two buttons",
-    page: { url: "https://example.com/app", title: "Example App", ts: 1725148800000 },
+    page: { url: "https://example.com/app", title: "Example App", ts: 1725148800000, tabId: "tab-mvn0alj273ujp" },
     picks: [PICK_WITH_SOURCE, PICK_WITHOUT_SOURCE],
     fromTarget: "dotfiles_q1",
     ...overrides,
@@ -57,6 +57,7 @@ Merge these two buttons
 
 - url: https://example.com/app
 - title: Example App
+- tabId: tab-mvn0alj273ujp
 - ts: 1725148800000 (2024-09-01T00:00:00.000Z)
 
 ## Annotations
@@ -79,11 +80,11 @@ Merge these two buttons
 
 ## Follow-up channel
 
-The sending browser tab is still online. Collect page data by calling its fixed tool ops via the broker CLI — the command waits and prints the result JSON on stdout:
-\`node daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]\`
+Collect page data by calling the originating tab's fixed tool ops via the broker CLI. Every call names that tab with \`--tab\`; the command waits and prints the result JSON on stdout:
+\`node daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON] --tab tab-mvn0alj273ujp\`
 Ops (fixed table): page.info · dom.query {selector, maxCount?, styleProps?} · dom.html {selector?, maxLength?, maxDepth?} · console.logs {lastN?, sinceTs?, level?} · network.log {lastN?, urlFilter?} · framework.inspect {selector, props?, maxDepth?} · page.wait {selector} (read) · dom.click {selector} / dom.setValue {selector, value} (write — only when the origin has page-write authorization; a refusal answers denied_op). Example:
-\`node daemon/broker-main.ts page-tool dotfiles_q1 dom.query '{"selector":"button.primary","maxCount":5}'\`
-A timeout or no_tabs exits 1 with an error on stderr — after a page reload wait a few seconds for the userscript auto-reconnect and retry (≤3 times). Multiple calls may be issued in parallel. After changing code, verify by re-querying: dom.query the target elements and check console.logs for new errors.
+\`node daemon/broker-main.ts page-tool dotfiles_q1 dom.query '{"selector":"button.primary","maxCount":5}' --tab tab-mvn0alj273ujp\`
+A timeout exits 1 with an error on stderr — after a page reload wait a few seconds for the userscript auto-reconnect and retry (≤3 times). \`missing_tab\` means \`--tab\` was left off — read it from the Page section, never guess. \`tab_unreachable\` means that page is closed: do NOT retry, stop and ask the human to reopen it. Multiple calls may be issued in parallel. After changing code, verify by re-querying: dom.query the target elements and check console.logs for new errors.
 
 ---
 
@@ -162,7 +163,7 @@ describe("renderHandoffDoc", () => {
     const lineCount = section.split("\n").length;
     assert.ok(lineCount <= 10, `follow-up section has ${lineCount} lines, expected <= 10`);
     assert.equal(
-      doc.includes('`node daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
+      doc.includes('`node daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON] --tab tab-mvn0alj273ujp`'),
       true,
       "expected the page-tool command example",
     );
@@ -171,20 +172,36 @@ describe("renderHandoffDoc", () => {
 
   it("uses fromTarget in the page-tool example, placeholder when absent", () => {
     const withTarget = renderHandoffDoc(input({ fromTarget: "session-a" }));
-    assert.equal(withTarget.includes('`node daemon/broker-main.ts page-tool session-a <op> [paramsJSON]`'), true);
+    assert.equal(withTarget.includes('`node daemon/broker-main.ts page-tool session-a <op> [paramsJSON] --tab tab-mvn0alj273ujp`'), true);
     const withoutTarget = renderHandoffDoc(input({ fromTarget: undefined }));
-    assert.equal(withoutTarget.includes('`node daemon/broker-main.ts page-tool <session-socket> <op> [paramsJSON]`'), true);
+    assert.equal(withoutTarget.includes('`node daemon/broker-main.ts page-tool <session-socket> <op> [paramsJSON] --tab tab-mvn0alj273ujp`'), true);
     assert.equal(withoutTarget.includes("undefined"), false);
   });
 
   it("embeds the broker CLI absolute path so the agent never has to search for it", () => {
     const doc = renderHandoffDoc(input({ brokerCliPath: "/Users/me/dev/dotfiles/pi/agent/extensions/xfer/daemon/broker-main.ts" }));
     assert.equal(
-      doc.includes('`node /Users/me/dev/dotfiles/pi/agent/extensions/xfer/daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON]`'),
+      doc.includes('`node /Users/me/dev/dotfiles/pi/agent/extensions/xfer/daemon/broker-main.ts page-tool dotfiles_q1 <op> [paramsJSON] --tab tab-mvn0alj273ujp`'),
       true,
       "expected the absolute broker CLI path in the command",
     );
     assert.equal(doc.includes("`node broker-main.ts"), false, "bare filename must not survive when the path is given");
+  });
+
+  it("names the originating tabId in the Page section and on every page-tool command (ADR-0022)", () => {
+    const doc = renderHandoffDoc(input());
+    assert.ok(
+      doc.includes("- url: https://example.com/app\n- title: Example App\n- tabId: tab-mvn0alj273ujp\n- ts: "),
+      "the tabId line sits between title and ts",
+    );
+    assert.equal(doc.indexOf("- tabId:"), doc.lastIndexOf("- tabId:"), "exactly one tabId line in the doc");
+    assert.equal(doc.split("--tab tab-mvn0alj273ujp").length - 1, 2, "both page-tool examples carry --tab");
+  });
+
+  it("omits the tabId line when the broker could not resolve one — and the command says where to read it", () => {
+    const doc = renderHandoffDoc(input({ page: { url: "https://example.com/app", title: "Example App", ts: 1725148800000 } }));
+    assert.equal(doc.includes("- tabId:"), false, "no guessed or empty tabId line");
+    assert.ok(doc.includes("--tab <tabId from the page section>"), "placeholder instead of a bare op that fails missing_tab");
   });
 
   it("renders zero picks as a well-formed (empty) Annotations section", () => {

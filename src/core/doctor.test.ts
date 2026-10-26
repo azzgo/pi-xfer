@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import { readFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -37,11 +38,17 @@ function deadPid(): number {
   return run.pid;
 }
 
+/** The version this checkout installs as — brokerCheck flags a broker on any other. */
+function installedVersion(): string {
+  const pkg = JSON.parse(readFileSync(path.join(import.meta.dirname, "../..", "package.json"), "utf-8")) as { version: string };
+  return pkg.version;
+}
+
 function stubBroker(info: { port: number; pid: number } | null | Error): Pick<BrokerManager, "probe"> {
   return {
     probe: async () => {
       if (info instanceof Error) throw info;
-      return info === null ? null : { startedAt: "", version: "test", ...info };
+      return info === null ? null : { startedAt: "", version: installedVersion(), ...info };
     },
   };
 }
@@ -50,7 +57,7 @@ function stubAdmin(info: { port: number; pid: number } | null | Error): Pick<Adm
   return {
     probe: async () => {
       if (info instanceof Error) throw info;
-      return info === null ? null : { startedAt: "", version: "test", ...info };
+      return info === null ? null : { startedAt: "", version: installedVersion(), ...info };
     },
   };
 }
@@ -73,6 +80,7 @@ function deps(overrides: Overrides = {}): DoctorDeps {
     meshConfigPath: overrides.meshConfigPath ?? path.join(tmpDir(), "mesh.config.json"),
     listMeshNodes: overrides.listMeshNodes ?? (async () => [{ name: "laptop", actorId: "a1" }]),
     meshTimeoutMs: overrides.meshTimeoutMs,
+    extensionVersion: installedVersion(),
   };
 }
 

@@ -515,7 +515,12 @@ describe("broker daemon (integration)", () => {
     assert.match(doc, /# Web annotation handoff/);
     assert.match(doc, /inspect these/);
     assert.match(doc, /### #cta/);
-    assert.match(doc, /broker-main\.ts page-tool someone/);
+    // The CLI named in the doc is the runnable bundle (dist/broker.cjs), never
+    // the .ts source: node refuses to type-strip a file under node_modules.
+    assert.match(doc, /\b(broker\.cjs|broker-main\.ts) page-tool someone/);
+    // ADR-0022: this connection sent no tab id, so the doc carries a placeholder
+    // rather than a guess.
+    assert.match(doc, /--tab <tabId from the page section>/);
     assert.match(doc, /handoff_id: /);
 
     const handoffId = /handoff_id: (\S+)/.exec(doc)?.[1] ?? "";

@@ -88,3 +88,9 @@ export function frameBagSubmit(id, prompt, targetName) {
     target: { namespace: PROTOCOL.NS_LOCAL, name: targetName },
   });
 }
+
+// 从袋中删除一条暂存（按 broker 分配的 entry id）。袋在 broker 上、由 broker 持有，
+// 因此删除必须走帧 —— 本地删只会让界面与真袋不一致。
+export function frameBagUnstage(id, entryId) {
+  return frame(PROTOCOL.KIND_BAG_UNSTAGE, { id, entryId });
+}

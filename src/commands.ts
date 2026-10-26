@@ -9,7 +9,7 @@ import type { XferController } from "./session/controller.ts";
 import { BrokerManager } from "./broker/broker-manager.ts";
 import { doctorSeverity, formatDoctorReport, runDoctor } from "./core/doctor.ts";
 import { collectGarbage } from "./core/gc.ts";
-import { MESH_CONFIG_PATH } from "./core/constants.ts";
+import { MESH_CONFIG_PATH, readPackageVersion } from "./core/constants.ts";
 import type { MeshNode } from "./mesh/mesh.ts";
 import { ensureRunnerPool, listMeshNodes } from "./mesh/mesh-engine.ts";
 import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTableLines, meshUnreachableLines } from "./mesh/mesh-status.ts";
@@ -923,6 +923,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           brokerManager,
           adminManager,
           meshConfigPath,
+          extensionVersion: readPackageVersion(path.join(import.meta.dirname, "..")),
         });
         ctx.ui.notify(formatDoctorReport(report), doctorSeverity(report));
         return;

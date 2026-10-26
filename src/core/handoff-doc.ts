@@ -18,6 +18,12 @@ export interface HandoffPageInfo {
   url: string;
   title: string;
   ts: number;
+  /**
+   * Page-lifetime tab id of the submitting tab (the broker resolves it from the
+   * live connection, not from the frame). Rendered into the doc so `--tab` is
+   * read rather than guessed — ADR-0022.
+   */
+  tabId?: string;
 }
 
 /** Dev-build source mapping attached to a pick (`payloadFor().source`). */
@@ -119,17 +125,21 @@ export interface RenderHandoffDocInput {
  * section, not a skill). Kept ≤10 lines — the bloat criterion for spinning it
  * into a skill stays in force.
  */
-function followUpSection(fromTarget: string | undefined, brokerCliPath: string | undefined): string[] {
+function followUpSection(fromTarget: string | undefined, brokerCliPath: string | undefined, tabId: string | undefined): string[] {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
   const cli = brokerCliPath?.trim() ? brokerCliPath.trim() : "daemon/broker-main.ts";
+  // The tabId is named in the `## Page` section; when the caller could not
+  // resolve it, the command carries a placeholder instead of a bare op that
+  // would fail with missing_tab.
+  const tab = tabId?.trim() ? tabId.trim() : "<tabId from the page section>";
   return [
     "## Follow-up channel",
     "",
-    "The sending browser tab is still online. Collect page data by calling its fixed tool ops via the broker CLI — the command waits and prints the result JSON on stdout:",
-    `\`node ${cli} page-tool ${target} <op> [paramsJSON]\``,
+    "Collect page data by calling the originating tab's fixed tool ops via the broker CLI. Every call names that tab with `--tab`; the command waits and prints the result JSON on stdout:",
+    `\`node ${cli} page-tool ${target} <op> [paramsJSON] --tab ${tab}\``,
     "Ops (fixed table): page.info · dom.query {selector, maxCount?, styleProps?} · dom.html {selector?, maxLength?, maxDepth?} · console.logs {lastN?, sinceTs?, level?} · network.log {lastN?, urlFilter?} · framework.inspect {selector, props?, maxDepth?} · page.wait {selector} (read) · dom.click {selector} / dom.setValue {selector, value} (write — only when the origin has page-write authorization; a refusal answers denied_op). Example:",
-    `\`node ${cli} page-tool ${target} dom.query '{"selector":"button.primary","maxCount":5}'\``,
-    "A timeout or no_tabs exits 1 with an error on stderr — after a page reload wait a few seconds for the userscript auto-reconnect and retry (≤3 times). Multiple calls may be issued in parallel. After changing code, verify by re-querying: dom.query the target elements and check console.logs for new errors.",
+    `\`node ${cli} page-tool ${target} dom.query '{"selector":"button.primary","maxCount":5}' --tab ${tab}\``,
+    "A timeout exits 1 with an error on stderr — after a page reload wait a few seconds for the userscript auto-reconnect and retry (≤3 times). `missing_tab` means `--tab` was left off — read it from the Page section, never guess. `tab_unreachable` means that page is closed: do NOT retry, stop and ask the human to reopen it. Multiple calls may be issued in parallel. After changing code, verify by re-querying: dom.query the target elements and check console.logs for new errors.",
   ];
 }
 
@@ -233,6 +243,9 @@ export function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarge
     "",
     field("url", page.url),
     field("title", page.title),
+    // Only when the broker resolved the live connection's tab: an absent id is
+    // an absent line, never an empty or guessed one (ADR-0022).
+    ...(page.tabId ? [field("tabId", page.tabId)] : []),
     field("ts", `${page.ts} (${new Date(page.ts).toISOString()})`),
     "",
     "## Annotations",
@@ -240,7 +253,7 @@ export function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarge
   ];
   for (const pick of picks) lines.push(...pickSection(pick));
   if (record) lines.push(...recordSection(record));
-  lines.push(...followUpSection(fromTarget, brokerCliPath), "");
+  lines.push(...followUpSection(fromTarget, brokerCliPath, page.tabId), "");
   lines.push(
     "---",
     "",
@@ -317,7 +330,7 @@ export function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCl
     `Every page section above carries its tabId. Follow up with \`page-tool <target> <op> --tab <tabId>\` — tabIds come from this doc, never guessed. If a call answers tab_unreachable, that page is closed: do NOT retry — stop and ask the human to reopen the page (title/url above) or reconnect the picker. Staged markers may come from pages other than the one this bag was sent from.`,
     "",
   );
-  lines.push(...followUpSection(fromTarget, brokerCliPath), "");
+  lines.push(...followUpSection(fromTarget, brokerCliPath, undefined), "");
   lines.push(
     "---",
     "",

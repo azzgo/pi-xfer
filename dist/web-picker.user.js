@@ -217,6 +217,7 @@
     KIND_STAGE: "annotation.stage",
     KIND_BAG_LIST: "bag.list",
     KIND_BAG_SUBMIT: "bag.submit",
+    KIND_BAG_UNSTAGE: "bag.unstage",
     KIND_PAGE_REQUEST: "page.request",
     KIND_PAGE_RESPONSE: "page.response",
     NS_LOCAL: "local"
@@ -314,6 +315,9 @@
       prompt,
       target: { namespace: WIRE.NS_LOCAL, name: targetName }
     });
+  }
+  function frameBagUnstage(id, entryId) {
+    return frame(WIRE.KIND_BAG_UNSTAGE, { id, entryId });
   }
 
   // web-picker.src/json-safe.js
@@ -1143,7 +1147,8 @@
     "bag.noteReadonly": { en: "Bag entries are broker-owned — notes are fixed at staging time", zh: "袋条目由 broker 持有 — 备注以暂存时刻为准" },
     "bag.staged": { en: "Staged to broker ({n} in bag)", zh: "已暂存到 broker（袋内 {n} 条）" },
     "bag.stageFailed": { en: "Stage failed: {detail}", zh: "暂存失败: {detail}" },
-    "bag.deleteLocalOnly": { en: "Bag entries are managed on the broker — send the bag or restage to prune", zh: "袋条目由 broker 管理 — 发送整袋或重新暂存来整理" },
+    "bag.unstaged": { en: "Removed from the bag", zh: "已从暂存袋删除" },
+    "bag.unstageFailed": { en: "Delete failed: {detail}", zh: "删除失败: {detail}" },
     // degraded-state button: deliberately short — the status line already says what
     // gets copied, and the full label overflowed the panel next to a long status.
     "copyprompt.offline": { en: "⧉ Copy", zh: "⧉ 复制" },
@@ -1182,7 +1187,8 @@
     "send.noTargetOffline": { en: "No broker link — copy the handoff prompt instead (send button needs a connected broker)", zh: "未连接 broker — 请改用复制 handoff prompt（发送按钮需要已连接的 broker）" },
     "send.promptOnly.confirm": { en: "No elements picked — send prompt only?", zh: "没有标注任何元素，只发 prompt？" },
     "send.sending": { en: "Sending…", zh: "发送中…" },
-    "send.delivered": { en: "Delivered to agent (handoff {id})", zh: "已送达 agent（handoff {id}）" },
+    "send.delivered": { en: "Delivered to agent (handoff {id}) · tab {tab}", zh: "已送达 agent（handoff {id}）· tab {tab}" },
+    "send.tabCopied": { en: "tabId {tab} copied", zh: "已复制 tabId {tab}" },
     "send.failed": { en: "Send failed: {detail}", zh: "发送失败: {detail}" },
     "send.connecting": { en: "Connecting {url} …", zh: "正在连接 {url} …" },
     "conn.wsFailed": { en: "WebSocket creation failed: {msg}", zh: "WS 创建失败: {msg}" },
@@ -1404,6 +1410,9 @@
             pending.delete(f.id);
             p.resolve({ ok: true, result: f.result });
           } else if (p && p.kind === "bagsubmit") {
+            pending.delete(f.id);
+            p.resolve({ ok: true, result: f.result });
+          } else if (p && p.kind === "bagunstage") {
             pending.delete(f.id);
             p.resolve({ ok: true, result: f.result });
           }
@@ -1635,6 +1644,27 @@
         }, 1e4);
       });
     }
+    function unstageMarker(entryId) {
+      return new Promise((resolve) => {
+        if (wsState !== "on") {
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          return;
+        }
+        const id = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        pending.set(id, { kind: "bagunstage", resolve });
+        if (!sendFrame(frameBagUnstage(id, entryId))) {
+          pending.delete(id);
+          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          return;
+        }
+        setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            resolve({ ok: false, code: "timeout", message: t("conn.noResponse") });
+          }
+        }, 1e4);
+      });
+    }
     return {
       brokerUrl,
       connect,
@@ -1650,7 +1680,8 @@
       requestTargets,
       stagePick,
       requestBagList,
-      submitBag
+      submitBag,
+      unstageMarker
     };
   }
 
@@ -3165,7 +3196,11 @@
       elSend.textContent = t("sendbtn");
       if (res.ok) {
         gm.set(GM_TARGET, target);
-        toast(t("send.delivered", { id: res.result && res.result.handoff_id ? res.result.handoff_id : "?" }));
+        const routedTabId = res.result && typeof res.result.routedTabId === "string" ? res.result.routedTabId : "";
+        toast(t("send.delivered", {
+          id: res.result && res.result.handoff_id ? res.result.handoff_id : "?",
+          tab: routedTabId || "?"
+        }));
         elPrompt.value = "";
         ctx.clearBatch();
         if (record && ctx.clearRecord) ctx.clearRecord();
@@ -3570,7 +3605,19 @@
       if (del) {
         const item = del.closest(".item");
         const id = item && item.getAttribute("data-id");
-        toast(t("bag.deleteLocalOnly"));
+        if (!id) return;
+        del.disabled = true;
+        void conn.unstageMarker(id).then((res) => {
+          del.disabled = false;
+          if (!res.ok) {
+            toast(t("bag.unstageFailed", { detail: res.code + (res.message ? " — " + res.message : "") }));
+            refresh();
+            return;
+          }
+          items = items.filter((m) => m.id !== id);
+          render();
+          toast(t("bag.unstaged"));
+        });
         return;
       }
       const toggle = e.target && e.target.closest ? e.target.closest("[data-toggle]") : null;

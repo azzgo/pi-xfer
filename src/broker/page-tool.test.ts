@@ -21,7 +21,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { runPageTool, startBroker, type BrokerHandle } from "../../daemon/broker-main.js";
+import { resolveBrokerCliPath, runPageTool, startBroker, type BrokerHandle } from "../../daemon/broker-main.js";
 import { decodeFrame, OPCODE_CLOSE, OPCODE_TEXT, type DecodedFrame } from "./ws-server.ts";
 
 // ---------- resolve hook (same as `npm test`) ----------
@@ -544,5 +544,50 @@ describe("page-tool flow", () => {
     const { code, stderr } = await runCli(dir, ["alpha"]);
     assert.equal(code, 1);
     assert.match(stderr, /usage: node daemon\/broker-main\.ts page-tool/);
+  });
+});
+
+/**
+ * The doc's page-tool path comes from these two helpers. Regression: the live
+ * 0.10.0 broker kept its startup dirname (the package ROOT), so after the
+ * 0.10.1 layout move every handoff doc named `<pkg>/broker-main.ts` — a file
+ * that no longer existed — and every follow-up died on `Cannot find module`.
+ */
+describe("broker CLI path resolution (doc-embedded page-tool command)", () => {
+  const ROOT = "/opt/pi-xfer";
+
+  it("prefers the bundle over the .ts source, from either dirname", () => {
+    const all = new Set([
+      path.join(ROOT, "dist/broker.cjs"),
+      path.join(ROOT, "daemon/broker-main.ts"),
+    ]);
+    const exists = (c: string) => all.has(c);
+    // bundle process (dirname = dist/) and a root-dirname daemon (0.10.0 zombie)
+    // both resolve to the runnable bundle
+    assert.equal(resolveBrokerCliPath(path.join(ROOT, "dist"), exists, "x"), path.join(ROOT, "dist/broker.cjs"));
+    assert.equal(resolveBrokerCliPath(ROOT, exists, "x"), path.join(ROOT, "dist/broker.cjs"));
+    // a repo tree running the source still finds the bundle — node cannot
+    // type-strip a .ts under node_modules, so the bundle is always preferred
+    assert.equal(resolveBrokerCliPath(path.join(ROOT, "daemon"), exists, "x"), path.join(ROOT, "dist/broker.cjs"));
+  });
+
+  it("falls back to a source layout only when no bundle exists", () => {
+    const only = new Set([path.join(ROOT, "daemon/broker-main.ts")]);
+    const exists = (c: string) => only.has(c);
+    assert.equal(resolveBrokerCliPath(ROOT, exists, "x"), path.join(ROOT, "daemon/broker-main.ts"));
+    assert.equal(resolveBrokerCliPath(path.join(ROOT, "daemon"), exists, "x"), path.join(ROOT, "daemon/broker-main.ts"));
+  });
+
+  it("never returns a path that does not exist — it returns the fallback instead", () => {
+    const gone = (c: string) => c.endsWith("only-thing.cjs");
+    assert.equal(resolveBrokerCliPath(ROOT, gone, "fallback.cjs"), "fallback.cjs");
+  });
+
+  it("a stale root dirname still resolves inside the upgraded package", () => {
+    // the 0.10.0 broker was started from the package root and kept that dirname
+    const upgraded = new Set([path.join(ROOT, "dist/broker.cjs")]);
+    const resolved = resolveBrokerCliPath(ROOT, (c) => upgraded.has(c), "x");
+    assert.equal(resolved, path.join(ROOT, "dist/broker.cjs"));
+    assert.equal(resolved.endsWith("broker-main.ts"), false, "the dead 0.10.0 path must not be named");
   });
 });

@@ -301,4 +301,47 @@ describe("staging bag", () => {
     const listed = await sendAndAck(tab, { v: 0, type: "bag.list", id: "l1" });
     assert.equal((listed.result as { items?: unknown[] }).items!.length, 1);
   });
+
+  it("bag.unstage deletes exactly one entry by id and reports the new count", async () => {
+    const daemon = await startTestBroker();
+    const tab = await RawWs.connect(daemon.port);
+    await welcome(tab, "tab-1");
+
+    const first = await sendAndAck(tab, stageFrame("s1", "tab-1", "https://a.example.com/cart", "Cart"));
+    const keptId = (first.result as { id?: string }).id!;
+    const second = await sendAndAck(tab, stageFrame("s2", "tab-1", "https://a.example.com/cart", "Cart"));
+    const removedId = (second.result as { id?: string }).id!;
+
+    const ack = await sendAndAck(tab, { v: 0, type: "bag.unstage", id: "u1", entryId: removedId });
+    assert.equal(ack.type, "ack");
+    assert.equal((ack.result as { id?: string }).id, removedId);
+    assert.equal((ack.result as { count?: number }).count, 1);
+
+    // The Bag is the broker's, so the delete really happened there — a fresh
+    // list shows only the survivor (the drawer's guarantee).
+    const listed = await sendAndAck(tab, { v: 0, type: "bag.list", id: "l1" });
+    const items = (listed.result as { items?: Array<Record<string, unknown>> }).items!;
+    assert.equal(items.length, 1);
+    assert.equal(items[0]!.id, keptId);
+
+    // A second delete is a stale-drawer error, not a silent no-op.
+    const again = await sendAndAck(tab, { v: 0, type: "bag.unstage", id: "u2", entryId: removedId });
+    assert.equal(again.type, "error");
+    assert.equal(again.code, "invalid_payload");
+    assert.match(String(again.message), new RegExp(removedId));
+  });
+
+  it("bag.unstage without an entryId → invalid_payload, bag untouched", async () => {
+    const daemon = await startTestBroker();
+    const tab = await RawWs.connect(daemon.port);
+    await welcome(tab, "tab-1");
+
+    await sendAndAck(tab, stageFrame("s1", "tab-1", "https://a.example.com/cart", "Cart"));
+    const err = await sendAndAck(tab, { v: 0, type: "bag.unstage", id: "u1" });
+    assert.equal(err.type, "error");
+    assert.equal(err.code, "invalid_payload");
+
+    const listed = await sendAndAck(tab, { v: 0, type: "bag.list", id: "l1" });
+    assert.equal((listed.result as { items?: unknown[] }).items!.length, 1);
+  });
 });

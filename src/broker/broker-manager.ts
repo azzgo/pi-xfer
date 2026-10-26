@@ -43,7 +43,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import { isEntryPoint, pidAlive } from "../core/utils.ts";
-import { XFER_DIR } from "../core/constants.ts";
+import { readPackageVersion, XFER_DIR } from "../core/constants.ts";
 /** Default broker TCP port (mirrors broker-main.ts DEFAULT_PORT). */
 export const DEFAULT_BROKER_PORT = 4719;
 /** Poll cadence for the readiness probe and the stop exit poll. */
@@ -227,12 +227,14 @@ export class BrokerManager {
         `  version: ${info.version}`,
       ].join("\n");
     }
+    const drift = versionDriftNote(info.version);
     return [
       "broker: alive",
       `  port: ${info.port}`,
       `  pid: ${info.pid}`,
       `  startedAt: ${info.startedAt}`,
       `  version: ${info.version}`,
+      ...(drift ? [drift] : []),
     ].join("\n");
   }
 
@@ -267,6 +269,18 @@ export class BrokerManager {
 /** The committed daemon bundle (built from broker-main.ts by `npm run build`). */
 const BROKER_MAIN = path.join(import.meta.dirname, "../../dist/broker.cjs");
 
+/**
+ * One status line when the live daemon was started by a different pi-xfer
+ * version than this install. A long-lived broker keeps the `import.meta.dirname`
+ * of its startup process, so after an upgrade its handoff docs name a page-tool
+ * path from the old layout (the 0.10.0 → 0.10.2 `broker-main.ts` move is exactly
+ * that). null when versions agree or either is unknown.
+ */
+function versionDriftNote(brokerVersion: string): string | null {
+  const installed = readPackageVersion(path.join(import.meta.dirname, "../.."));
+  if (installed === null || brokerVersion === "" || brokerVersion === installed) return null;
+  return `  drift: started by ${brokerVersion}, this install is ${installed} — run /xfer broker stop then /xfer broker start so its handoff docs name a live page-tool path`;
+}
 /** broker.json parsed + shape-checked, or null when missing/invalid. */
 function readBrokerJson(xferDir: string): BrokerInfo | null {
   try {

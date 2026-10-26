@@ -27,7 +27,7 @@ import { t } from './i18n.js';
 import {
   PROTOCOL,
   frameHello, frameSubmit, frameCompose, frameTargetsList,
-  frameStage, frameBagList, frameBagSubmit,
+  frameStage, frameBagList, frameBagSubmit, frameBagUnstage,
 } from './protocol.js';
 
 // 指数退避序列（ms）：1s → 4s → 16s → 60s（封顶）
@@ -213,6 +213,7 @@ export function createBrokerConn(deps) {
         } else if (p && p.kind === 'stage') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
         else if (p && p.kind === 'baglist') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
         else if (p && p.kind === 'bagsubmit') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
+        else if (p && p.kind === 'bagunstage') { pending.delete(f.id); p.resolve({ ok: true, result: f.result }); }
         return;
       }
       if (f.type === PROTOCOL.KIND_ERROR) {
@@ -418,6 +419,21 @@ export function createBrokerConn(deps) {
     });
   }
 
+  // 删一条暂存：袋由 broker 持有，删除必须过 broker，否则 drawer 与真袋不一致。
+  function unstageMarker(entryId) {
+    return new Promise((resolve) => {
+      if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
+      const id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      pending.set(id, { kind: 'bagunstage', resolve });
+      if (!sendFrame(frameBagUnstage(id, entryId))) {
+        pending.delete(id);
+        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
+        return;
+      }
+      setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); } }, 10000);
+    });
+  }
+
   return {
     brokerUrl,
     connect,
@@ -434,5 +450,6 @@ export function createBrokerConn(deps) {
     stagePick,
     requestBagList,
     submitBag,
+    unstageMarker,
   };
 }

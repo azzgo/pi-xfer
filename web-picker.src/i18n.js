@@ -109,7 +109,8 @@ const STRINGS = {
   'bag.noteReadonly': { en: 'Bag entries are broker-owned — notes are fixed at staging time', zh: '袋条目由 broker 持有 — 备注以暂存时刻为准' },
   'bag.staged': { en: 'Staged to broker ({n} in bag)', zh: '已暂存到 broker（袋内 {n} 条）' },
   'bag.stageFailed': { en: 'Stage failed: {detail}', zh: '暂存失败: {detail}' },
-  'bag.deleteLocalOnly': { en: 'Bag entries are managed on the broker — send the bag or restage to prune', zh: '袋条目由 broker 管理 — 发送整袋或重新暂存来整理' },
+  'bag.unstaged': { en: 'Removed from the bag', zh: '已从暂存袋删除' },
+  'bag.unstageFailed': { en: 'Delete failed: {detail}', zh: '删除失败: {detail}' },
   // degraded-state button: deliberately short — the status line already says what
   // gets copied, and the full label overflowed the panel next to a long status.
   'copyprompt.offline': { en: '⧉ Copy', zh: '⧉ 复制' },
@@ -152,7 +153,8 @@ const STRINGS = {
   'send.noTargetOffline': { en: 'No broker link — copy the handoff prompt instead (send button needs a connected broker)', zh: '未连接 broker — 请改用复制 handoff prompt（发送按钮需要已连接的 broker）' },
   'send.promptOnly.confirm': { en: 'No elements picked — send prompt only?', zh: '没有标注任何元素，只发 prompt？' },
   'send.sending': { en: 'Sending…', zh: '发送中…' },
-  'send.delivered': { en: 'Delivered to agent (handoff {id})', zh: '已送达 agent（handoff {id}）' },
+  'send.delivered': { en: 'Delivered to agent (handoff {id}) · tab {tab}', zh: '已送达 agent（handoff {id}）· tab {tab}' },
+  'send.tabCopied': { en: 'tabId {tab} copied', zh: '已复制 tabId {tab}' },
   'send.failed': { en: 'Send failed: {detail}', zh: '发送失败: {detail}' },
   'send.connecting': { en: 'Connecting {url} …', zh: '正在连接 {url} …' },
 

@@ -421,8 +421,16 @@ describe("broker reverse channel (integration)", () => {
     const ack = parseFrame(await tab.next());
     assert.equal(ack.type, "ack");
     const handoffId = (ack.result as { handoff_id?: unknown }).handoff_id as string;
-    // ADR-0022: the ack tells the agent which tab to target with --tab.
+    // ADR-0022: the ack tells the picker which tab the handoff came from…
     assert.equal((ack.result as { routedTabId?: unknown }).routedTabId, "tab-1");
+    // …and the DOC tells the agent, which has no bus to that ack: the page
+    // section names the tab and every page-tool command carries --tab. Without
+    // this the agent can only guess, and a guess is tab_unreachable.
+    const docPath = (ack.result as { doc?: unknown }).doc as string;
+    const doc = fs.readFileSync(docPath, "utf-8");
+    assert.match(doc, /^- tabId: tab-1$/m);
+    assert.ok(doc.includes("--tab tab-1"), "page-tool examples carry the tabId");
+    assert.equal(doc.includes("the sending browser tab is still online"), false, "no unconditional liveness claim");
 
     const requestId = routePageTool("alpha", { op: "dom.html", params: { selector: "#app" } }, undefined, "tab-1");
     assert.ok(requestId);

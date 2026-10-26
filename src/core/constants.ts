@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveMeshConfigPath } from "../mesh/mesh-guard.ts";
@@ -18,3 +19,17 @@ export const MAX_FRAME_BYTES = 1024 * 1024;
 
 /** Deadline for a mesh engine query (node listing) before the engine counts as unreachable. */
 export const MESH_PROBE_TIMEOUT_MS = 2_500;
+
+/**
+ * The pi-xfer version this process was loaded from (package.json at the
+ * extension root). Undefined outside the install layout — a repo checkout with
+ * a missing/garbled package.json is a broken install, not a version.
+ */
+export function readPackageVersion(extensionRoot: string): string | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(extensionRoot, "package.json"), "utf-8")) as { version?: unknown };
+    return typeof raw.version === "string" && raw.version !== "" ? raw.version : null;
+  } catch {
+    return null;
+  }
+}

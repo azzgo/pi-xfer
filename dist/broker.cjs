@@ -35,11 +35,13 @@ __export(broker_main_exports, {
   DEFAULT_PAGE_TIMEOUT_MS: () => DEFAULT_PAGE_TIMEOUT_MS,
   VERSION: () => VERSION,
   awaitPageResult: () => awaitPageResult,
+  brokerCliCandidates: () => brokerCliCandidates,
   handleFrame: () => handleFrame,
   handlePageResponse: () => handlePageResponse,
   main: () => main,
   parseArgs: () => parseArgs,
   pidAlive: () => pidAlive,
+  resolveBrokerCliPath: () => resolveBrokerCliPath,
   routePageTool: () => routePageTool,
   runPageTool: () => runPageTool,
   startBroker: () => startBroker
@@ -140,6 +142,7 @@ var WIRE = {
   KIND_STAGE: "annotation.stage",
   KIND_BAG_LIST: "bag.list",
   KIND_BAG_SUBMIT: "bag.submit",
+  KIND_BAG_UNSTAGE: "bag.unstage",
   KIND_PAGE_REQUEST: "page.request",
   KIND_PAGE_RESPONSE: "page.response",
   NS_LOCAL: "local"
@@ -173,7 +176,6 @@ var ERR = {
   INVALID_PAYLOAD: "invalid_payload",
   BAD_TARGET: "bad_target",
   TARGET_NOT_FOUND: "target_not_found",
-  TARGET_NOT_FOUND: "target_not_found",
   MISSING_TAB: "missing_tab",
   TAB_UNREACHABLE: "tab_unreachable",
   UNSUPPORTED_VERSION: "unsupported_version"
@@ -186,17 +188,18 @@ function formatHandoffKind(kind) {
 }
 
 // src/core/handoff-doc.ts
-function followUpSection(fromTarget, brokerCliPath2) {
+function followUpSection(fromTarget, brokerCliPath2, tabId) {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
   const cli = brokerCliPath2?.trim() ? brokerCliPath2.trim() : "daemon/broker-main.ts";
+  const tab = tabId?.trim() ? tabId.trim() : "<tabId from the page section>";
   return [
     "## Follow-up channel",
     "",
-    "The sending browser tab is still online. Collect page data by calling its fixed tool ops via the broker CLI — the command waits and prints the result JSON on stdout:",
-    `\`node ${cli} page-tool ${target} <op> [paramsJSON]\``,
+    "Collect page data by calling the originating tab's fixed tool ops via the broker CLI. Every call names that tab with `--tab`; the command waits and prints the result JSON on stdout:",
+    `\`node ${cli} page-tool ${target} <op> [paramsJSON] --tab ${tab}\``,
     "Ops (fixed table): page.info · dom.query {selector, maxCount?, styleProps?} · dom.html {selector?, maxLength?, maxDepth?} · console.logs {lastN?, sinceTs?, level?} · network.log {lastN?, urlFilter?} · framework.inspect {selector, props?, maxDepth?} · page.wait {selector} (read) · dom.click {selector} / dom.setValue {selector, value} (write — only when the origin has page-write authorization; a refusal answers denied_op). Example:",
-    `\`node ${cli} page-tool ${target} dom.query '{"selector":"button.primary","maxCount":5}'\``,
-    "A timeout or no_tabs exits 1 with an error on stderr — after a page reload wait a few seconds for the userscript auto-reconnect and retry (≤3 times). Multiple calls may be issued in parallel. After changing code, verify by re-querying: dom.query the target elements and check console.logs for new errors."
+    `\`node ${cli} page-tool ${target} dom.query '{"selector":"button.primary","maxCount":5}' --tab ${tab}\``,
+    "A timeout exits 1 with an error on stderr — after a page reload wait a few seconds for the userscript auto-reconnect and retry (≤3 times). `missing_tab` means `--tab` was left off — read it from the Page section, never guess. `tab_unreachable` means that page is closed: do NOT retry, stop and ask the human to reopen it. Multiple calls may be issued in parallel. After changing code, verify by re-querying: dom.query the target elements and check console.logs for new errors."
   ];
 }
 function field(name, value) {
@@ -288,6 +291,9 @@ function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brok
     "",
     field("url", page.url),
     field("title", page.title),
+    // Only when the broker resolved the live connection's tab: an absent id is
+    // an absent line, never an empty or guessed one (ADR-0022).
+    ...page.tabId ? [field("tabId", page.tabId)] : [],
     field("ts", `${page.ts} (${new Date(page.ts).toISOString()})`),
     "",
     "## Annotations",
@@ -295,7 +301,7 @@ function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brok
   ];
   for (const pick of picks) lines.push(...pickSection(pick));
   if (record) lines.push(...recordSection(record));
-  lines.push(...followUpSection(fromTarget, brokerCliPath2), "");
+  lines.push(...followUpSection(fromTarget, brokerCliPath2, page.tabId), "");
   lines.push(
     "---",
     "",
@@ -348,7 +354,7 @@ function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath: 
     `Every page section above carries its tabId. Follow up with \`page-tool <target> <op> --tab <tabId>\` — tabIds come from this doc, never guessed. If a call answers tab_unreachable, that page is closed: do NOT retry — stop and ask the human to reopen the page (title/url above) or reconnect the picker. Staged markers may come from pages other than the one this bag was sent from.`,
     ""
   );
-  lines.push(...followUpSection(fromTarget, brokerCliPath2), "");
+  lines.push(...followUpSection(fromTarget, brokerCliPath2, void 0), "");
   lines.push(
     "---",
     "",
@@ -968,6 +974,7 @@ var {
   KIND_STAGE: WIRE_STAGE,
   KIND_BAG_LIST: WIRE_BAG_LIST,
   KIND_BAG_SUBMIT: WIRE_BAG_SUBMIT,
+  KIND_BAG_UNSTAGE: WIRE_BAG_UNSTAGE,
   KIND_TARGETS_LIST: WIRE_TARGETS_LIST,
   KIND_TARGETS_RESULT: WIRE_TARGETS_RESULT,
   KIND_PAGE_REQUEST: WIRE_PAGE_REQUEST,
@@ -1159,10 +1166,13 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
   const msgId = nextMsgId();
   const doc = path5.join(os3.tmpdir(), `pi-xfer-${msgId}.md`);
   const pageRaw = typeof frame.page === "object" && frame.page !== null ? frame.page : {};
+  const submittingTab = activeConns?.get(connection);
+  const routedTabId = submittingTab && typeof submittingTab.id === "string" && submittingTab.id !== "" ? submittingTab.id : void 0;
   const page = {
     url: typeof pageRaw.url === "string" ? pageRaw.url : "",
     title: typeof pageRaw.title === "string" ? pageRaw.title : "",
-    ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now()
+    ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now(),
+    ...routedTabId !== void 0 ? { tabId: routedTabId } : {}
   };
   let content;
   try {
@@ -1190,8 +1200,6 @@ function handleAnnotationSubmit(connection, frame, xferDir) {
   }
   console.log(`[doc] ${doc} (${picks.length} picks${record ? ` + record ${record.id} (${record.events.length} events)` : ""} → local:${targetName})`);
   latestHandoffByTarget.set(targetName, msgId);
-  const submittingTab = activeConns?.get(connection);
-  const routedTabId = submittingTab && typeof submittingTab.id === "string" ? submittingTab.id : void 0;
   void pushXferNotify(xferDir, targetName, {
     type: WIRE_XFER_NOTIFY,
     msg_id: msgId,
@@ -1228,6 +1236,8 @@ function handleAnnotationCompose(connection, frame) {
   const targetName = typeof target?.name === "string" && target.name.trim() !== "" ? target.name : void 0;
   const msgId = nextMsgId();
   const pageRaw = typeof frame.page === "object" && frame.page !== null ? frame.page : {};
+  const composingTab = activeConns?.get(connection);
+  const routedTabId = composingTab && typeof composingTab.id === "string" && composingTab.id !== "" ? composingTab.id : void 0;
   let content;
   try {
     content = renderHandoffDoc({
@@ -1236,7 +1246,8 @@ function handleAnnotationCompose(connection, frame) {
       page: {
         url: typeof pageRaw.url === "string" ? pageRaw.url : "",
         title: typeof pageRaw.title === "string" ? pageRaw.title : "",
-        ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now()
+        ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now(),
+        ...routedTabId !== void 0 ? { tabId: routedTabId } : {}
       },
       picks,
       record: record ?? void 0,
@@ -1303,6 +1314,21 @@ function handleAnnotationStage(connection, frame) {
   bag.push(entry);
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { id: entry.id, count: bag.length } });
   console.log(`[bag] staged ${entry.id} [tab ${entry.tabId}] ${entry.pick.selector} (bag: ${bag.length})`);
+}
+function handleBagUnstage(connection, frame) {
+  const entryId = typeof frame.entryId === "string" ? frame.entryId : "";
+  if (entryId === "") {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "malformed unstage: expected {entryId}");
+    return;
+  }
+  const index = bag.findIndex((entry) => entry.id === entryId);
+  if (index < 0) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `no bag entry ${entryId} (already sent or removed — refresh the drawer)`);
+    return;
+  }
+  const [removed] = bag.splice(index, 1);
+  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { id: entryId, count: bag.length } });
+  console.log(`[bag] unstaged ${entryId} [tab ${removed.tabId}] ${removed.pick.selector} (bag: ${bag.length})`);
 }
 var BAG_LIST_MAX_ITEMS = 100;
 function handleBagList(connection, frame) {
@@ -1563,6 +1589,7 @@ function buildFrameHandlers(xferDir) {
     [WIRE_STAGE]: (connection, frame) => handleAnnotationStage(connection, frame),
     [WIRE_BAG_LIST]: (connection, frame) => handleBagList(connection, frame),
     [WIRE_BAG_SUBMIT]: (connection, frame) => handleBagSubmit(connection, frame, xferDir),
+    [WIRE_BAG_UNSTAGE]: (connection, frame) => handleBagUnstage(connection, frame),
     [WIRE_TARGETS_LIST]: (connection, frame) => handleTargetsList(connection, frame, xferDir),
     [WIRE_PAGE_REQUEST]: () => handleInboundPageRequest(),
     [WIRE_PAGE_RESPONSE]: (connection, frame) => handlePageResponse(connection, frame)
@@ -1601,6 +1628,7 @@ async function startBroker(options) {
   bag = [];
   frameHandlers = buildFrameHandlers(options.xferDir);
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+  checkBrokerCliPath();
   const server = http.createServer((request2, response) => {
     const url = new URL(request2.url ?? "/", `http://${HOST}`);
     if (url.pathname === "/status") {
@@ -1788,12 +1816,40 @@ async function runPageToolCommand(args) {
   console.error(`[broker] page-tool failed: ${typeof body.error === "string" ? body.error : `http ${response.status}`}`);
   process.exit(1);
 }
+function brokerCliCandidates(dirname) {
+  return [
+    // bundle layouts: `dist/broker.cjs` (current) and `broker.cjs` at the root
+    // (pre-0.10.1 layout) — resolved from either dirname
+    path5.join(dirname, "broker.cjs"),
+    path5.join(dirname, "dist", "broker.cjs"),
+    path5.join(dirname, "..", "dist", "broker.cjs"),
+    path5.join(dirname, "..", "broker.cjs"),
+    // source layouts (repo tree / pre-bundle installs)
+    path5.join(dirname, "broker-main.ts"),
+    path5.join(dirname, "daemon", "broker-main.ts"),
+    path5.join(dirname, "..", "daemon", "broker-main.ts")
+  ];
+}
+function resolveBrokerCliPath(dirname, exists, fallback) {
+  for (const candidate of brokerCliCandidates(dirname)) if (exists(candidate)) return candidate;
+  return fallback;
+}
 function brokerCliPath() {
-  const source = path5.join(__dirname, "broker-main.ts");
-  if (fs3.existsSync(source)) return source;
-  const bundled = path5.join(__dirname, "..", "dist", "broker.cjs");
-  if (fs3.existsSync(bundled)) return bundled;
-  return path5.join(__dirname, "..", "broker-main.ts");
+  return resolveBrokerCliPath(
+    __dirname,
+    (candidate) => fs3.existsSync(candidate),
+    process.argv[1] ?? path5.join(__dirname, "broker.cjs")
+  );
+}
+function checkBrokerCliPath() {
+  const resolved = brokerCliPath();
+  if (fs3.existsSync(resolved)) {
+    console.log(`[boot] page-tool CLI: ${resolved}`);
+    return;
+  }
+  console.log(
+    `[boot] WARN: no runnable page-tool CLI found from ${__dirname} — handoff docs would name a missing file. Reinstall pi-xfer or restart the broker from the current install.`
+  );
 }
 async function main() {
   const args = process.argv.slice(2);
@@ -1860,11 +1916,13 @@ if (isMainModule()) {
   DEFAULT_PAGE_TIMEOUT_MS,
   VERSION,
   awaitPageResult,
+  brokerCliCandidates,
   handleFrame,
   handlePageResponse,
   main,
   parseArgs,
   pidAlive,
+  resolveBrokerCliPath,
   routePageTool,
   runPageTool,
   startBroker

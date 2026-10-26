@@ -51,7 +51,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ACK_TIMEOUT_MS, CONNECT_TIMEOUT_MS, MAX_FRAME_BYTES, XFER_DIR } from "../src/core/constants.ts";
 import { ERR, FROM_WEB_PICKER, WIRE } from "../src/core/wire.ts";
-import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPick, type HandoffRecord } from "../src/core/handoff-doc.ts";
+import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPageInfo, type HandoffPick, type HandoffRecord } from "../src/core/handoff-doc.ts";
 import { createMeshDescriber } from "../src/mesh/mesh-describer.ts";
 import { listTargetsWithDescriptions } from "../src/core/targets.ts";
 import { encodeAgentName, isEntryPoint, pidAlive } from "../src/core/utils.ts";
@@ -83,6 +83,7 @@ const {
   KIND_STAGE: WIRE_STAGE,
   KIND_BAG_LIST: WIRE_BAG_LIST,
   KIND_BAG_SUBMIT: WIRE_BAG_SUBMIT,
+  KIND_BAG_UNSTAGE: WIRE_BAG_UNSTAGE,
   KIND_TARGETS_LIST: WIRE_TARGETS_LIST,
   KIND_TARGETS_RESULT: WIRE_TARGETS_RESULT,
   KIND_PAGE_REQUEST: WIRE_PAGE_REQUEST,
@@ -361,10 +362,17 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   const msgId = nextMsgId();
   const doc = path.join(os.tmpdir(), `pi-xfer-${msgId}.md`);
   const pageRaw = typeof frame.page === "object" && frame.page !== null ? (frame.page as Record<string, unknown>) : {};
-  const page = {
+  // ADR-0022: the originating tabId is a known fact — the broker reads it off
+  // the live connection, never off the frame (the page cannot vouch for its own
+  // routing identity). It lands in the doc's Page section AND in the ack, so
+  // --tab is read instead of guessed.
+  const submittingTab = activeConns?.get(connection);
+  const routedTabId = submittingTab && typeof submittingTab.id === "string" && submittingTab.id !== "" ? submittingTab.id : undefined;
+  const page: HandoffPageInfo = {
     url: typeof pageRaw.url === "string" ? pageRaw.url : "",
     title: typeof pageRaw.title === "string" ? pageRaw.title : "",
     ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now(),
+    ...(routedTabId !== undefined ? { tabId: routedTabId } : {}),
   };
   let content: string;
   try {
@@ -392,11 +400,8 @@ function handleAnnotationSubmit(connection: WsConnection, frame: Frame, xferDir:
   }
   console.log(`[doc] ${doc} (${picks.length} picks${record ? ` + record ${record.id} (${record.events.length} events)` : ""} → local:${targetName})`);
   latestHandoffByTarget.set(targetName, msgId); // the doc exists → page.requests can reference it
-  // ADR-0022: the ack carries the originating tabId; the agent passes it back
-  // as --tab on every follow-up page-tool call. No latest-tab guess is kept.
-  const submittingTab = activeConns?.get(connection);
-  const routedTabId = submittingTab && typeof submittingTab.id === "string" ? submittingTab.id : undefined;
-
+  // The same tabId rides the ack for the picker's own confirmation; the agent
+  // has no bus to it and reads the doc instead.
   void pushXferNotify(xferDir, targetName, {
     type: WIRE_XFER_NOTIFY,
     msg_id: msgId,
@@ -450,6 +455,10 @@ function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
 
   const msgId = nextMsgId();
   const pageRaw = typeof frame.page === "object" && frame.page !== null ? (frame.page as Record<string, unknown>) : {};
+  // Same source of truth as submit: the live connection's tabId, not the frame
+  // — a composed prompt must be as runnable as a delivered one.
+  const composingTab = activeConns?.get(connection);
+  const routedTabId = composingTab && typeof composingTab.id === "string" && composingTab.id !== "" ? composingTab.id : undefined;
   let content: string;
   try {
     content = renderHandoffDoc({
@@ -459,6 +468,7 @@ function handleAnnotationCompose(connection: WsConnection, frame: Frame): void {
         url: typeof pageRaw.url === "string" ? pageRaw.url : "",
         title: typeof pageRaw.title === "string" ? pageRaw.title : "",
         ts: typeof pageRaw.ts === "number" ? pageRaw.ts : Date.now(),
+        ...(routedTabId !== undefined ? { tabId: routedTabId } : {}),
       },
       picks: picks as HandoffPick[],
       record: record ?? undefined,
@@ -584,6 +594,30 @@ function handleAnnotationStage(connection: WsConnection, frame: Frame): void {
   bag.push(entry);
   connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { id: entry.id, count: bag.length } });
   console.log(`[bag] staged ${entry.id} [tab ${entry.tabId}] ${entry.pick.selector} (bag: ${bag.length})`);
+}
+
+/**
+ * bag.unstage — delete one staged marker by its broker-assigned entry id. The
+ * Bag is broker state, so this is the only way a delete can be real: a local
+ * removal would leave the drawer diverged from what bag.submit actually sends.
+ * The reply carries the Bag's new count so the picker can re-render without a
+ * second round trip; an unknown id is an invalid_payload (not a silent no-op,
+ * so a stale drawer surfaces instead of quietly doing nothing).
+ */
+function handleBagUnstage(connection: WsConnection, frame: Frame): void {
+  const entryId = typeof frame.entryId === "string" ? frame.entryId : "";
+  if (entryId === "") {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, "malformed unstage: expected {entryId}");
+    return;
+  }
+  const index = bag.findIndex((entry) => entry.id === entryId);
+  if (index < 0) {
+    sendError(connection, frame, ERR_INVALID_PAYLOAD, `no bag entry ${entryId} (already sent or removed — refresh the drawer)`);
+    return;
+  }
+  const [removed] = bag.splice(index, 1);
+  connection.send({ v: PROTOCOL_VERSION, type: WIRE_ACK, id: frameId(frame), result: { id: entryId, count: bag.length } });
+  console.log(`[bag] unstaged ${entryId} [tab ${removed!.tabId}] ${removed!.pick.selector} (bag: ${bag.length})`);
 }
 
 /**
@@ -935,6 +969,7 @@ function buildFrameHandlers(xferDir: string): Record<string, FrameHandler> {
     [WIRE_STAGE]: (connection, frame) => handleAnnotationStage(connection, frame),
     [WIRE_BAG_LIST]: (connection, frame) => handleBagList(connection, frame),
     [WIRE_BAG_SUBMIT]: (connection, frame) => handleBagSubmit(connection, frame, xferDir),
+    [WIRE_BAG_UNSTAGE]: (connection, frame) => handleBagUnstage(connection, frame),
     [WIRE_TARGETS_LIST]: (connection, frame) => handleTargetsList(connection, frame, xferDir),
     [WIRE_PAGE_REQUEST]: () => handleInboundPageRequest(),
     [WIRE_PAGE_RESPONSE]: (connection, frame) => handlePageResponse(connection, frame),
@@ -993,6 +1028,7 @@ export async function startBroker(options: BrokerOptions): Promise<BrokerHandle>
   bag = []; // per-broker-instance state — a test-started broker gets a fresh bag
   frameHandlers = buildFrameHandlers(options.xferDir);
   const startedAt = new Date().toISOString();
+  checkBrokerCliPath();
 
   const server = http.createServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://${HOST}`);
@@ -1206,19 +1242,71 @@ async function runPageToolCommand(args: string[]): Promise<void> {
 
 
 /**
- * The path a handoff doc names for follow-up page-tool calls. The daemon may
- * run as `daemon/broker-main.ts` (repo tree, or the shipped source) or as
- * `dist/broker.cjs` (npm install); in the bundle `import.meta.dirname` is
- * `dist/`, so `../broker-main.ts` would name a file that does not exist. The
- * shim keeps one path that is always runnable: the bundle when present, else
- * the source next to it.
+ * The path a handoff doc names for follow-up page-tool calls.
+ *
+ * The daemon runs either as the bundle (`dist/broker.cjs`, what the manager
+ * spawns and what an npm install ships) or as the TS source (`daemon/
+ * broker-main.ts`, the repo tree). `import.meta.dirname` differs between the
+ * two: `dist/` for the bundle, `daemon/` for the source — and it is whatever it
+ * was when this PROCESS started, so a package upgrade underneath a long-lived
+ * broker leaves it pointing at a directory layout that no longer exists.
+ *
+ * Hence: every candidate is existence-checked at call time, the bundle wins
+ * (node 26 refuses to type-strip a `.ts` under node_modules), and a candidate
+ * layout is never returned on faith — an unverifiable path is a doc that tells
+ * the receiving agent to run a file that is not there.
  */
+/** Candidate layouts for the page-tool CLI, relative to a daemon dirname. */
+export function brokerCliCandidates(dirname: string): string[] {
+  return [
+    // bundle layouts: `dist/broker.cjs` (current) and `broker.cjs` at the root
+    // (pre-0.10.1 layout) — resolved from either dirname
+    path.join(dirname, "broker.cjs"),
+    path.join(dirname, "dist", "broker.cjs"),
+    path.join(dirname, "..", "dist", "broker.cjs"),
+    path.join(dirname, "..", "broker.cjs"),
+    // source layouts (repo tree / pre-bundle installs)
+    path.join(dirname, "broker-main.ts"),
+    path.join(dirname, "daemon", "broker-main.ts"),
+    path.join(dirname, "..", "daemon", "broker-main.ts"),
+  ];
+}
+
+/**
+ * The first existing candidate, or `fallback` when none exists. Guards are
+ * ordered by preference, so an install that ships both the bundle and the
+ * source still gets the runnable one.
+ */
+export function resolveBrokerCliPath(
+  dirname: string,
+  exists: (candidate: string) => boolean,
+  fallback: string,
+): string {
+  for (const candidate of brokerCliCandidates(dirname)) if (exists(candidate)) return candidate;
+  return fallback;
+}
+
 function brokerCliPath(): string {
-  const source = path.join(import.meta.dirname, "broker-main.ts");
-  if (fs.existsSync(source)) return source;
-  const bundled = path.join(import.meta.dirname, "..", "dist", "broker.cjs");
-  if (fs.existsSync(bundled)) return bundled;
-  return path.join(import.meta.dirname, "..", "broker-main.ts");
+  // Nothing runnable: name the file this process was started from, which at
+  // least exists by definition (the process is running). A stale layout is a
+  // broken install the operator has to see, not something to paper over.
+  return resolveBrokerCliPath(
+    import.meta.dirname,
+    (candidate) => fs.existsSync(candidate),
+    process.argv[1] ?? path.join(import.meta.dirname, "broker.cjs"),
+  );
+}
+
+/** Startup self-check: a doc that names an unresolvable CLI is a dead end. */
+function checkBrokerCliPath(): void {
+  const resolved = brokerCliPath();
+  if (fs.existsSync(resolved)) {
+    console.log(`[boot] page-tool CLI: ${resolved}`);
+    return;
+  }
+  console.log(
+    `[boot] WARN: no runnable page-tool CLI found from ${import.meta.dirname} — handoff docs would name a missing file. Reinstall pi-xfer or restart the broker from the current install.`,
+  );
 }
 
 /** CLI entry: parse args, handle EADDRINUSE, install clean-exit handlers. */

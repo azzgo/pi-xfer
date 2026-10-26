@@ -250,8 +250,16 @@ export function initBag(ctx) {
     if (del) {
       const item = del.closest('.item');
       const id = item && item.getAttribute('data-id');
-      toast(t('bag.deleteLocalOnly'));
-      return; // v1: entries are deleted by staging less, or by resending — see docs
+      if (!id) return;
+      del.disabled = true;
+      void conn.unstageMarker(id).then((res) => {
+        del.disabled = false;
+        if (!res.ok) { toast(t('bag.unstageFailed', { detail: res.code + (res.message ? ' — ' + res.message : '') })); refresh(); return; }
+        items = items.filter((m) => m.id !== id);
+        render();
+        toast(t('bag.unstaged'));
+      });
+      return;
     }
     const toggle = e.target && e.target.closest ? e.target.closest('[data-toggle]') : null;
     if (toggle) {

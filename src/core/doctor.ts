@@ -52,6 +52,13 @@ export interface DoctorDeps {
   myName: string;
   brokerManager: Pick<BrokerManager, "probe">;
   adminManager: Pick<AdminManager, "probe">;
+  /**
+   * pi-xfer version this process loaded (from its package.json). A live broker
+   * that reports a different one is a daemon left over from a previous install:
+   * its `import.meta.dirname` still points at the old layout, so the page-tool
+   * command it names in handoff docs no longer exists.
+   */
+  extensionVersion?: string | null;
   /** Mesh engine config; absence means the opt-in transport was never set up. */
   meshConfigPath: string;
   /** Engine node listing; overridden in tests, defaults to the REST listing. */
@@ -67,7 +74,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const checks = [
     dirCheck,
     dirCheck.status === "pass" ? await peersCheck(deps) : fail("Peers", `cannot list peers — fix "${dirCheck.name}" first`, dirCheck.fix),
-    await brokerCheck(deps.brokerManager),
+    await brokerCheck(deps.brokerManager, deps.extensionVersion),
     await adminCheck(deps.adminManager),
     await meshCheck(deps),
   ];
@@ -149,11 +156,24 @@ async function peersCheck(deps: DoctorDeps): Promise<DoctorCheck> {
   return { name: "Peers", status: "pass", detail: listed };
 }
 
-async function brokerCheck(brokerManager: Pick<BrokerManager, "probe">): Promise<DoctorCheck> {
+async function brokerCheck(
+  brokerManager: Pick<BrokerManager, "probe">,
+  extensionVersion: string | null | undefined,
+): Promise<DoctorCheck> {
   try {
     const info = await brokerManager.probe();
     if (info === null) {
       return { name: "Broker", status: "pass", detail: "not running (opt-in) — the web picker needs it", fix: "/xfer broker start" };
+    }
+    // A daemon from a previous install keeps its startup dirname and version:
+    // every doc it writes names a page-tool path from a layout that is gone.
+    if (info.version && extensionVersion && info.version !== extensionVersion) {
+      return {
+        name: "Broker",
+        status: "warn",
+        detail: `running on port ${info.port} but on version ${info.version} — this install is ${extensionVersion}; its handoff docs name a stale page-tool path`,
+        fix: "/xfer broker stop, then /xfer broker start",
+      };
     }
     return { name: "Broker", status: "pass", detail: `running on port ${info.port} — the web picker channel is ready` };
   } catch (err) {

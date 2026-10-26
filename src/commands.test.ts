@@ -152,9 +152,15 @@ function stubBrokerManager(
     start: make("start", "broker started (pid 4242, port 4719)"),
     stop: make("stop", "broker stopped (pid 4242)"),
     status: make("status", "broker: alive\n  port: 4719\n  pid: 4242"),
-    probe: overrides.probe ?? (async () => { calls.push("probe"); return { port: 4719, pid: 4242, startedAt: "", version: "test" }; }),
+    probe: overrides.probe ?? (async () => { calls.push("probe"); return { port: 4719, pid: 4242, startedAt: "", version: installedVersion() }; }),
     calls,
   } as unknown as BrokerManager & { calls: string[] };
+}
+
+/** The version this checkout installs as — doctor's drift check compares against it. */
+function installedVersion(): string {
+  const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "..", "package.json"), "utf-8")) as { version: string };
+  return pkg.version;
 }
 
 /** AdminManager stub whose probe() never sees the developer's real ~/.pi/xfer. */

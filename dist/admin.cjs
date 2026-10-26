@@ -38,7 +38,7 @@ __export(admin_main_exports, {
   startWatchers: () => startWatchers
 });
 module.exports = __toCommonJS(admin_main_exports);
-var fs6 = __toESM(require("node:fs"), 1);
+var fs7 = __toESM(require("node:fs"), 1);
 var http = __toESM(require("node:http"), 1);
 var path8 = __toESM(require("node:path"), 1);
 
@@ -190,15 +190,16 @@ var Board = class {
 
 // src/broker/broker-manager.ts
 var import_node_child_process = require("node:child_process");
-var fs3 = __toESM(require("node:fs"), 1);
+var fs4 = __toESM(require("node:fs"), 1);
 var net = __toESM(require("node:net"), 1);
 var path5 = __toESM(require("node:path"), 1);
 
 // src/core/utils.ts
-var fs2 = __toESM(require("node:fs"), 1);
+var fs3 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 
 // src/core/constants.ts
+var fs2 = __toESM(require("node:fs"), 1);
 var os3 = __toESM(require("node:os"), 1);
 var path3 = __toESM(require("node:path"), 1);
 
@@ -266,6 +267,14 @@ var MESH_CONFIG_PATH = resolveMeshConfigPath(path3.join(XFER_DIR, "mesh.config.j
 var MESH_CACHE_DIR = path3.join(XFER_DIR, "cache");
 var MAX_FRAME_BYTES = 1024 * 1024;
 var MESH_PROBE_TIMEOUT_MS = 2500;
+function readPackageVersion(extensionRoot) {
+  try {
+    const raw = JSON.parse(fs2.readFileSync(path3.join(extensionRoot, "package.json"), "utf-8"));
+    return typeof raw.version === "string" && raw.version !== "" ? raw.version : null;
+  } catch {
+    return null;
+  }
+}
 
 // src/core/utils.ts
 function encodeAgentName(name) {
@@ -296,7 +305,7 @@ function pidAlive(pid) {
 }
 function readPeerMetadata(xferName, xferDir = XFER_DIR) {
   try {
-    const raw = JSON.parse(fs2.readFileSync(path4.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));
+    const raw = JSON.parse(fs3.readFileSync(path4.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
     const value = raw;
     return {
@@ -329,8 +338,8 @@ async function withTimeout(promise, ms) {
 }
 function listPeers(myName, xferDir = XFER_DIR) {
   try {
-    fs2.mkdirSync(xferDir, { recursive: true, mode: 448 });
-    const names = fs2.readdirSync(xferDir).filter((f) => f.endsWith(".sock")).map((f) => decodeAgentName(f.replace(/\.sock$/, ""))).filter((n) => n !== myName);
+    fs3.mkdirSync(xferDir, { recursive: true, mode: 448 });
+    const names = fs3.readdirSync(xferDir).filter((f) => f.endsWith(".sock")).map((f) => decodeAgentName(f.replace(/\.sock$/, ""))).filter((n) => n !== myName);
     return [...new Set(names)].map((xferName) => ({
       xferName,
       endpoint: endpointForName(xferName),
@@ -386,14 +395,14 @@ var BrokerManager = class {
   async start(portOverride) {
     const port = portOverride ?? this.port;
     if (await this.probe() !== null) return "already running";
-    if (!fs3.existsSync(BROKER_MAIN)) {
+    if (!fs4.existsSync(BROKER_MAIN)) {
       throw new Error(
         `broker: daemon bundle missing (${BROKER_MAIN}) — run \`npm run build\` in the xfer extension directory`
       );
     }
-    fs3.mkdirSync(this.xferDir, { recursive: true, mode: 448 });
+    fs4.mkdirSync(this.xferDir, { recursive: true, mode: 448 });
     const logPath = path5.join(this.xferDir, "broker.log");
-    const logFd = fs3.openSync(logPath, "a");
+    const logFd = fs4.openSync(logPath, "a");
     let child;
     try {
       child = (0, import_node_child_process.spawn)(process.execPath, [
@@ -411,7 +420,7 @@ var BrokerManager = class {
       });
     } catch (error) {
       try {
-        fs3.closeSync(logFd);
+        fs4.closeSync(logFd);
       } catch {
       }
       throw new Error(`broker: spawn failed: ${errorMessage(error)}`);
@@ -419,14 +428,14 @@ var BrokerManager = class {
     child.unref();
     child.once("spawn", () => {
       try {
-        fs3.closeSync(logFd);
+        fs4.closeSync(logFd);
       } catch {
       }
     });
     const spawnError = await confirmSpawn(child);
     if (spawnError) {
       try {
-        fs3.closeSync(logFd);
+        fs4.closeSync(logFd);
       } catch {
       }
       throw new Error(`broker: spawn failed: ${spawnError.message}`);
@@ -486,12 +495,14 @@ ${this.logTail()}`);
         `  version: ${info.version}`
       ].join("\n");
     }
+    const drift = versionDriftNote(info.version);
     return [
       "broker: alive",
       `  port: ${info.port}`,
       `  pid: ${info.pid}`,
       `  startedAt: ${info.startedAt}`,
-      `  version: ${info.version}`
+      `  version: ${info.version}`,
+      ...drift ? [drift] : []
     ].join("\n");
   }
   /** Poll broker.json + TCP connect until ready or the deadline (or child exit). */
@@ -508,7 +519,7 @@ ${this.logTail()}`);
   /** The last LOG_TAIL_LINES non-empty lines of <xfer-dir>/broker.log. */
   logTail() {
     try {
-      const lines = fs3.readFileSync(path5.join(this.xferDir, "broker.log"), "utf-8").split("\n").filter((line) => line.trim() !== "");
+      const lines = fs4.readFileSync(path5.join(this.xferDir, "broker.log"), "utf-8").split("\n").filter((line) => line.trim() !== "");
       return `last broker.log lines (${path5.join(this.xferDir, "broker.log")}):
 ${lines.slice(-LOG_TAIL_LINES).join("\n")}`;
     } catch {
@@ -517,9 +528,14 @@ ${lines.slice(-LOG_TAIL_LINES).join("\n")}`;
   }
 };
 var BROKER_MAIN = path5.join(__dirname, "../../dist/broker.cjs");
+function versionDriftNote(brokerVersion) {
+  const installed = readPackageVersion(path5.join(__dirname, "../.."));
+  if (installed === null || brokerVersion === "" || brokerVersion === installed) return null;
+  return `  drift: started by ${brokerVersion}, this install is ${installed} — run /xfer broker stop then /xfer broker start so its handoff docs name a live page-tool path`;
+}
 function readBrokerJson(xferDir) {
   try {
-    const data = JSON.parse(fs3.readFileSync(path5.join(xferDir, "broker.json"), "utf-8"));
+    const data = JSON.parse(fs4.readFileSync(path5.join(xferDir, "broker.json"), "utf-8"));
     const port = typeof data.port === "number" ? data.port : NaN;
     const pid = typeof data.pid === "number" ? data.pid : NaN;
     if (!Number.isFinite(port) || port <= 0 || !Number.isFinite(pid) || pid <= 0) return null;
@@ -535,7 +551,7 @@ function readBrokerJson(xferDir) {
 }
 function readPidFile(xferDir) {
   try {
-    const raw = fs3.readFileSync(path5.join(xferDir, "broker.pid"), "utf-8").trim();
+    const raw = fs4.readFileSync(path5.join(xferDir, "broker.pid"), "utf-8").trim();
     const pid = Number.parseInt(raw, 10);
     return Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
@@ -545,7 +561,7 @@ function readPidFile(xferDir) {
 function unlinkBrokerFiles(xferDir) {
   for (const name of ["broker.pid", "broker.json"]) {
     try {
-      fs3.unlinkSync(path5.join(xferDir, name));
+      fs4.unlinkSync(path5.join(xferDir, name));
     } catch {
     }
   }
@@ -636,7 +652,7 @@ if (isMainModule()) {
 }
 
 // src/core/gc.ts
-var fs4 = __toESM(require("node:fs"), 1);
+var fs5 = __toESM(require("node:fs"), 1);
 var net2 = __toESM(require("node:net"), 1);
 var path6 = __toESM(require("node:path"), 1);
 var GC_SKIP_JSON = /* @__PURE__ */ new Set(["broker.json", "settings.json"]);
@@ -675,7 +691,7 @@ async function planGc(xferDir) {
   const alive = [];
   let entries;
   try {
-    entries = fs4.readdirSync(xferDir, { withFileTypes: true });
+    entries = fs5.readdirSync(xferDir, { withFileTypes: true });
   } catch {
     return { zombies, alive };
   }
@@ -699,7 +715,7 @@ async function planGc(xferDir) {
     let reverseMarker = false;
     let importMarker = false;
     try {
-      const raw = JSON.parse(fs4.readFileSync(jsonPath, "utf-8"));
+      const raw = JSON.parse(fs5.readFileSync(jsonPath, "utf-8"));
       const rec = raw;
       const candidate = rec?.pid;
       if (typeof candidate === "number") pid = candidate;
@@ -729,7 +745,7 @@ async function planGc(xferDir) {
       continue;
     }
     if (pid === void 0) {
-      if (fs4.existsSync(sockPath) && !await socketHasListener(sockPath)) {
+      if (fs5.existsSync(sockPath) && !await socketHasListener(sockPath)) {
         zombies.push({ name: stem, sockPath, jsonPath, reason: "unreadable-json" });
       } else {
         alive.push(stem);
@@ -750,7 +766,7 @@ async function planGc(xferDir) {
     let pid;
     let names = [];
     try {
-      const rec = JSON.parse(fs4.readFileSync(jsonPath, "utf-8"));
+      const rec = JSON.parse(fs5.readFileSync(jsonPath, "utf-8"));
       if (typeof rec.host === "string") host = rec.host;
       if (typeof rec.pid === "number") pid = rec.pid;
       if (Array.isArray(rec.names)) names = rec.names.filter((n) => typeof n === "string");
@@ -759,7 +775,7 @@ async function planGc(xferDir) {
     const sockets = names.map((n) => path6.join(xferDir, `${encodeURIComponent(n)}.sock`));
     for (const name of names) claimedByLink.add(name);
     if (pid !== void 0 && !processAlive(pid)) {
-      const owned = sockets.filter((p) => fs4.existsSync(p));
+      const owned = sockets.filter((p) => fs5.existsSync(p));
       zombies.push({
         name: label,
         sockPath: owned[0] ?? path6.join(xferDir, `.link-${label}.sock`),
@@ -802,13 +818,13 @@ async function collectGarbage(xferDir) {
     const sockets = zombie.ownedSockets ?? [zombie.sockPath];
     for (const sock of sockets) {
       try {
-        fs4.unlinkSync(sock);
+        fs5.unlinkSync(sock);
       } catch {
       }
     }
     if (zombie.jsonPath) {
       try {
-        fs4.unlinkSync(zombie.jsonPath);
+        fs5.unlinkSync(zombie.jsonPath);
       } catch {
       }
     }
@@ -818,7 +834,7 @@ async function collectGarbage(xferDir) {
 
 // src/mesh/mesh-config.ts
 var import_node_child_process2 = require("node:child_process");
-var fs5 = __toESM(require("node:fs"), 1);
+var fs6 = __toESM(require("node:fs"), 1);
 var XFER_INSTANCE_ACTOR = "xfer-instance";
 function parseMeshConfig(raw) {
   if (typeof raw !== "object" || raw === null) {
@@ -882,7 +898,7 @@ The token field also accepts "$MESH_TOKEN" (an environment variable) or "!pass s
 function loadMeshConfig(configPath) {
   let text;
   try {
-    text = fs5.readFileSync(configPath, "utf-8");
+    text = fs6.readFileSync(configPath, "utf-8");
   } catch {
     throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
   }
@@ -1184,7 +1200,7 @@ function poolLabel(pool) {
 var DEFAULT_ADMIN_PORT = 7788;
 var EXTENSION_VERSION = (() => {
   try {
-    return JSON.parse(fs6.readFileSync(path8.join(__dirname, "package.json"), "utf-8")).version ?? "?";
+    return JSON.parse(fs7.readFileSync(path8.join(__dirname, "package.json"), "utf-8")).version ?? "?";
   } catch {
     return "?";
   }
@@ -1236,7 +1252,7 @@ var emptyMeshView = (overrides = {}) => ({
 });
 async function meshView(xferDir, meshNode, notice = null) {
   const configPath = path8.join(xferDir, "mesh.config.json");
-  if (!fs6.existsSync(configPath)) return emptyMeshView({ configured: false, notice });
+  if (!fs7.existsSync(configPath)) return emptyMeshView({ configured: false, notice });
   let config;
   try {
     config = await resolveMeshConfig(loadMeshConfig(configPath));
@@ -1732,7 +1748,7 @@ function createAdminServer(options) {
         redirect(res, back("/control"));
         for (const name of ["admin.pid", "admin.json"]) {
           try {
-            fs6.unlinkSync(path8.join(xferDir, name));
+            fs7.unlinkSync(path8.join(xferDir, name));
           } catch {
           }
         }
@@ -1783,7 +1799,7 @@ function createAdminServer(options) {
     };
     if (target === "") return refuse("mesh down needs a node name");
     const configPath = path8.join(xferDir, "mesh.config.json");
-    if (!fs6.existsSync(configPath)) return refuse("mesh is not configured — no mesh.config.json in the xfer dir");
+    if (!fs7.existsSync(configPath)) return refuse("mesh is not configured — no mesh.config.json in the xfer dir");
     let config;
     try {
       config = await resolveMeshConfig(loadMeshConfig(configPath));
@@ -1860,11 +1876,11 @@ function startWatchers(xferDir, boardDir, publish) {
     }, ms));
   };
   try {
-    fs6.watch(xferDir, (_, filename) => {
+    fs7.watch(xferDir, (_, filename) => {
       const name = filename ?? "";
       if (name === "broker.json" || name === "broker.pid") {
         once(`broker:${name}`, () => {
-          const alive = fs6.existsSync(path8.join(xferDir, "broker.json"));
+          const alive = fs7.existsSync(path8.join(xferDir, "broker.json"));
           publish({
             t: now(),
             kind: "broker",
@@ -1877,7 +1893,7 @@ function startWatchers(xferDir, boardDir, publish) {
       if (name.endsWith(".sock") || name.endsWith(".json") && !SKIP_JSON.has(name)) {
         const peerName = name.replace(/\.sock$/, "").replace(/\.json$/, "");
         once(`peer:${peerName}`, () => {
-          const alive = fs6.existsSync(path8.join(xferDir, `${peerName}.sock`));
+          const alive = fs7.existsSync(path8.join(xferDir, `${peerName}.sock`));
           publish({
             t: now(),
             kind: "peer",
@@ -1890,12 +1906,12 @@ function startWatchers(xferDir, boardDir, publish) {
   } catch {
   }
   try {
-    fs6.mkdirSync(boardDir, { recursive: true });
-    fs6.watch(boardDir, (_, filename) => {
+    fs7.mkdirSync(boardDir, { recursive: true });
+    fs7.watch(boardDir, (_, filename) => {
       const name = filename ?? "";
       if (!name.endsWith(".md")) return;
       once(`board:${name}`, () => {
-        const exists = fs6.existsSync(path8.join(boardDir, name));
+        const exists = fs7.existsSync(path8.join(boardDir, name));
         publish({
           t: now(),
           kind: "board",
@@ -1962,8 +1978,8 @@ async function main() {
       process.exit(1);
     }
     try {
-      fs6.unlinkSync(path8.join(xferDir, "admin.pid"));
-      fs6.unlinkSync(path8.join(xferDir, "admin.json"));
+      fs7.unlinkSync(path8.join(xferDir, "admin.pid"));
+      fs7.unlinkSync(path8.join(xferDir, "admin.json"));
     } catch {
     }
     console.error(`[admin] port ${port} is occupied by another program — falling back to an ephemeral port`);
@@ -1976,10 +1992,10 @@ async function main() {
     }
   }
   setPort(realPort);
-  fs6.mkdirSync(xferDir, { recursive: true, mode: 448 });
-  fs6.writeFileSync(path8.join(xferDir, "admin.pid"), `${process.pid}
+  fs7.mkdirSync(xferDir, { recursive: true, mode: 448 });
+  fs7.writeFileSync(path8.join(xferDir, "admin.pid"), `${process.pid}
 `, "utf-8");
-  fs6.writeFileSync(
+  fs7.writeFileSync(
     path8.join(xferDir, "admin.json"),
     JSON.stringify({ port: realPort, pid: process.pid, startedAt: (/* @__PURE__ */ new Date()).toISOString(), version: EXTENSION_VERSION }, null, 2),
     "utf-8"
@@ -1990,8 +2006,8 @@ async function main() {
     if (shutdownRequested) return;
     shutdownRequested = true;
     try {
-      fs6.unlinkSync(path8.join(xferDir, "admin.pid"));
-      fs6.unlinkSync(path8.join(xferDir, "admin.json"));
+      fs7.unlinkSync(path8.join(xferDir, "admin.pid"));
+      fs7.unlinkSync(path8.join(xferDir, "admin.json"));
     } catch {
     }
     process.exit(0);

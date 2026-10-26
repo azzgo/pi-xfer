@@ -73,7 +73,14 @@ export function initSend(ctx) {
     elSend.textContent = t('sendbtn');
     if (res.ok) {
       gm.set(GM_TARGET, target);
-      toast(t('send.delivered', { id: res.result && res.result.handoff_id ? res.result.handoff_id : '?' }));
+      // ADR-0022: the ack's routedTabId is the same tabId the doc's Page section
+      // now carries. Surface it so a human following up by hand has it in front
+      // of them instead of digging through the delivered document.
+      const routedTabId = res.result && typeof res.result.routedTabId === 'string' ? res.result.routedTabId : '';
+      toast(t('send.delivered', {
+        id: res.result && res.result.handoff_id ? res.result.handoff_id : '?',
+        tab: routedTabId || '?',
+      }));
       elPrompt.value = '';
       ctx.clearBatch();
       if (record && ctx.clearRecord) ctx.clearRecord();      // record 一次性：发送成功即清
