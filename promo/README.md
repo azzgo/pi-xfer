@@ -1,4 +1,5 @@
 # promo — the product videos
+[简体中文](README.zh.md)
 
 Everything under this directory exists to produce video about pi-xfer. Each
 subdirectory is one cut: its captures, its composition timeline, and a

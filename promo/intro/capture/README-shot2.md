@@ -1,4 +1,5 @@
 # Shot 2 — web picker capture
+[简体中文](README-shot2.zh.md)
 
 Code-driven capture of the browser → handoff flow. Everything shown is real:
 

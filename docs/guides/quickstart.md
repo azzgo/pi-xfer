@@ -1,4 +1,5 @@
 # Quickstart
+[简体中文](quickstart.zh.md)
 
 Get your first handoff delivered between two pi agents in about five minutes.
 

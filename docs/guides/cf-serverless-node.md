@@ -1,4 +1,5 @@
 # A serverless Cloudflare node — a mesh node that costs nothing while idle
+[简体中文](cf-serverless-node.zh.md)
 
 > **Experimental, not a supported feature.** No SLA, no network test in CI, no promise across
 > rivetkit majors. It is an **example** (`examples/cf-serverless-node/`), not part of the pi-xfer

@@ -1,4 +1,5 @@
 # A serverless Cloudflare node, joined to the mesh
+[简体中文](README.zh.md)
 
 > **Experimental, not a supported feature.** No SLA, no network test in CI, no promise across
 > rivetkit majors. This `package.json` and its `node_modules/` belong to the example — the

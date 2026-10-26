@@ -1,4 +1,5 @@
 # Milestone 4 — 通讯面：让投递可被看见（approved feature list）
+[简体中文](phase4-features.zh.md)
 
 > Brainstorm closed 2026-10-18, user-approved. Next node: **design**.
 >

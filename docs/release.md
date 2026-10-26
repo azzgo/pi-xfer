@@ -1,4 +1,5 @@
 # Release Guide
+[简体中文](release.zh.md)
 
 How to ship a new version of pi-xfer to npm. The process is tag-driven: a
 GitHub Actions workflow (`.github/workflows/publish.yml`) publishes on every

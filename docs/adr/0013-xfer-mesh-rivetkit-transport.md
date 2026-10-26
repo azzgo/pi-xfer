@@ -1,4 +1,5 @@
 # Xfer mesh 传输层：RivetKit in-process actor，opt-in，与本地 sock 显式并存
+[简体中文](0013-xfer-mesh-rivetkit-transport.zh.md)
 
 跨机互发 handoff 需要注册/发现/路由/离线缓冲，这些在单机 xfer 里是手写的（`.json` 注册表、gc、notify+ack），跨机后复杂度爆炸。选定 RivetKit 作为 mesh 传输层：引擎（单节点 docker，RocksDB file_system 后端，无需 FDB/NATS/ClickHouse）承担注册、存活检测、actor 间路由与 durable queue；xfer 侧只写一个 actor 定义与本地 sock 的桥接。
 

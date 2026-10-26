@@ -1,4 +1,5 @@
 # Milestone 2 design — P0-B broker/admin daemons as committed bundles
+[简体中文](phase2-design-p0b.zh.md)
 
 ## Decision (2026-10-13)
 

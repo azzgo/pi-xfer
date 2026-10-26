@@ -127,7 +127,6 @@ xfer-adapterd mesh send <target> <file> <summary> --from grok
 
 - **launchd / systemd**：`KeepAlive`/`Restart=on-failure`，5 秒重启退避。
 
-如果守护进程无法连上引擎，它会以非零退出——上面的 supervisor
 如果守护进程无法启动（配置错误、启动时引擎不可达），它会带错误消息退出——上面的
 supervisor 会重启它，这就是重连路径。
 

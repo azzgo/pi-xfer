@@ -1,4 +1,5 @@
 # Identity, addressing, discovery, reachability — research input (naming / same-name conflict / identity binding / reachability judgement / capability declaration / credentials, local + mesh + adapterd)
+[简体中文](notes-identity-and-addressing.zh.md)
 
 Provenance: commissioned read-only walkthrough of project `pi-xfer` at
 `ae1121c` (branch `main`, 2026-10-18), requested by the human node of this project. No code was

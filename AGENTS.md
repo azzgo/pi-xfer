@@ -1,16 +1,10 @@
 # AGENTS.md
+[简体中文](AGENTS.zh.md)
 
 You are working on **pi-xfer**, a pi coding-agent extension for cross-context handoff.
 This file is a map, not a rulebook — the authoritative guidance lives in the
-documents it points to.
-
-**This repository is bilingual.** Every document it points to below also exists
-as a Chinese mirror at the same path with `.zh.md` in place of `.md`. English is
-canonical; the Chinese file mirrors it, and **both sides move in the same
-commit** — an English edit without its `.zh.md` counterpart is an unfinished
-change, not a follow-up. The full rule (shared assets, verbatim code, link
-rewriting, what is deliberately not paired) is `docs/i18n.md`; the mechanical
-half is enforced by `src/docs-pairs.test.ts` in `npm test`.
+documents it points to. This file is written for agents and stays English-only
+(see the last working agreement below).
 
 ## Read in this order
 
@@ -46,6 +40,10 @@ half is enforced by `src/docs-pairs.test.ts` in `npm test`.
   - Not paired, on purpose: `skills/**`, `.agents/skills/**`, `.pi/**`, `.pig/**` — see `docs/i18n.md` for why.
   - `README.zh.md` uses the Bilibili cut (<https://www.bilibili.com/video/BV1oQWc6fEn9>) where `README.md` links YouTube.
   - When adding a new document, add its `.zh.md` in the same commit; `src/docs-pairs.test.ts` fails on a missing pair, structural drift, a mistranslated code block, or a Chinese file whose links do not point at counterparts.
+- **Documents for humans are bilingual; documents for agents are English-only.** The pairing rule keys on *audience*, not location:
+  - **Paired (human-facing)**: `README.md`, `CONTEXT.md`, `CONTRIBUTING.md`, everything under `docs/` and `examples/`/`promo/` READMEs. English is canonical, the `.zh.md` file mirrors it, and both sides carry a cross-link to each other (`[简体中文](X.zh.md)` under the English H1, `> 中文版 · 英文原文：[X](X)` atop the Chinese file).
+  - **Never paired (agent-facing)**: `AGENTS.md` itself, `skills/**` (shipped prompt material installed into other hosts — a translated copy would be a second behavioural source of truth), `.agents/**` (agent tooling), `.pi/**`/`.pig/**` (local working state). Do not create `.zh.md` files for these; if one exists, delete it.
+  - Rationale: a mirror only pays for itself when a *human* reads the other language. An agent reads English fine, and a second copy of its instructions is drift waiting to happen.
 
 ## Layout pointers
 

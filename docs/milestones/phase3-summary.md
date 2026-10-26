@@ -1,4 +1,5 @@
 # Milestone 3 总结 — Release Note 素材
+[简体中文](phase3-summary.zh.md)
 
 > Milestone:阶段3 — refine mesh 机制 · 目标:mesh 从「文档化但未实战」走向经受住真实部署的检验。
 > 状态:全部特性已实现、验证并验收(P0-A / P0-B / P0-D / P1-C 拒绝 / P1-E,另含插入项与两笔修复)。

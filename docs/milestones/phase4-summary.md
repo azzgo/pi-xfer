@@ -1,4 +1,5 @@
 # Milestone 4 Summary — Release Note Input
+[简体中文](phase4-summary.zh.md)
 
 > Milestone: Phase 4 — make delivery visible.
 > Status: complete. Items 0+1 shipped as one change, item 2 shipped, items 3, 4 and

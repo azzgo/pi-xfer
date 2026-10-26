@@ -1,4 +1,5 @@
 # Agent Host Setup — wiring a non-pi bot into the xfer network
+[简体中文](agent-host-setup.zh.md)
 
 This guide is for a bot or agent that is **not** a pi session — a Feishu bot, a
 CLI agent, a cron worker — that should receive and send xfer handoffs like any
@@ -134,7 +135,6 @@ already use:
 
 - **launchd / systemd**: `KeepAlive`/`Restart=on-failure`, 5 s restart backoff.
 
-If the daemon cannot reach the engine it exits non-zero — the supervisor above
 If the daemon cannot start (bad config, engine unreachable at startup) it exits
 with an error message — the supervisor above restarts it, which is the
 reconnect path.

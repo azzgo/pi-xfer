@@ -1,4 +1,5 @@
 # Shot 3 — Admin console capture
+[简体中文](README-shot3.zh.md)
 
 Fully code-driven capture of the xfer Admin web console: Playwright records the
 dashboard while real events fire in one continuous take.

@@ -1,4 +1,5 @@
 # Mesh setup — cross-machine handoffs
+[简体中文](mesh-setup.zh.md)
 
 The Mesh is pi-xfer's opt-in transport for delivering handoffs between machines: each pi session that joins becomes a **Node** — one actor in a [RivetKit](https://rivet.dev) actor network, with engine-side discovery and a durable queue, so a handoff reaches a Node on another machine even if it's offline when sent. Local Unix-socket delivery is unaffected and stays the default. Why it's built this way: [`docs/adr/0013`](../adr/0013-xfer-mesh-rivetkit-transport.md).
 

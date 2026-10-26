@@ -1,4 +1,5 @@
 # MCP gateway — typed xfer tools for a host's model
+[简体中文](mcp-gateway.zh.md)
 
 `mcp-gateway.mjs` is a **stdio MCP server**: the host spawns it, owns its
 stdin/stdout, and its tools shell out to the `xfer-adapterd` CLI that already

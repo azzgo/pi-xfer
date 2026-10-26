@@ -1,4 +1,5 @@
 # xfer-adapterd: one bundle, dual transport, take-to-read Inbox
+[简体中文](0015-adapter-daemon.zh.md)
 
 Status: accepted
 

@@ -1,4 +1,5 @@
 # Xfer Web Picker userscript — install, verify, troubleshoot
+[简体中文](web-picker.zh.md)
 
 `web-picker.user.js` is a Tampermonkey userscript that gives the xfer broker a
 page side:

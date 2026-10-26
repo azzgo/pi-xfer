@@ -1,4 +1,5 @@
 # Mesh log — what is in it, what is not, how it is maintained
+[简体中文](mesh-log.zh.md)
 
 The mesh transport runs **in-process** inside pi (ADR 0013) and is pinned quiet,
 because RivetKit logs the way a standalone server does — straight to the

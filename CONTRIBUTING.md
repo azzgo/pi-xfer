@@ -1,4 +1,5 @@
 # Contributing to pi-xfer
+[简体中文](CONTRIBUTING.zh.md)
 
 A short orientation for humans and outside contributors. **If you are an agent working in
 this repo, read `AGENTS.md` instead** — it is stricter and it is the source of truth. This

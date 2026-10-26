@@ -1,4 +1,5 @@
 # Verify the loop, by hand
+[简体中文](VERIFICATION.zh.md)
 
 **This is the one place in the repository where verification touches a live deployment**, and it
 is a deliberate, recorded exception (`AGENTS.md` — "Never test against a live deployment"). A

@@ -1,4 +1,5 @@
 # Xfer board: Markdown cards, human-commanded, prompt-injected writes
+[简体中文](0009-xfer-board-command-driven.zh.md)
 
 Status: accepted
 

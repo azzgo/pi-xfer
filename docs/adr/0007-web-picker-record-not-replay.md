@@ -1,4 +1,5 @@
 # Web picker captures human-operated records, not agent replays
+[简体中文](0007-web-picker-record-not-replay.zh.md)
 
 Status: accepted
 

@@ -1,4 +1,5 @@
 # Reason Network wake mechanisms — research input (inbox delivery tier + resident worker)
+[简体中文](notes-reason-network-wake.zh.md)
 
 Provenance: xfer handoff `mvdtel08-fpm32p` (`kind: notification`) from `invest`, machine
 `ison-arch`, project `pi-xfer`, branch `main`, 2026-10-18. Read-only research; no files changed

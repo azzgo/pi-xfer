@@ -15,6 +15,7 @@ import { describe, it } from "node:test";
 
 const root = path.join(import.meta.dirname, "..");
 const skippedDirectories = new Set(["node_modules", ".git", ".agents", ".pi", ".pig", "skills", "dist"]);
+const agentFacing = new Set(["AGENTS.md"]);
 const provenance = "英文原文";
 
 function markdownFiles(directory = root, found: string[] = []): string[] {
@@ -33,7 +34,7 @@ function markdownFiles(directory = root, found: string[] = []): string[] {
 const chineseOf = (file: string): string => file.replace(/\.md$/, ".zh.md");
 const englishOf = (file: string): string => file.replace(/\.zh\.md$/, ".md");
 
-const englishFiles = markdownFiles().filter((file) => !file.endsWith(".zh.md"));
+const englishFiles = markdownFiles().filter((file) => !file.endsWith(".zh.md") && !agentFacing.has(file));
 const chineseFiles = markdownFiles().filter((file) => file.endsWith(".zh.md"));
 
 const read = (file: string): string => fs.readFileSync(path.join(root, file), "utf-8");
@@ -63,6 +64,13 @@ function relativeDocLinks(source: string): string[] {
 }
 
 describe("bilingual documentation pairs", () => {
+  it("documents written for agents stay English-only", () => {
+    const offenders = [...agentFacing]
+      .filter((file) => fs.existsSync(path.join(root, chineseOf(file))))
+      .concat(markdownFiles().filter((file) => file.startsWith("skills/") && file.endsWith(".zh.md")));
+    assert.deepEqual(offenders, [], `agent-facing material is never mirrored — delete: ${offenders.join(", ")}`);
+  });
+
   it("every English document has a Chinese counterpart", () => {
     const missing = englishFiles.filter((file) => !fs.existsSync(path.join(root, chineseOf(file))));
     assert.deepEqual(missing, [], `missing Chinese counterparts — add <file>.zh.md for: ${missing.join(", ")}`);
@@ -121,7 +129,10 @@ describe("bilingual documentation pairs", () => {
       if (!fs.existsSync(path.join(root, chinese))) continue;
       const englishTargets = relativeDocLinks(read(file)).map((target) => path.posix.basename(target));
       const chineseTargets = relativeDocLinks(read(chinese)).map((target) => path.posix.basename(target));
-      const expected = englishTargets.map((target) => target.replace(/\.md$/, ".zh.md")).sort();
+      const expected = englishTargets
+        .filter((target) => !target.endsWith(".zh.md"))
+        .map((target) => target.replace(/\.md$/, ".zh.md"))
+        .sort();
       const actual = chineseTargets.sort();
       if (expected.join(",") !== actual.join(",")) {
         problems.push(`${chinese}: links ${actual.join(", ") || "(none)"} — expected ${expected.join(", ") || "(none)"}`);
@@ -130,9 +141,13 @@ describe("bilingual documentation pairs", () => {
     assert.deepEqual(problems, [], `relative document links:\n${problems.join("\n")}`);
   });
 
-  it("each Chinese file names its English original", () => {
-    const missing = chineseFiles.filter((file) => !read(file).slice(0, 400).includes(provenance));
-    assert.deepEqual(missing, [], `missing a provenance line ("${provenance}") near the top: ${missing.join(", ")}`);
+  it("each Chinese file names its English original, and each English file links back", () => {
+    const missingProvenance = chineseFiles.filter((file) => !read(file).slice(0, 400).includes(provenance));
+    assert.deepEqual(missingProvenance, [], `missing a provenance line ("${provenance}") near the top: ${missingProvenance.join(", ")}`);
+    const missingCrossLink = englishFiles
+      .filter((file) => fs.existsSync(path.join(root, chineseOf(file))))
+      .filter((file) => !read(file).slice(0, 400).includes(`(${chineseOf(file).split("/").pop()})`));
+    assert.deepEqual(missingCrossLink, [], `missing a \`[简体中文](…)\` link near the H1: ${missingCrossLink.join(", ")}`);
   });
 
   it("shared assets are referenced, never copied", () => {

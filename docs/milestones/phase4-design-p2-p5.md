@@ -1,4 +1,5 @@
 # Milestone 4 design — items 2–5 (scope decisions)
+[简体中文](phase4-design-p2-p5.zh.md)
 
 > Design node, 2026-10-19. Items 0+1 are in `phase4-design-p0-p1.md` (ADR-0020). This file
 > records the go/no-go calls on the remaining four items. All four are closed. Item 2's

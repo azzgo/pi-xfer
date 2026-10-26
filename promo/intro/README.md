@@ -1,4 +1,5 @@
 # Intro: pi-xfer
+[简体中文](README.zh.md)
 
 The 76-second overview cut, published on YouTube:
 <https://youtu.be/0mm2CirJMUo>.
