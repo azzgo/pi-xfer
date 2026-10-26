@@ -111,15 +111,21 @@ This only removes the **mesh** half: the local socket and the inbox are untouche
 ## Web picker follow-ups (page-tool)
 
 A web-picker handoff's follow-up channel is the broker CLI. Every call must
-name its tab explicitly (ADR-0022 — the tabId is in the handoff's page
-sections / the submit ack's `routedTabId`):
+name its tab explicitly (ADR-0022 — the tabId is in the handoff's `## Page`
+section, `- tabId: <id>`; the command example in the same doc already carries
+it as `--tab`). The submit ack's `routedTabId` goes to the browser, not to you:
 
 ```sh
-node <daemon/broker-main.ts path> page-tool <target> <op> [paramsJSON] --tab <tabId>
+node <broker CLI path from the handoff> page-tool <target> <op> [paramsJSON] --tab <tabId>
 ```
 
+The path the handoff names is the runnable one (`dist/broker.cjs` on an npm
+install). Do not substitute `daemon/broker-main.ts`: node refuses to type-strip
+a `.ts` file under `node_modules`.
+
 - **`missing_tab`** — you called without `--tab`. Read the tabId from the
-  handoff and pass it; do not guess.
+  handoff's `## Page` section and pass it. Never guess one: a guessed id is a
+  `tab_unreachable` in disguise, indistinguishable in the log from a closed page.
 - **`tab_unreachable`** — that page is closed or the picker disconnected.
   **Stop and ask the human** to reopen the page (title/url are in the
   handoff) or reconnect the picker. Do not retry: a page-lifetime tab id

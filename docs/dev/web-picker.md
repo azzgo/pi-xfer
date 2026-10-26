@@ -61,11 +61,12 @@ shapes below match `mock-broker.mjs`, `.pi/wayfinder/prototypes/`).
 
 | Direction | Frame | Shape |
 |-----------|-------|-------|
-| page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` → `ack{result:{handoff_id, doc, routedTabId?}}`（ADR-0022：ack 里的 routedTabId 是后续 page-tool `--tab` 的值） |
+| page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` → `ack{result:{handoff_id, doc, routedTabId?}}`（ADR-0022：broker 从 `hello` 登记的那条连接取 tabId，写进 doc 的 `## Page` 节与每条 page-tool 命令里的 `--tab`，ack 的 `routedTabId` 是同一事实的副本） |
 | page → broker | `annotation.compose` | `{id, page, picks, prompt, target?}` → `ack{result:{prompt:<handoff doc>}}`（只渲染，不落盘不投递） |
 | page → broker | `annotation.stage` | `{id, pick, page:{tabId, origin, url, title, ts}}` → `ack{result:{id, count}}`（入袋；broker 分配 id，不去重） |
 | page → broker | `bag.list` | `{id}` → `ack{result:{items:[StagedMarker]}}`（全量快照，重连重建的唯一来源） |
 | page → broker | `bag.submit` | `{id, prompt, target:{name}}` → `ack{result:{handoff_id, doc}}`；渲染为每页一节的 handoff（节头带 tabId/url/title），发送即清袋，失败保袋 |
+| page → broker | `bag.unstage` | `{id, entryId}` → `ack{result:{id, count}}`（按 broker 分配的条目 id 删除一条暂存；id 不存在 → `invalid_payload`，抽屉据此重新拉取而不是静默成功） |
 | page → broker | `targets.list` | `{id}` |
 | broker → page | `page.request` | `{id, handoff_id, from, tool:{op, params?}, timeoutMs}` — ADR-0022：定向到显式 tabId，无广播 |
 | page → broker | `page.response` | `{id, ok:true, text}` / `{id, ok:false, error}` |
@@ -292,6 +293,8 @@ several pages, then send the whole bag from any of them.
   per page (url/origin/tabId header, that page's picks inside), plus a
   Routing note telling the agent to take `--tab` per section and to stop and
   ask the human on `tab_unreachable` (skills/xfer has the full rule).
-- **v1 limits** — bag entries cannot be edited or deleted from the picker
-  (broker-owned; prune by restaging or just send). Copy-prompt only ever
-  covers the local page's picks, never the bag.
+- **Deleting** — each row's 「删除」 sends `bag.unstage` with the broker's entry
+  id; the Bag is broker state, so a local-only removal would leave the drawer
+  diverged from what `bag.submit` actually sends. Notes stay read-only at
+  staging time (broker-owned), and Copy-prompt only ever covers the local
+  page's picks, never the bag.

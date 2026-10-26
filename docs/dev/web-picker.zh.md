@@ -47,11 +47,12 @@
 
 | 方向 | 帧 | 形状 |
 |-----------|-------|-------|
-| page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` → `ack{result:{handoff_id, doc, routedTabId?}}`（ADR-0022：ack 里的 routedTabId 是后续 page-tool `--tab` 的值） |
+| page → broker | `annotation.submit` | `{id, page, picks, prompt, target:{namespace:"local", name}}` → `ack{result:{handoff_id, doc, routedTabId?}}`（ADR-0022：broker 从 `hello` 登记的那条连接取 tabId，写进 doc 的 `## Page` 节与每条 page-tool 命令里的 `--tab`，ack 的 `routedTabId` 是同一事实的副本） |
 | page → broker | `annotation.compose` | `{id, page, picks, prompt, target?}` → `ack{result:{prompt:<handoff doc>}}`（只渲染，不落盘不投递） |
 | page → broker | `annotation.stage` | `{id, pick, page:{tabId, origin, url, title, ts}}` → `ack{result:{id, count}}`（入袋；broker 分配 id，不去重） |
 | page → broker | `bag.list` | `{id}` → `ack{result:{items:[StagedMarker]}}`（全量快照，重连重建的唯一来源） |
 | page → broker | `bag.submit` | `{id, prompt, target:{name}}` → `ack{result:{handoff_id, doc}}`；渲染为每页一节的 handoff（节头带 tabId/url/title），发送即清袋，失败保袋 |
+| page → broker | `bag.unstage` | `{id, entryId}` → `ack{result:{id, count}}`（按 broker 分配的条目 id 删除一条暂存；id 不存在 → `invalid_payload`，抽屉据此重新拉取而不是静默成功） |
 | page → broker | `targets.list` | `{id}` |
 | broker → page | `page.request` | `{id, handoff_id, from, tool:{op, params?}, timeoutMs}` — ADR-0022：定向到显式 tabId，无广播 |
 | page → broker | `page.response` | `{id, ok:true, text}` / `{id, ok:false, error}` |
@@ -236,5 +237,6 @@ socket。如果策略拒绝它，blocked 角标立刻出现，并且该判定按
 - **文档形状** — `bag.submit` 渲染出一份 handoff，每页一个 `## Page:` 节
   （url/origin/tabId 页头，该页的 picks 在里面），外加一段 Routing 说明，告诉 agent 每节
   各取 `--tab`，并在遇到 `tab_unreachable` 时停下来问人（skills/xfer 里有完整规则）。
-- **v1 限制** — 袋里的条目不能在 picker 里编辑或删除（broker 所有；靠重新暂存来清理，
-  或者干脆发出去）。复制 prompt 永远只覆盖本页的 picks，从不覆盖袋。
+- **删除** — 每行的「删除」用 broker 分配的条目 id 发 `bag.unstage`；袋是 broker 状态，
+  只删本地会让抽屉与 `bag.submit` 实际发送的内容不一致。备注仍在暂存时刻固定（broker 所有），
+  复制 prompt 也永远只覆盖本页的 picks，从不覆盖袋。
