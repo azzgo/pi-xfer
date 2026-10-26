@@ -15,7 +15,8 @@ import { describe, it } from "node:test";
 
 const root = path.join(import.meta.dirname, "..");
 const skippedDirectories = new Set(["node_modules", ".git", ".agents", ".pi", ".pig", "skills", "dist"]);
-const agentFacing = new Set(["AGENTS.md"]);
+const agentFacing = new Set(["AGENTS.md", "CONTEXT.md"]);
+const agentFacingDirectories = ["docs/adr", "docs/milestones"];
 const provenance = "英文原文";
 
 function markdownFiles(directory = root, found: string[] = []): string[] {
@@ -34,7 +35,9 @@ function markdownFiles(directory = root, found: string[] = []): string[] {
 const chineseOf = (file: string): string => file.replace(/\.md$/, ".zh.md");
 const englishOf = (file: string): string => file.replace(/\.zh\.md$/, ".md");
 
-const englishFiles = markdownFiles().filter((file) => !file.endsWith(".zh.md") && !agentFacing.has(file));
+const englishFiles = markdownFiles().filter(
+  (file) => !file.endsWith(".zh.md") && !agentFacing.has(file) && !agentFacingDirectories.some((dir) => file.startsWith(`${dir}/`)),
+);
 const chineseFiles = markdownFiles().filter((file) => file.endsWith(".zh.md"));
 
 const read = (file: string): string => fs.readFileSync(path.join(root, file), "utf-8");
@@ -65,9 +68,14 @@ function relativeDocLinks(source: string): string[] {
 
 describe("bilingual documentation pairs", () => {
   it("documents written for agents stay English-only", () => {
-    const offenders = [...agentFacing]
-      .filter((file) => fs.existsSync(path.join(root, chineseOf(file))))
-      .concat(markdownFiles().filter((file) => file.startsWith("skills/") && file.endsWith(".zh.md")));
+    const offenders = markdownFiles()
+      .filter((file) => file.endsWith(".zh.md"))
+      .filter(
+        (file) =>
+          agentFacing.has(englishOf(file)) ||
+          agentFacingDirectories.some((dir) => englishOf(file).startsWith(`${dir}/`)) ||
+          englishOf(file).startsWith("skills/"),
+      );
     assert.deepEqual(offenders, [], `agent-facing material is never mirrored — delete: ${offenders.join(", ")}`);
   });
 

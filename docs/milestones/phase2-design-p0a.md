@@ -1,5 +1,4 @@
 # Milestone 2 design — P0-A Web Picker site compatibility
-[简体中文](phase2-design-p0a.zh.md)
 
 ## Root causes (verified 2026-10-13 via chrome-devtools, live sites)
 

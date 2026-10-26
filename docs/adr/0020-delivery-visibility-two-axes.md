@@ -1,5 +1,4 @@
 # Delivery visibility is two axes: Delivery verdict and Handoff outcome
-[简体中文](0020-delivery-visibility-two-axes.zh.md)
 
 `xfer_to` and `xfer_mesh_to` both returned a constant `status: "sent"` — identical
 whether the target was awake, asleep, queued, or gone. Fixing that needs one term that

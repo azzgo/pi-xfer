@@ -1,5 +1,4 @@
 # 0022 — Page-tool always targets a tab; broadcast fallback removed
-[简体中文](0022-page-tool-explicit-tab-routing.zh.md)
 
 Page-tool routing used to guess (`latestTabIdByTarget` from the last
 `annotation.submit`) and silently broadcast to all tabs when the guess

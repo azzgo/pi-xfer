@@ -5,6 +5,7 @@
 
 
 [简体中文](README.zh.md)
+
 Structured markdown handoff between [pi](https://github.com/nicobailon/pi) coding agents. Instead of chat fragments, agents exchange a document — Context / Problem / Requirements / a return address — that the receiving agent can actually act on. Local Unix-socket delivery works out of the box; the **Mesh** adds opt-in cross-machine transport; the **web picker** pulls structured context straight from the browser.
 
 ## Intro Demo

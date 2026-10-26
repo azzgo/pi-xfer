@@ -1,5 +1,4 @@
 # Milestone 2 design — P1-E mesh node capability descriptions
-[简体中文](phase2-design-p1e.zh.md)
 
 ## Decisions (2026-10-13, user)
 

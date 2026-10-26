@@ -1,5 +1,4 @@
 # External agent↔agent protocol landscape — research input (survey + ADR compatibility)
-[简体中文](notes-external-protocols.zh.md)
 
 Provenance: read-only survey by a pi session on `ison-arch`, project `pi-xfer`, branch `main`,
 2026-10-18. No code changed; the only file written is this note. No live deployment was contacted

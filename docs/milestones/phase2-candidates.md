@@ -1,5 +1,4 @@
 # Milestone 2 — draft candidate list (brainstorm, not yet approved)
-[简体中文](phase2-candidates.zh.md)
 
 Collected from: retro of milestone-1 sessions (agentsview), user input, and cross-project
 retro handoffs from `refine` (2026-10-13).

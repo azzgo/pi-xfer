@@ -1,5 +1,4 @@
 # Milestone 3 — Refine the mesh (approved feature list)
-[简体中文](phase3-features.zh.md)
 
 > Brainstorm closed 2026-10-17, user-approved. Scope: the mesh transport, after it went from
 > "documented but unexercised" to a real deployment behind a Cloudflare Tunnel. Next node: design.

@@ -1,5 +1,4 @@
 # Milestone 2 design — P1-D handoff cwd anchoring
-[简体中文](phase2-design-p1d.zh.md)
 
 ## Decision (2026-10-13)
 

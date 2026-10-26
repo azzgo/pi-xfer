@@ -1,5 +1,4 @@
 # Coordination semantics — research input (multi-sender coordination in the handoff / Board / broker surfaces)
-[简体中文](notes-coordination-semantics.zh.md)
 
 Provenance: read-only code walkthrough of `main` at the user's request, 2026-10-18. No files were
 changed except this one; no test was run; no mesh engine was started; no live deployment was

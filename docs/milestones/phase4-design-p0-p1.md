@@ -1,5 +1,4 @@
 # Milestone 4 design — items 0 + 1 (presence signal, Handoff outcome)
-[简体中文](phase4-design-p0-p1.zh.md)
 
 > Design node, 2026-10-19. Items 0 and 1 collapsed into one change during the design
 > discussion; this is the written plan for that change. Decision record: ADR-0020.

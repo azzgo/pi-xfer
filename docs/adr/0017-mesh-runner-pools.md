@@ -1,5 +1,4 @@
 # Per-host mesh runner pools
-[简体中文](0017-mesh-runner-pools.zh.md)
 
 Status: accepted
 

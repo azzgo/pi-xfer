@@ -1,5 +1,4 @@
 # Milestone 2 Summary — Release Note Input
-[简体中文](phase2-summary.zh.md)
 
 > Milestone: Phase 2 — Robustness + site compatibility + cross-agent ergonomics.
 > Status: all planned items implemented and verified. Candidate list and per-feature

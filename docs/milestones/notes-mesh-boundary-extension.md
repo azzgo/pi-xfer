@@ -1,5 +1,4 @@
 # Mesh boundary extension — discussion record (thought experiment, not scheduled)
-[简体中文](notes-mesh-boundary-extension.zh.md)
 
 Provenance: xfer handoff `mvbqgtve-idqjvv` (`kind: notification`) from `pi-xfer_t82p`,
 machine `ison-arch`, project `pi-xfer`, branch `main`, 2026-10-17. No code was written and the

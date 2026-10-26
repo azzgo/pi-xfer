@@ -1,5 +1,4 @@
 # Xfer — Language
-[简体中文](CONTEXT.zh.md)
 
 ## Mesh (opt-in cross-machine transport)
 

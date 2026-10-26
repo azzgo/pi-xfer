@@ -1,5 +1,4 @@
 # Milestone 4 design — item 2 (local MCP gateway)
-[简体中文](phase4-design-p2.zh.md)
 
 > Design node follow-up, 2026-10-19. Scope settled in `phase4-design-p2-p5.md`; this is the
 > implementation plan that scope implies. Items 0+1 are in `phase4-design-p0-p1.md`

@@ -1,5 +1,4 @@
 # SSH Link: 点对点 ssh 转发作为 mesh 之外的跨机传输
-[简体中文](0021-ssh-link-peer-to-peer-transport.zh.md)
 
 Status: accepted
 

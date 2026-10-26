@@ -1,5 +1,4 @@
 # Handoff Kind: the sender declares, the receiver never judges
-[简体中文](0018-handoff-kind-sender-declares.zh.md)
 
 A Handoff carries a Kind — `Notification` (informs; silent by default) or `Task`
 (asks for output; exactly one conclusion comes back). The sender declares it, and

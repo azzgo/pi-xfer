@@ -1,5 +1,4 @@
 # Status-aware actor adoption in mesh up()
-[简体中文](0016-actor-adoption.zh.md)
 
 Status: accepted
 

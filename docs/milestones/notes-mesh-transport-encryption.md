@@ -1,5 +1,4 @@
 # Mesh transport encryption — research finding (no app-layer crypto; TLS is a deployment duty)
-[简体中文](notes-mesh-transport-encryption.zh.md)
 
 Researched 2026-10-17 at the user's request: "does our Rivet-based mesh communication have any
 encryption at all? It is deployed on a VPS without SSL — is there a MITM risk?"

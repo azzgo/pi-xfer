@@ -1,5 +1,4 @@
 # Milestone 1 总结 — Release Note 素材
-[简体中文](phase1-summary.zh.md)
 
 > Milestone:阶段1 — 打磨 · 目标:初步具备公共性、易用性、对外部人员的吸引力。
 > 状态:13/13 项已实现并验收。功能清单与设计计划见 `docs/milestones/phase1-polish.md`。

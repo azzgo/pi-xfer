@@ -1,5 +1,4 @@
 # Mesh transport security: TLS is a deployment duty, not a pi-xfer feature
-[简体中文](0019-mesh-transport-security.zh.md)
 
 Status: accepted
 

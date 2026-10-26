@@ -37,12 +37,14 @@ documents it points to. This file is written for agents and stays English-only
   - Point relative links at the `.zh.md` counterpart; keep the same set of document links on both sides.
   - Assets (`docs/guides/assets/`) are shared: reference the same file from both sides, never copy or translate it.
   - Glossary terms stay in English inside Chinese prose (`CONTEXT.md` fixes them; they are names, not words).
+  - `README.zh.md` uses the Bilibili cut (<https://www.bilibili.com/video/BV1oQWc6fEn9>) where `README.md` links YouTube.
   - Not paired, on purpose: `skills/**`, `.agents/skills/**`, `.pi/**`, `.pig/**` — see `docs/i18n.md` for why.
   - `README.zh.md` uses the Bilibili cut (<https://www.bilibili.com/video/BV1oQWc6fEn9>) where `README.md` links YouTube.
-  - When adding a new document, add its `.zh.md` in the same commit; `src/docs-pairs.test.ts` fails on a missing pair, structural drift, a mistranslated code block, or a Chinese file whose links do not point at counterparts.
+  - `README.zh.md` uses the Bilibili cut (<https://www.bilibili.com/video/BV1oQWc6fEn9>) where `README.md` links YouTube.
+  - When adding a new document, decide its audience first: human reader → pair it with a `.zh.md` in the same commit; agent context → English-only. `src/docs-pairs.test.ts` fails on a missing pair, structural drift, a mistranslated code block, or a Chinese file whose links do not point at counterparts.
 - **Documents for humans are bilingual; documents for agents are English-only.** The pairing rule keys on *audience*, not location:
-  - **Paired (human-facing)**: `README.md`, `CONTEXT.md`, `CONTRIBUTING.md`, everything under `docs/` and `examples/`/`promo/` READMEs. English is canonical, the `.zh.md` file mirrors it, and both sides carry a cross-link to each other (`[简体中文](X.zh.md)` under the English H1, `> 中文版 · 英文原文：[X](X)` atop the Chinese file).
-  - **Never paired (agent-facing)**: `AGENTS.md` itself, `skills/**` (shipped prompt material installed into other hosts — a translated copy would be a second behavioural source of truth), `.agents/**` (agent tooling), `.pi/**`/`.pig/**` (local working state). Do not create `.zh.md` files for these; if one exists, delete it.
+  - **Paired (human-facing)**: `README.md`, `CONTRIBUTING.md`, `docs/guides/`, `docs/dev/`, `docs/release.md`, and the `examples/`/`promo/` READMEs. English is canonical, the `.zh.md` file mirrors it, and both sides carry a cross-link to each other (`[简体中文](X.zh.md)` under the English H1, `> 中文版 · 英文原文：[X](X)` atop the Chinese file).
+  - **Never paired (agent-facing)**: `AGENTS.md` itself, `CONTEXT.md`, `docs/adr/**`, `docs/milestones/**`, `skills/**` (shipped prompt material installed into other hosts — a translated copy would be a second behavioural source of truth), `.agents/**` (agent tooling), `.pi/**`/`.pig/**` (local working state). These exist so an agent can deposit and recover context; unless there is a stated need, they stay English-only. Do not create `.zh.md` files for them; if one exists, delete it.
   - Rationale: a mirror only pays for itself when a *human* reads the other language. An agent reads English fine, and a second copy of its instructions is drift waiting to happen.
 
 ## Layout pointers

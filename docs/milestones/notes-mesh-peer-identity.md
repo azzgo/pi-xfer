@@ -1,5 +1,4 @@
 # Mesh peer identity — research input (trust boundary of actor-type discovery)
-[简体中文](notes-mesh-peer-identity.zh.md)
 
 Provenance: xfer handoff `mvbqic9z-9ktjrb` (`kind: notification`) from `pi-xfer_oizx`,
 machine `ison-arch`, project `pi-xfer`, branch `main`, 2026-10-17. Read-only code walkthrough;

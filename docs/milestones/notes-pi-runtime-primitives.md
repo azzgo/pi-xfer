@@ -1,5 +1,4 @@
 # Pi runtime primitives for agent-to-agent messaging, session injection and scheduling — research input (pi 1.3.0 extension API surface)
-[简体中文](notes-pi-runtime-primitives.zh.md)
 
 Provenance: read-only survey of the installed pi release, requested as background material for
 pi-xfer design. No code was changed; no deployment was contacted; `XFER_ALLOW_REMOTE` was not set.

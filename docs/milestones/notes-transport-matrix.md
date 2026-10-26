@@ -1,5 +1,4 @@
 # Transport matrix — research input (end-to-end capability of every messaging surface in the tree)
-[简体中文](notes-transport-matrix.zh.md)
 
 Provenance: direct read-only code walkthrough by the pi session in project `pi-xfer`
 (branch `main`), 2026-10-19. No file was created or
