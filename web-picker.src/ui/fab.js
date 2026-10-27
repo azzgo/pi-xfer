@@ -7,7 +7,7 @@ import { makeDraggable } from './draggable.js';
 export function initFab(ctx) {
   const { ui, toast } = ctx;
   const { host, els } = ui;
-  const { elFab, elCnt, elBar, elCard, elPanel, elPH } = els;
+  const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elBar, elCard, elPanel, elPH } = els;
 
   let drag = null;
   function fabPointerDown(e) {
@@ -25,26 +25,21 @@ export function initFab(ctx) {
     if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
     ui.pos.x = Math.max(4, Math.min(window.innerWidth - 50, drag.ox + dx));
     ui.pos.y = Math.max(4, Math.min(window.innerHeight - 50, drag.oy + dy));
-    elFab.style.left = ui.pos.x + 'px';
-    elFab.style.top = ui.pos.y + 'px';
+    elFabStack.style.left = ui.pos.x + 'px';
+    elFabStack.style.top = ui.pos.y + 'px';
   }
-  // 角标常驻显示（无 marker 时是 0），命中即可开面板；用坐标命中测试而非
-  // composedPath，因为 fabPointerDown 的 setPointerCapture 会把 pointerup
-  // 重定向到 fab。#cnt.zero 会变灰，但仍然可点。
-  function overBadge(x, y) {
-    const r = elCnt.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return false;
-    return x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3;
-  }
+  // 核心按钮只有一个动作：开始拾取。面板 / 录制在悬停扇出的两行里，
+  // 角标只报数——之前角标与图标是两个热区却共用一个视觉主体。
   function fabPointerUp(e) {
     if (!drag) return;
     e.stopPropagation(); e.preventDefault();
     const wasMoved = drag.moved;
-    const hitBadge = overBadge(e.clientX, e.clientY);
     drag = null;
     try { sessionStorage.setItem(KEY_POS, JSON.stringify(ui.pos)); } catch (err) { /* position won't persist */ }
-    if (!wasMoved) { if (hitBadge) ctx.togglePanel(); else ctx.setActive(true); }
+    if (!wasMoved) ctx.setActive(true);
   }
+  elFabRowPanel.addEventListener('click', (e) => { e.stopPropagation(); ctx.togglePanel(); });
+  elFabRowRecord.addEventListener('click', (e) => { e.stopPropagation(); ctx.toggleRecord(); });
   window.addEventListener('pointerdown', fabPointerDown, true);
   window.addEventListener('pointermove', fabPointerMove, true);
   window.addEventListener('pointerup', fabPointerUp, true);

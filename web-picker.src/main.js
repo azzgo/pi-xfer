@@ -138,6 +138,7 @@ if (!window.__PI_WEBPICKER__) {
         const next = gm.get(GM_FAB_SIZE, 'small') === 'small' ? 'large' : 'small';
         gm.set(GM_FAB_SIZE, next);
         ui.els.elFab.classList.toggle('large', next === 'large');
+        ui.els.elFabStack.classList.toggle('large', next === 'large');
         ui.toast(t('toast.fabSize', { size: next }));
       });
     } catch (e) { /* menu registration unavailable in this manager */ }

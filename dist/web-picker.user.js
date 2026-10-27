@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
-// @version      1.14.1
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
+// @version      1.15.0
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.15.0：fab 只保留一个动作（点击 = 开始拾取），标注面板与录制操作收进悬停扇出——角标不再兼职第二个热区；备注面板表头新增「⌖ 拾取」「● 录制」入口；暂存袋发送成功后抽屉自动收起；v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -1079,7 +1079,16 @@
     "escx.title": { en: "Exit pick mode", zh: "退出拾取模式" },
     "bar.exit": { en: "exit", zh: "退出" },
     "fab.title": { en: "pi xfer — pick, record, hand off", zh: "pi xfer — 拾取、录制、交接" },
-    "recbadge.title": { en: "Open pick panel", zh: "打开标注面板" },
+    "fab.hint": { en: "Click to start picking · hover for panel / record", zh: "点击开始拾取 · 悬停展开面板 / 录制" },
+    "fabrow.panel": { en: "Picks", zh: "标注面板" },
+    "fabrow.panel.title": { en: "Open the pick panel (⇧⌥L)", zh: "打开标注面板（⇧⌥L）" },
+    "fabrow.record": { en: "Record", zh: "录制操作" },
+    "fabrow.record.title": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制（⇧⌥R）" },
+    "cnt.title": { en: "Picked elements / record", zh: "已选元素 / 录制" },
+    "panel.pick": { en: "⌖ Pick", zh: "⌖ 拾取" },
+    "panel.pick.title": { en: "Start picking elements (⇧⌥P)", zh: "开始拾取元素（⇧⌥P）" },
+    "panel.record": { en: "● Record", zh: "● 录制" },
+    "panel.record.title": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制（⇧⌥R）" },
     "recbadge": { en: "panel", zh: "面板" },
     "recstop": { en: "■ Stop", zh: "■ 停止" },
     "recdiscard": { en: "Discard", zh: "丢弃" },
@@ -1974,8 +1983,27 @@
       #recbar #recstop:hover { background: #dc2626; }
       #recbar #recdiscard { background: #1e293b; color: #94a3b8; }
       #recbar #recdiscard:hover { background: #334155; color: #e2e8f0; }
-      /* ---- fab ---- */
-      #fab { position: fixed; width: 36px; height: 36px; border-radius: 11px;
+      /* ---- fab（核心按钮 + 悬停扇出）---- */
+      /* 核心按钮只有一个动作：开始拾取。面板 / 录制收在悬停扇出的两行里——
+         之前角标与图标是两个热区但只有一个视觉主体，点击结果全靠猜。 */
+      #fabstack { position: fixed; width: 36px; height: 36px; z-index: 2147483647; pointer-events: auto;
+        display: flex; flex-direction: column-reverse; align-items: flex-end; }
+      #fabstack.large { width: 46px; height: 46px; }
+      #fabrows { position: absolute; bottom: calc(100% + 6px); right: 0; display: flex; flex-direction: column-reverse;
+        align-items: flex-end; gap: 6px; }
+      #fabrows .frow { display: flex; align-items: center; gap: 8px; opacity: 0; transform: translateY(6px) scale(.92);
+        transform-origin: bottom right; transition: opacity .16s ease, transform .18s cubic-bezier(.2,.9,.3,1.2);
+        pointer-events: none; }
+      #fabstack:hover #fabrows .frow { opacity: 1; transform: none; pointer-events: auto; }
+      #fabrows .flab { background: rgba(15,21,34,.96); color: #e2e8f0; font: 600 11.5px var(--wp-font);
+        padding: 5px 9px; border-radius: 7px; white-space: nowrap; box-shadow: 0 4px 12px rgba(10,14,25,.4); }
+      #fabrows .fbtn { width: 34px; height: 34px; border-radius: 11px; padding: 0; cursor: pointer;
+        background: linear-gradient(160deg, #1b2230, #12161f); border: 1px solid rgba(255,255,255,.12);
+        color: #fff; display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 6px 16px rgba(10,14,25,.4); }
+      #fabrows .fbtn:hover { background: rgba(79,140,255,.32); }
+      #fabrows .fbtn svg { width: 16px; height: 16px; }
+      #fab { position: relative; width: 36px; height: 36px; border-radius: 11px;
         border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, #1b2230, #12161f);
         color: #fff; padding: 0; outline: none; cursor: grab;
         box-shadow: 0 10px 26px rgba(10,14,25,.45), inset 0 1px 0 rgba(255,255,255,.09);
@@ -1989,16 +2017,15 @@
       #fab.large { width: 46px; height: 46px; border-radius: 14px; }
       #fab.large svg { width: 20px; height: 20px; }
       #fab.large #dot { top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px; }
+      /* 角标只报数，不再是第二个可点热区 */
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
-        box-shadow: 0 0 0 2px #161a21; cursor: pointer; transition: background .2s, color .2s, filter .15s; }
+        box-shadow: 0 0 0 2px #161a21; pointer-events: none; transition: background .2s, color .2s; }
       #cnt.zero { background: #232a36; color: #7c8aa0; }
-      #cnt:hover { filter: brightness(1.18); }
       #dot { position: absolute; top: -3px; left: -3px; width: 9px; height: 9px; border-radius: 5px;
         background: #94a3b8; box-shadow: 0 0 0 2px #161a21; transition: background .2s; }
       #dot.connecting { background: var(--wp-amber); }
       #dot.on { background: var(--wp-green); box-shadow: 0 0 0 2px #161a21, 0 0 8px rgba(34,197,94,.8); }
-      /* ---- floating cards ---- */
       #card, #panel, #settings {
         background: #fff; border: 1px solid var(--wp-line); border-radius: var(--wp-radius);
         box-shadow: var(--wp-shadow); color: var(--wp-ink);
@@ -2177,7 +2204,7 @@
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>${t("panel.title")}</b><span class="cnt2" id="pcount"></span><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t("bag.entry.title")}">${t("bag.entry")} ▾</button><button id="pclose" title="${t("panel.pclose.title")}">✕</button></div>
+      <div class="ph" id="ph"><b>${t("panel.title")}</b><span class="cnt2" id="pcount"></span><button id="panelpick" class="ghost" style="font-size:11px" title="${t("panel.pick.title")}">${t("panel.pick")}</button><button id="panelrecord" class="ghost" style="font-size:11px" title="${t("panel.record.title")}">${t("panel.record")}</button><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t("bag.entry.title")}">${t("bag.entry")} ▾</button><button id="pclose" title="${t("panel.pclose.title")}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
         <div class="lbl">${t("send.label")}</div>
@@ -2205,13 +2232,29 @@
         </div>
       </div>
     </div>
-    <button id="fab" title="${t("fab.title")}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
-        <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-      </svg>
-      <span id="dot"></span>
-      <span id="cnt" class="zero" title="${t("recbadge.title")}">0</span>
-    </button>
+    <div id="fabstack">
+      <div id="fabrows">
+        <div class="frow">
+          <span class="flab">${t("fabrow.panel")}</span>
+          <button class="fbtn" id="frow-panel" title="${t("fabrow.panel.title")}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg>
+          </button>
+        </div>
+        <div class="frow">
+          <span class="flab">${t("fabrow.record")}</span>
+          <button class="fbtn" id="frow-record" title="${t("fabrow.record.title")}">
+            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+          </button>
+        </div>
+      </div>
+      <button id="fab" title="${t("fab.hint")}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+        </svg>
+        <span id="dot"></span>
+        <span id="cnt" class="zero" title="${t("cnt.title")}">0</span>
+      </button>
+    </div>
     <div id="toast"></div>
     <div id="settings">
       <b>${t("settings.title")}</b>
@@ -2227,8 +2270,11 @@
     </div>
   `);
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
-    if (gm.get(GM_FAB_SIZE, "small") === "large") elFab.classList.add("large");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elFabStack = $("fabstack"), elFabRowPanel = $("frow-panel"), elFabRowRecord = $("frow-record"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPanelPick = $("panelpick"), elPanelRecord = $("panelrecord"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    if (gm.get(GM_FAB_SIZE, "small") === "large") {
+      elFab.classList.add("large");
+      elFabStack.classList.add("large");
+    }
     let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
     try {
       const saved = sessionStorage.getItem(KEY_POS);
@@ -2243,12 +2289,12 @@
       pos.y = Math.max(4, Math.min(window.innerHeight - 50, pos.y));
     }
     clampFabPos();
-    elFab.style.left = pos.x + "px";
-    elFab.style.top = pos.y + "px";
+    elFabStack.style.left = pos.x + "px";
+    elFabStack.style.top = pos.y + "px";
     window.addEventListener("resize", () => {
       clampFabPos();
-      elFab.style.left = pos.x + "px";
-      elFab.style.top = pos.y + "px";
+      elFabStack.style.left = pos.x + "px";
+      elFabStack.style.top = pos.y + "px";
       try {
         sessionStorage.setItem(KEY_POS, JSON.stringify(pos));
       } catch (err) {
@@ -2275,6 +2321,9 @@
       elRecStop,
       elRecDiscard,
       elFab,
+      elFabStack,
+      elFabRowPanel,
+      elFabRowRecord,
       elCnt,
       elDot,
       elCard,
@@ -2289,6 +2338,8 @@
       elPcount,
       elPclose,
       elBagEntry,
+      elPanelPick,
+      elPanelRecord,
       elPrompt,
       elTCombo,
       elTInput,
@@ -2316,8 +2367,8 @@
       if (host.isConnected) return true;
       document.documentElement.appendChild(host);
       clampFabPos();
-      elFab.style.left = pos.x + "px";
-      elFab.style.top = pos.y + "px";
+      elFabStack.style.left = pos.x + "px";
+      elFabStack.style.top = pos.y + "px";
       return host.isConnected;
     }
     function observeHostRemoval() {
@@ -2336,7 +2387,7 @@
   // web-picker.src/ui/panel.js
   function initPanel(ctx) {
     const { els, toast } = ctx;
-    const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
+    const { elCnt, elPanel, elPlist, elPcount, elPclose, elPanelPick, elPanelRecord } = els;
     let panelOpen = false;
     function refreshCount() {
       const n = loadBatch().length + (ctx.getRecord && ctx.getRecord() ? 1 : 0);
@@ -2393,6 +2444,8 @@
     }
     ctx.togglePanel = togglePanel;
     elPclose.addEventListener("click", closePanel);
+    elPanelPick.addEventListener("click", () => ctx.setActive(true));
+    elPanelRecord.addEventListener("click", () => ctx.toggleRecord());
     elPlist.addEventListener("change", (e) => {
       const t2 = e.target;
       if (!t2 || t2.tagName !== "TEXTAREA") return;
@@ -2572,7 +2625,7 @@
       host.style.pointerEvents = "none";
       elBar.style.display = on ? "flex" : "none";
       if (on) ctx.barDrag.clamp();
-      els.elFab.style.display = on ? "none" : "block";
+      els.elFabStack.style.display = on ? "none" : "flex";
       document.body.style.cursor = on ? "crosshair" : "";
       if (on) {
         frozen = true;
@@ -3661,7 +3714,7 @@
         toast(t("bag.delivered", { id: res.result && res.result.handoff_id ? res.result.handoff_id : "?" }));
         items = [];
         openPages.clear();
-        render();
+        closeDrawer();
       } else {
         toast(t("send.failed", { detail: res.code + (res.message ? " — " + res.message : "") }));
       }
@@ -3790,7 +3843,7 @@
   function initFab(ctx) {
     const { ui, toast } = ctx;
     const { host, els } = ui;
-    const { elFab, elCnt, elBar, elCard, elPanel, elPH } = els;
+    const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elBar, elCard, elPanel, elPH } = els;
     let drag = null;
     function fabPointerDown(e) {
       if (!ctx.isFabTarget(e)) return;
@@ -3812,30 +3865,29 @@
       if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
       ui.pos.x = Math.max(4, Math.min(window.innerWidth - 50, drag.ox + dx));
       ui.pos.y = Math.max(4, Math.min(window.innerHeight - 50, drag.oy + dy));
-      elFab.style.left = ui.pos.x + "px";
-      elFab.style.top = ui.pos.y + "px";
-    }
-    function overBadge(x, y) {
-      const r = elCnt.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) return false;
-      return x >= r.left - 3 && x <= r.right + 3 && y >= r.top - 3 && y <= r.bottom + 3;
+      elFabStack.style.left = ui.pos.x + "px";
+      elFabStack.style.top = ui.pos.y + "px";
     }
     function fabPointerUp(e) {
       if (!drag) return;
       e.stopPropagation();
       e.preventDefault();
       const wasMoved = drag.moved;
-      const hitBadge = overBadge(e.clientX, e.clientY);
       drag = null;
       try {
         sessionStorage.setItem(KEY_POS, JSON.stringify(ui.pos));
       } catch (err) {
       }
-      if (!wasMoved) {
-        if (hitBadge) ctx.togglePanel();
-        else ctx.setActive(true);
-      }
+      if (!wasMoved) ctx.setActive(true);
     }
+    elFabRowPanel.addEventListener("click", (e) => {
+      e.stopPropagation();
+      ctx.togglePanel();
+    });
+    elFabRowRecord.addEventListener("click", (e) => {
+      e.stopPropagation();
+      ctx.toggleRecord();
+    });
     window.addEventListener("pointerdown", fabPointerDown, true);
     window.addEventListener("pointermove", fabPointerMove, true);
     window.addEventListener("pointerup", fabPointerUp, true);
@@ -4417,6 +4469,7 @@
           const next = gm.get(GM_FAB_SIZE, "small") === "small" ? "large" : "small";
           gm.set(GM_FAB_SIZE, next);
           ui.els.elFab.classList.toggle("large", next === "large");
+          ui.els.elFabStack.classList.toggle("large", next === "large");
           ui.toast(t("toast.fabSize", { size: next }));
         });
       } catch (e) {

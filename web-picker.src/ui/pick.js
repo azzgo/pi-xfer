@@ -82,7 +82,7 @@ export function initPick(ctx) {
     host.style.pointerEvents = 'none';
     elBar.style.display = on ? 'flex' : 'none';
     if (on) ctx.barDrag.clamp();          // 隐藏期间视口可能缩小过，先拉回可视区
-    els.elFab.style.display = on ? 'none' : 'block';
+    els.elFabStack.style.display = on ? 'none' : 'flex';
     document.body.style.cursor = on ? 'crosshair' : '';
     if (on) { frozen = true; ctx.closePanel(); renderGroupMarks(); }
     else {

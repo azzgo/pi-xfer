@@ -295,7 +295,7 @@ export function initBag(ctx) {
       toast(t('bag.delivered', { id: res.result && res.result.handoff_id ? res.result.handoff_id : '?' }));
       items = [];
       openPages.clear();
-      render();
+      closeDrawer();          // 发送成功即收起抽屉（与主面板发送后收起一致）
     } else {
       toast(t('send.failed', { detail: res.code + (res.message ? ' — ' + res.message : '') }));
     }

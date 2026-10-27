@@ -12,7 +12,7 @@ import { setHTML } from '../tt.js';
 
 export function initPanel(ctx) {
   const { els, toast } = ctx;
-  const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
+  const { elCnt, elPanel, elPlist, elPcount, elPclose, elPanelPick, elPanelRecord } = els;
 
   let panelOpen = false;
 
@@ -70,6 +70,9 @@ export function initPanel(ctx) {
   function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
   ctx.togglePanel = togglePanel;
   elPclose.addEventListener('click', closePanel);
+  // 面板里直接进入拾取 / 录制：拾取模式会自己收起面板（setActive 内部 closePanel）
+  elPanelPick.addEventListener('click', () => ctx.setActive(true));
+  elPanelRecord.addEventListener('click', () => ctx.toggleRecord());
   elPlist.addEventListener('change', (e) => {
     const t = e.target;
     if (!t || t.tagName !== 'TEXTAREA') return;

@@ -98,8 +98,27 @@ export function buildUI() {
       #recbar #recstop:hover { background: #dc2626; }
       #recbar #recdiscard { background: #1e293b; color: #94a3b8; }
       #recbar #recdiscard:hover { background: #334155; color: #e2e8f0; }
-      /* ---- fab ---- */
-      #fab { position: fixed; width: 36px; height: 36px; border-radius: 11px;
+      /* ---- fab（核心按钮 + 悬停扇出）---- */
+      /* 核心按钮只有一个动作：开始拾取。面板 / 录制收在悬停扇出的两行里——
+         之前角标与图标是两个热区但只有一个视觉主体，点击结果全靠猜。 */
+      #fabstack { position: fixed; width: 36px; height: 36px; z-index: 2147483647; pointer-events: auto;
+        display: flex; flex-direction: column-reverse; align-items: flex-end; }
+      #fabstack.large { width: 46px; height: 46px; }
+      #fabrows { position: absolute; bottom: calc(100% + 6px); right: 0; display: flex; flex-direction: column-reverse;
+        align-items: flex-end; gap: 6px; }
+      #fabrows .frow { display: flex; align-items: center; gap: 8px; opacity: 0; transform: translateY(6px) scale(.92);
+        transform-origin: bottom right; transition: opacity .16s ease, transform .18s cubic-bezier(.2,.9,.3,1.2);
+        pointer-events: none; }
+      #fabstack:hover #fabrows .frow { opacity: 1; transform: none; pointer-events: auto; }
+      #fabrows .flab { background: rgba(15,21,34,.96); color: #e2e8f0; font: 600 11.5px var(--wp-font);
+        padding: 5px 9px; border-radius: 7px; white-space: nowrap; box-shadow: 0 4px 12px rgba(10,14,25,.4); }
+      #fabrows .fbtn { width: 34px; height: 34px; border-radius: 11px; padding: 0; cursor: pointer;
+        background: linear-gradient(160deg, #1b2230, #12161f); border: 1px solid rgba(255,255,255,.12);
+        color: #fff; display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 6px 16px rgba(10,14,25,.4); }
+      #fabrows .fbtn:hover { background: rgba(79,140,255,.32); }
+      #fabrows .fbtn svg { width: 16px; height: 16px; }
+      #fab { position: relative; width: 36px; height: 36px; border-radius: 11px;
         border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, #1b2230, #12161f);
         color: #fff; padding: 0; outline: none; cursor: grab;
         box-shadow: 0 10px 26px rgba(10,14,25,.45), inset 0 1px 0 rgba(255,255,255,.09);
@@ -113,16 +132,15 @@ export function buildUI() {
       #fab.large { width: 46px; height: 46px; border-radius: 14px; }
       #fab.large svg { width: 20px; height: 20px; }
       #fab.large #dot { top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px; }
+      /* 角标只报数，不再是第二个可点热区 */
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
-        box-shadow: 0 0 0 2px #161a21; cursor: pointer; transition: background .2s, color .2s, filter .15s; }
+        box-shadow: 0 0 0 2px #161a21; pointer-events: none; transition: background .2s, color .2s; }
       #cnt.zero { background: #232a36; color: #7c8aa0; }
-      #cnt:hover { filter: brightness(1.18); }
       #dot { position: absolute; top: -3px; left: -3px; width: 9px; height: 9px; border-radius: 5px;
         background: #94a3b8; box-shadow: 0 0 0 2px #161a21; transition: background .2s; }
       #dot.connecting { background: var(--wp-amber); }
       #dot.on { background: var(--wp-green); box-shadow: 0 0 0 2px #161a21, 0 0 8px rgba(34,197,94,.8); }
-      /* ---- floating cards ---- */
       #card, #panel, #settings {
         background: #fff; border: 1px solid var(--wp-line); border-radius: var(--wp-radius);
         box-shadow: var(--wp-shadow); color: var(--wp-ink);
@@ -301,7 +319,7 @@ export function buildUI() {
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>${t('panel.title')}</b><span class="cnt2" id="pcount"></span><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t('bag.entry.title')}">${t('bag.entry')} ▾</button><button id="pclose" title="${t('panel.pclose.title')}">✕</button></div>
+      <div class="ph" id="ph"><b>${t('panel.title')}</b><span class="cnt2" id="pcount"></span><button id="panelpick" class="ghost" style="font-size:11px" title="${t('panel.pick.title')}">${t('panel.pick')}</button><button id="panelrecord" class="ghost" style="font-size:11px" title="${t('panel.record.title')}">${t('panel.record')}</button><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t('bag.entry.title')}">${t('bag.entry')} ▾</button><button id="pclose" title="${t('panel.pclose.title')}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
         <div class="lbl">${t('send.label')}</div>
@@ -329,13 +347,29 @@ export function buildUI() {
         </div>
       </div>
     </div>
-    <button id="fab" title="${t('fab.title')}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
-        <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-      </svg>
-      <span id="dot"></span>
-      <span id="cnt" class="zero" title="${t('recbadge.title')}">0</span>
-    </button>
+    <div id="fabstack">
+      <div id="fabrows">
+        <div class="frow">
+          <span class="flab">${t('fabrow.panel')}</span>
+          <button class="fbtn" id="frow-panel" title="${t('fabrow.panel.title')}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/></svg>
+          </button>
+        </div>
+        <div class="frow">
+          <span class="flab">${t('fabrow.record')}</span>
+          <button class="fbtn" id="frow-record" title="${t('fabrow.record.title')}">
+            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
+          </button>
+        </div>
+      </div>
+      <button id="fab" title="${t('fab.hint')}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
+          <circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+        </svg>
+        <span id="dot"></span>
+        <span id="cnt" class="zero" title="${t('cnt.title')}">0</span>
+      </button>
+    </div>
     <div id="toast"></div>
     <div id="settings">
       <b>${t('settings.title')}</b>
@@ -354,12 +388,13 @@ export function buildUI() {
   const $ = (id) => root.getElementById(id);
   const elHL = $('hl'), elGWrap = $('gwrap'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
         elGCLEAR = $('gclear'), elEscX = $('escx'),
-        elFab = $('fab'), elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
+        elFab = $('fab'), elFabStack = $('fabstack'), elFabRowPanel = $('frow-panel'), elFabRowRecord = $('frow-record'),
+        elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
         elRecBar = $('recbar'), elRecCount = $('reccount'), elRecBadge = $('recbadge'),
         elRecStop = $('recstop'), elRecDiscard = $('recdiscard'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
         elPanel = $('panel'), elPH = $('ph'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
-        elBagEntry = $('bagentry'),
+        elBagEntry = $('bagentry'), elPanelPick = $('panelpick'), elPanelRecord = $('panelrecord'),
         elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
         elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
@@ -367,7 +402,7 @@ export function buildUI() {
         elConn = $('connstate'), elConnText = $('conntext'), elSettings = $('settings'), elSendOffline = $('sendoffline'),
         elSUrl = $('sburl'), elSSave = $('ssave'), elSCancel = $('scancel'), elSProps = $('sprops'),
         elSAuto = $('sauto'), elSWrite = $('swrite');
-  if (gm.get(GM_FAB_SIZE, 'small') === 'large') elFab.classList.add('large');
+  if (gm.get(GM_FAB_SIZE, 'small') === 'large') { elFab.classList.add('large'); elFabStack.classList.add('large'); }
 
   let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
   try {
@@ -380,12 +415,12 @@ export function buildUI() {
     pos.y = Math.max(4, Math.min(window.innerHeight - 50, pos.y));
   }
   clampFabPos();
-  elFab.style.left = pos.x + 'px';
-  elFab.style.top = pos.y + 'px';
+  elFabStack.style.left = pos.x + 'px';
+  elFabStack.style.top = pos.y + 'px';
   window.addEventListener('resize', () => {
     clampFabPos();
-    elFab.style.left = pos.x + 'px';
-    elFab.style.top = pos.y + 'px';
+    elFabStack.style.left = pos.x + 'px';
+    elFabStack.style.top = pos.y + 'px';
     try { sessionStorage.setItem(KEY_POS, JSON.stringify(pos)); } catch (err) { /* position won't persist */ }
   }, true);
 
@@ -398,8 +433,8 @@ export function buildUI() {
 
   const els = { elHL, elGWrap, elBadge, elInfo, elBar, elGH, elGCLEAR, elEscX,
     elRecBar, elRecCount, elRecBadge, elRecStop, elRecDiscard,
-    elFab, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
-    elPanel, elPH, elPlist, elPcount, elPclose, elBagEntry, elPrompt, elTCombo, elTInput,
+    elFab, elFabStack, elFabRowPanel, elFabRowRecord, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
+    elPanel, elPH, elPlist, elPcount, elPclose, elBagEntry, elPanelPick, elPanelRecord, elPrompt, elTCombo, elTInput,
     elTDrop, elTRefresh, elSend, elClear, elSendGroup, elSendMore, elSendMenu,
     elCopyPrompt, elStage, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite,
     elSendOffline };
@@ -411,8 +446,8 @@ export function buildUI() {
     if (host.isConnected) return true;
     document.documentElement.appendChild(host);
     clampFabPos();
-    elFab.style.left = pos.x + 'px';
-    elFab.style.top = pos.y + 'px';
+    elFabStack.style.left = pos.x + 'px';
+    elFabStack.style.top = pos.y + 'px';
     return host.isConnected;
   }
   function observeHostRemoval() {

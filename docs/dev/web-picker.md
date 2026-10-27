@@ -165,9 +165,17 @@ corner.
 
 The fab's top-left dot is the broker status: grey = off, amber = connecting,
 green = connected. Its bottom-right badge is the marker count (picks + record);
-it stays visible as a muted `0` with nothing collected, and clicking it opens
-the note panel — that is the way to reach targets / reverse lookup / network /
-logs even when you have no marker to annotate.
+it stays visible as a muted `0` with nothing collected.
+
+The fab itself has exactly one action: click it to start picking. The other two
+actions live in a hover fan-out above it — **Picks** opens the note panel (that
+is the way to reach targets / reverse lookup / network / logs even when you have
+no marker to annotate) and **Record** starts/stops recording. The badge is a
+read-out, not a second hit target: an icon and a badge sharing one visual
+body made the click result a guess.
+
+The note panel carries the same two entries in its header (**⌖ Pick** and
+**● Record**), so picking and recording are reachable without the fab.
 
 > The script only ever talks to `127.0.0.1` (`@connect` header). Nothing is
 > sent anywhere until you explicitly connect the broker and click 发送.
@@ -284,7 +292,9 @@ several pages, then send the whole bag from any of them.
   The drawer lists the bag grouped by page (url+title accordion, each page
   header carrying its tabId) with its own prompt textarea, target combo and
   发送整袋 button. The note panel itself is untouched — the two paths stay
-  visually separate.
+  visually separate. A successful 发送整袋 closes the drawer, the same way a
+  successful send closes the note panel: the panel is a way to look at things,
+  not a place to sit after the handoff is gone.
 - **Lifecycle** — one default bag, in memory only (lost on broker restart;
   every entry carries provenance, restaging is cheap). `bag.submit` consumes
   the bag: it clears on success and is kept on failure (retry the submit).
