@@ -8,11 +8,11 @@
 import { loadBatch, saveBatch } from '../storage.js';
 import { escapeHtml } from '../dom-utils.js';
 import { t } from '../i18n.js';
-import { setHTML } from '../tt.js';
+import { setHTML, clearHTML } from '../tt.js';
 
 export function initPanel(ctx) {
   const { els, toast } = ctx;
-  const { elCnt, elPanel, elPlist, elPcount, elPclose, elPanelPick, elPanelRecord } = els;
+  const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
 
   let panelOpen = false;
 
@@ -39,11 +39,39 @@ export function initPanel(ctx) {
   function clearBatch() { saveBatch([]); refreshCount(); }
   ctx.clearBatch = clearBatch;
 
+  // 空态自己承载「拾取 / 录制」入口：面板空着的时候，人需要的正是「去采点东西」，
+  // 而不是两个和 Bag 挤在表头里的模式按钮。一旦有了标注，入口消失——列表本身就是
+  // 下一步该做的事。
+  function renderEmptyState() {
+    clearHTML(elPlist);
+    const box = document.createElement('div');
+    box.className = 'emptycta';
+    const lead = document.createElement('div');
+    lead.className = 'lead';
+    lead.textContent = t('panel.empty');
+    const row = document.createElement('div');
+    row.className = 'row';
+    const pick = document.createElement('button');
+    pick.className = 'pick';
+    pick.textContent = t('panel.pick');
+    pick.title = t('panel.pick.title');
+    pick.addEventListener('click', () => ctx.setActive(true));   // 拾取模式会自己收起面板
+    const rec = document.createElement('button');
+    rec.className = 'rec';
+    const recording = ctx.recState && ctx.recState.active;
+    rec.textContent = recording ? t('recstop') : t('panel.record');
+    rec.title = t('panel.record.title');
+    rec.addEventListener('click', () => ctx.toggleRecord());
+    row.append(pick, rec);
+    box.append(lead, row);
+    elPlist.appendChild(box);
+  }
+
   function renderPanel() {
     const b = loadBatch();
     const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : '';
     elPcount.textContent = (b.length || recHtml) ? t('count.items', { n: b.length + (recHtml ? 1 : 0) }) : '';
-    if (!b.length && !recHtml) { setHTML(elPlist, `<div class="empty">${t('panel.empty')}</div>`); return; }
+    if (!b.length && !recHtml) { renderEmptyState(); return; }
     setHTML(elPlist, recHtml + b.map((r, i) =>
       '<div class="item" data-i="' + i + '">' +
         '<div class="psel">' + escapeHtml(r.selector) + '</div>' +
@@ -70,9 +98,6 @@ export function initPanel(ctx) {
   function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
   ctx.togglePanel = togglePanel;
   elPclose.addEventListener('click', closePanel);
-  // 面板里直接进入拾取 / 录制：拾取模式会自己收起面板（setActive 内部 closePanel）
-  elPanelPick.addEventListener('click', () => ctx.setActive(true));
-  elPanelRecord.addEventListener('click', () => ctx.toggleRecord());
   elPlist.addEventListener('change', (e) => {
     const t = e.target;
     if (!t || t.tagName !== 'TEXTAREA') return;

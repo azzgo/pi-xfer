@@ -174,8 +174,11 @@ no marker to annotate) and **Record** starts/stops recording. The badge is a
 read-out, not a second hit target: an icon and a badge sharing one visual
 body made the click result a guess.
 
-The note panel carries the same two entries in its header (**⌖ Pick** and
-**● Record**), so picking and recording are reachable without the fab.
+When the note panel is empty it carries its own two entries (**⌖ Pick elements**
+and **● Record actions**) in place of the list. They disappear as soon as the
+panel has something in it — with picks on screen, the list *is* the next step,
+and a row of mode buttons next to **Bag ▾** in the header only muddled which
+row meant what.
 
 > The script only ever talks to `127.0.0.1` (`@connect` header). Nothing is
 > sent anywhere until you explicitly connect the broker and click 发送.

@@ -207,6 +207,15 @@ export function buildUI() {
       #plist::-webkit-scrollbar-thumb { background: #dde4ec; border-radius: 4px; }
       #plist::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
       #plist .empty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 12px; }
+      /* 空态自带的入口：面板空着的时候，「去采点东西」就是下一步 */
+      #plist .emptycta { text-align: center; padding: 24px 12px 22px; }
+      #plist .emptycta .lead { color: #94a3b8; font-size: 12px; margin-bottom: 14px; }
+      #plist .emptycta .row { display: flex; gap: 8px; justify-content: center; }
+      #plist .emptycta button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; }
+      #plist .emptycta button.pick { background: #f4f8ff; color: var(--wp-accent-deep); border: 1px solid #bfd4ff; }
+      #plist .emptycta button.pick:hover { background: #eaf1ff; }
+      #plist .emptycta button.rec { background: #fff7f7; color: #b91c1c; border: 1px solid #fecaca; }
+      #plist .emptycta button.rec:hover { background: #fef2f2; }
       #plist .item { border: 1px solid var(--wp-line); border-radius: 10px; padding: 9px; margin-bottom: 8px;
         background: #fff; transition: border-color .15s ease, box-shadow .15s ease; }
       #plist .item:hover { border-color: #c9d6ea; box-shadow: 0 2px 8px rgba(15,23,42,.06); }
@@ -319,7 +328,7 @@ export function buildUI() {
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>${t('panel.title')}</b><span class="cnt2" id="pcount"></span><button id="panelpick" class="ghost" style="font-size:11px" title="${t('panel.pick.title')}">${t('panel.pick')}</button><button id="panelrecord" class="ghost" style="font-size:11px" title="${t('panel.record.title')}">${t('panel.record')}</button><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t('bag.entry.title')}">${t('bag.entry')} ▾</button><button id="pclose" title="${t('panel.pclose.title')}">✕</button></div>
+      <div class="ph" id="ph"><b>${t('panel.title')}</b><span class="cnt2" id="pcount"></span><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t('bag.entry.title')}">${t('bag.entry')} ▾</button><button id="pclose" title="${t('panel.pclose.title')}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
         <div class="lbl">${t('send.label')}</div>
@@ -394,7 +403,7 @@ export function buildUI() {
         elRecStop = $('recstop'), elRecDiscard = $('recdiscard'),
         elTxt = $('txt'), elOk = $('ok'), elCancel = $('cancel'), elToast = $('toast'),
         elPanel = $('panel'), elPH = $('ph'), elPlist = $('plist'), elPcount = $('pcount'), elPclose = $('pclose'),
-        elBagEntry = $('bagentry'), elPanelPick = $('panelpick'), elPanelRecord = $('panelrecord'),
+        elBagEntry = $('bagentry'),
         elPrompt = $('prompt'), elTCombo = $('tcombo'), elTInput = $('tinput'), elTDrop = $('tdrop'),
         elTRefresh = $('trefresh'),
         elSend = $('sendbtn'), elClear = $('clearbtn'),
@@ -434,7 +443,7 @@ export function buildUI() {
   const els = { elHL, elGWrap, elBadge, elInfo, elBar, elGH, elGCLEAR, elEscX,
     elRecBar, elRecCount, elRecBadge, elRecStop, elRecDiscard,
     elFab, elFabStack, elFabRowPanel, elFabRowRecord, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
-    elPanel, elPH, elPlist, elPcount, elPclose, elBagEntry, elPanelPick, elPanelRecord, elPrompt, elTCombo, elTInput,
+    elPanel, elPH, elPlist, elPcount, elPclose, elBagEntry, elPrompt, elTCombo, elTInput,
     elTDrop, elTRefresh, elSend, elClear, elSendGroup, elSendMore, elSendMenu,
     elCopyPrompt, elStage, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite,
     elSendOffline };

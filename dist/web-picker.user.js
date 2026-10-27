@@ -2,7 +2,7 @@
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
 // @version      1.15.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.15.0：fab 只保留一个动作（点击 = 开始拾取），标注面板与录制操作收进悬停扇出——角标不再兼职第二个热区；备注面板表头新增「⌖ 拾取」「● 录制」入口；暂存袋发送成功后抽屉自动收起；v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.15.0：fab 只保留一个动作（点击 = 开始拾取），标注面板与录制操作收进悬停扇出——角标不再兼职第二个热区；备注面板空态自带「⌖ 拾取元素」「● 录制操作」入口，有标注后自动消失；暂存袋发送成功后抽屉自动收起；v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -1085,9 +1085,9 @@
     "fabrow.record": { en: "Record", zh: "录制操作" },
     "fabrow.record.title": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制（⇧⌥R）" },
     "cnt.title": { en: "Picked elements / record", zh: "已选元素 / 录制" },
-    "panel.pick": { en: "⌖ Pick", zh: "⌖ 拾取" },
+    "panel.pick": { en: "⌖ Pick elements", zh: "⌖ 拾取元素" },
     "panel.pick.title": { en: "Start picking elements (⇧⌥P)", zh: "开始拾取元素（⇧⌥P）" },
-    "panel.record": { en: "● Record", zh: "● 录制" },
+    "panel.record": { en: "● Record actions", zh: "● 录制操作" },
     "panel.record.title": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制（⇧⌥R）" },
     "recbadge": { en: "panel", zh: "面板" },
     "recstop": { en: "■ Stop", zh: "■ 停止" },
@@ -2092,6 +2092,15 @@
       #plist::-webkit-scrollbar-thumb { background: #dde4ec; border-radius: 4px; }
       #plist::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
       #plist .empty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 12px; }
+      /* 空态自带的入口：面板空着的时候，「去采点东西」就是下一步 */
+      #plist .emptycta { text-align: center; padding: 24px 12px 22px; }
+      #plist .emptycta .lead { color: #94a3b8; font-size: 12px; margin-bottom: 14px; }
+      #plist .emptycta .row { display: flex; gap: 8px; justify-content: center; }
+      #plist .emptycta button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; }
+      #plist .emptycta button.pick { background: #f4f8ff; color: var(--wp-accent-deep); border: 1px solid #bfd4ff; }
+      #plist .emptycta button.pick:hover { background: #eaf1ff; }
+      #plist .emptycta button.rec { background: #fff7f7; color: #b91c1c; border: 1px solid #fecaca; }
+      #plist .emptycta button.rec:hover { background: #fef2f2; }
       #plist .item { border: 1px solid var(--wp-line); border-radius: 10px; padding: 9px; margin-bottom: 8px;
         background: #fff; transition: border-color .15s ease, box-shadow .15s ease; }
       #plist .item:hover { border-color: #c9d6ea; box-shadow: 0 2px 8px rgba(15,23,42,.06); }
@@ -2204,7 +2213,7 @@
       </div>
     </div>
     <div id="panel">
-      <div class="ph" id="ph"><b>${t("panel.title")}</b><span class="cnt2" id="pcount"></span><button id="panelpick" class="ghost" style="font-size:11px" title="${t("panel.pick.title")}">${t("panel.pick")}</button><button id="panelrecord" class="ghost" style="font-size:11px" title="${t("panel.record.title")}">${t("panel.record")}</button><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t("bag.entry.title")}">${t("bag.entry")} ▾</button><button id="pclose" title="${t("panel.pclose.title")}">✕</button></div>
+      <div class="ph" id="ph"><b>${t("panel.title")}</b><span class="cnt2" id="pcount"></span><button id="bagentry" class="ghost" style="display:none;font-size:11px" title="${t("bag.entry.title")}">${t("bag.entry")} ▾</button><button id="pclose" title="${t("panel.pclose.title")}">✕</button></div>
       <div id="plist"></div>
       <div id="sendbox">
         <div class="lbl">${t("send.label")}</div>
@@ -2270,7 +2279,7 @@
     </div>
   `);
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elFabStack = $("fabstack"), elFabRowPanel = $("frow-panel"), elFabRowRecord = $("frow-record"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPanelPick = $("panelpick"), elPanelRecord = $("panelrecord"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elFabStack = $("fabstack"), elFabRowPanel = $("frow-panel"), elFabRowRecord = $("frow-record"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
     if (gm.get(GM_FAB_SIZE, "small") === "large") {
       elFab.classList.add("large");
       elFabStack.classList.add("large");
@@ -2338,8 +2347,6 @@
       elPcount,
       elPclose,
       elBagEntry,
-      elPanelPick,
-      elPanelRecord,
       elPrompt,
       elTCombo,
       elTInput,
@@ -2387,7 +2394,7 @@
   // web-picker.src/ui/panel.js
   function initPanel(ctx) {
     const { els, toast } = ctx;
-    const { elCnt, elPanel, elPlist, elPcount, elPclose, elPanelPick, elPanelRecord } = els;
+    const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
     let panelOpen = false;
     function refreshCount() {
       const n = loadBatch().length + (ctx.getRecord && ctx.getRecord() ? 1 : 0);
@@ -2410,12 +2417,36 @@
       refreshCount();
     }
     ctx.clearBatch = clearBatch;
+    function renderEmptyState() {
+      clearHTML(elPlist);
+      const box = document.createElement("div");
+      box.className = "emptycta";
+      const lead = document.createElement("div");
+      lead.className = "lead";
+      lead.textContent = t("panel.empty");
+      const row = document.createElement("div");
+      row.className = "row";
+      const pick = document.createElement("button");
+      pick.className = "pick";
+      pick.textContent = t("panel.pick");
+      pick.title = t("panel.pick.title");
+      pick.addEventListener("click", () => ctx.setActive(true));
+      const rec = document.createElement("button");
+      rec.className = "rec";
+      const recording = ctx.recState && ctx.recState.active;
+      rec.textContent = recording ? t("recstop") : t("panel.record");
+      rec.title = t("panel.record.title");
+      rec.addEventListener("click", () => ctx.toggleRecord());
+      row.append(pick, rec);
+      box.append(lead, row);
+      elPlist.appendChild(box);
+    }
     function renderPanel() {
       const b = loadBatch();
       const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : "";
       elPcount.textContent = b.length || recHtml ? t("count.items", { n: b.length + (recHtml ? 1 : 0) }) : "";
       if (!b.length && !recHtml) {
-        setHTML(elPlist, `<div class="empty">${t("panel.empty")}</div>`);
+        renderEmptyState();
         return;
       }
       setHTML(elPlist, recHtml + b.map(
@@ -2444,8 +2475,6 @@
     }
     ctx.togglePanel = togglePanel;
     elPclose.addEventListener("click", closePanel);
-    elPanelPick.addEventListener("click", () => ctx.setActive(true));
-    elPanelRecord.addEventListener("click", () => ctx.toggleRecord());
     elPlist.addEventListener("change", (e) => {
       const t2 = e.target;
       if (!t2 || t2.tagName !== "TEXTAREA") return;
