@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { renderHandoffDoc } from "./handoff-doc.ts";
+import { renderBagHandoffDoc, renderHandoffDoc } from "./handoff-doc.ts";
 import type { HandoffPick, RenderHandoffDocInput } from "./handoff-doc.ts";
 
 const PICK_WITH_SOURCE: HandoffPick = {
@@ -48,6 +48,10 @@ function input(overrides: Partial<RenderHandoffDocInput> = {}): RenderHandoffDoc
 const GOLDEN = `# Web annotation handoff
 
 kind: task
+
+> The page this handoff came from is still open. Query it through the broker's page-tool
+> channel — see the "Follow-up channel" section below. Do not open a browser for it:
+> a browser hands you the whole DOM, page-tool hands you the elements you name. Its tabId is in the Page section below (tab-mvn0alj273ujp).
 
 ## Request
 
@@ -112,6 +116,34 @@ describe("renderHandoffDoc", () => {
     for (let i = 1; i < offsets.length; i++) {
       assert.ok(offsets[i] > offsets[i - 1], `section ${i} must come after ${i - 1}: ${offsets.join(", ")}`);
     }
+  });
+
+  it("names the page-tool channel at the top, before the request", () => {
+    const doc = renderHandoffDoc(input());
+    const pointer = doc.indexOf("page-tool");
+    assert.ok(pointer > 0, "the doc names the channel");
+    assert.ok(pointer < doc.indexOf("## Request"), "the channel is named before the request");
+    assert.ok(doc.includes("Do not open a browser"), "the pointer says what NOT to do");
+    assert.ok(
+      doc.includes("Its tabId is in the Page section below (tab-mvn0alj273ujp)"),
+      "the pointer names the tabId instead of leaving the agent to guess",
+    );
+  });
+
+  it("keeps the pointer but omits a tabId it does not have", () => {
+    const doc = renderHandoffDoc(input({ page: { url: "https://example.com/app", title: "Example App", ts: 1725148800000 } }));
+    assert.ok(doc.includes("page-tool"));
+    assert.ok(!doc.includes("Its tabId is in the Page section below"), "no invented tabId");
+  });
+
+  it("points at the channel in a staging-bag doc too", () => {
+    const doc = renderBagHandoffDoc({
+      msgId: "m2",
+      prompt: "look at these",
+      items: [{ tabId: "tab-1", origin: "https://example.com", url: "https://example.com", title: "Example", pick: PICK_WITH_SOURCE, ts: 1 }],
+      fromTarget: "alpha",
+    });
+    assert.ok(doc.indexOf("page-tool") < doc.indexOf("## Request"));
   });
 
   it("preserves a multiline prompt verbatim, including blank lines and trailing spaces", () => {

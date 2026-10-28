@@ -171,11 +171,32 @@ pid），daemon 会告警并回退到临时端口——`/xfer broker start` 会 
    的备注作答 / 解释它的渲染），在下拉里选择目标会话（⟳ 刷新），发送 →
    toast 显示 `handoff_id`，目标会话收到一份 `📨 [Xfer from web-picker]` handoff。
 4. **page-tool 往返** — tab 已连接的情况下，从任意 shell：
-   `node pi/agent/extensions/xfer/daemon/broker-main.ts page-tool <session-name> page.info`
+   `node pi/agent/extensions/xfer/daemon/broker-main.ts page-tool <session-name> page.info --tab <tabId>`
    → broker 打印结果 JSON（`url`、`title`、`viewport`、……）。试试
    `dom.query '{"selector":"a","maxCount":3}'` 或 `console.logs`。broker 日志显示
    `[page.request r… ] → tab <id>: …` 和 `[page.response r…] ok=true`。
    超时（默认 30s，`--timeout-ms` 可覆盖）或没有已连接的 tab 会以 1 退出，错误打到 stderr。
+
+## 接收方 agent 的视角
+
+收到 handoff 的 agent，必须知道 page-tool 通道的存在。否则它的默认动作是
+自己开浏览器——那会给它整片 DOM，而不是被拾取的那些元素。
+
+通道出现在三个地方，agent 无论从哪条路看都会遇见它：
+
+- **投递消息把它放在最前面**：页面还开着，查它就该走 `page-tool`。示例命令
+  指向随包发布的 `dist/broker.cjs`。
+- **handoff 文档开头**就指向它的 `Follow-up channel` 一节，那里列着全部
+  op 和该 tab 的确切命令。
+- **CLI 会自述**：
+
+```bash
+node dist/broker.cjs page-tool --help   # the page-tool op table
+node dist/broker.cjs --help             # the broker's two modes
+```
+
+`--tab` 是必填的（ADR-0022）：tabId 在文档的 `## Page` 一节，猜出来的 id 会
+以 `tab_unreachable` 失败。
 
 ## 站点兼容性（v1.15）
 

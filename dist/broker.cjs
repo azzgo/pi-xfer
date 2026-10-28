@@ -200,6 +200,15 @@ function formatHandoffKind(kind) {
 }
 
 // src/core/handoff-doc.ts
+function channelPointer(tabId) {
+  const tab = tabId?.trim() ? ` Its tabId is in the Page section below (${tabId.trim()}).` : "";
+  return [
+    "> The page this handoff came from is still open. Query it through the broker's page-tool",
+    '> channel — see the "Follow-up channel" section below. Do not open a browser for it:',
+    `> a browser hands you the whole DOM, page-tool hands you the elements you name.${tab}`,
+    ""
+  ];
+}
 function followUpSection(fromTarget, brokerCliPath2, tabId) {
   const target = fromTarget?.trim() ? fromTarget.trim() : "<session-socket>";
   const cli = brokerCliPath2?.trim() ? brokerCliPath2.trim() : "daemon/broker-main.ts";
@@ -295,6 +304,7 @@ function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarget, brok
     // follow-up section below, not a reverse xfer — the sender is a browser.
     formatHandoffKind("task"),
     "",
+    ...channelPointer(page.tabId),
     "## Request",
     "",
     prompt,
@@ -336,6 +346,7 @@ function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCliPath: 
     "",
     formatHandoffKind("task"),
     "",
+    ...channelPointer(void 0),
     "## Request",
     "",
     prompt,
@@ -1731,7 +1742,53 @@ function httpPostJson(port, pathname, body) {
     request2.end(payload);
   });
 }
+var BROKER_HELP = [
+  "usage: node broker.cjs [--port <port>] [--xfer-dir <dir>]   — run the web-picker broker",
+  "       node broker.cjs page-tool <target> <op> [paramsJSON] --tab <tabId> [--timeout-ms <ms>]",
+  "",
+  "The broker serves the web picker userscript and owns the page-tool channel:",
+  "it queries the page a handoff came from, so an agent never has to open a browser.",
+  "",
+  "  node broker.cjs page-tool --help    — the page-tool op table",
+  "",
+  "Read-only ops: page.info · dom.query · dom.html · console.logs · network.log ·",
+  "                 framework.inspect · page.wait",
+  "Write ops (need page-write authorization): dom.click · dom.setValue",
+  "",
+  "The page-tool channel is described in every web-picker handoff, under",
+  '"## Follow-up channel" — that section carries the exact command and the tabId.'
+].join("\n");
+var PAGE_TOOL_HELP = [
+  "usage: node broker.cjs page-tool <target> <op> [paramsJSON] --tab <tabId> [--timeout-ms <ms>]",
+  "",
+  "Query the page a web-picker handoff came from — no browser, no full DOM dump.",
+  "Every call names the tab it belongs to (--tab): the tabId is in the handoff's",
+  '"## Page" section or in the submit ack. Never guess one.',
+  "",
+  "ops (read):",
+  "  page.info                                     page title + url",
+  "  dom.query {selector, maxCount?, styleProps?}  matched elements",
+  "  dom.html {selector?, maxLength?, maxDepth?}    markup of a subtree",
+  "  console.logs {lastN?, sinceTs?, level?}       captured console entries",
+  "  network.log {lastN?, urlFilter?}              captured requests",
+  "  framework.inspect {selector, props?, maxDepth?} framework props of a node",
+  "  page.wait {selector}                          wait for a selector to appear",
+  "",
+  "ops (write — need page-write authorization):",
+  "  dom.click {selector}                          click an element",
+  "  dom.setValue {selector, value}                set an input's value",
+  "",
+  "example:",
+  `  node broker.cjs page-tool alpha dom.query '{"selector":"button.primary","maxCount":5}' --tab <tabId>`,
+  "",
+  "errors: missing_tab (no --tab) · tab_unreachable (page closed — stop, ask the human)",
+  "        timeout (retry up to 3 times) · denied_op (write without authorization)"
+].join("\n");
 async function runPageToolCommand(args) {
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+    console.log(PAGE_TOOL_HELP);
+    process.exit(0);
+  }
   const positional = [];
   let timeoutMs;
   let tabId;
@@ -1862,6 +1919,10 @@ async function main() {
   if (args[0] === "page-tool") {
     await runPageToolCommand(args.slice(1));
     return;
+  }
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+    console.log(BROKER_HELP);
+    process.exit(0);
   }
   const { port, xferDir } = parseArgs(args);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {

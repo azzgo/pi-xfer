@@ -244,6 +244,24 @@ describe("inbound: ssh Link is bidirectional by construction", () => {
   });
 });
 
+describe("inbound: the web-picker delivery names the page-tool channel first", () => {
+  it("puts the channel before the request, with a runnable command", () => {
+    const content = deliver({
+      type: "xfer-notify",
+      msg_id: "w1",
+      from: FROM_WEB_PICKER,
+      file: doc(),
+      summary: "collect the notes",
+    });
+    const channel = content.indexOf("page-tool");
+    assert.ok(channel > 0, "the delivery names the channel");
+    assert.ok(channel < content.indexOf("**Request**"), "the channel comes before the request");
+    assert.match(content, /Do not open a browser/i);
+    assert.match(content, /dist\/broker\.cjs/, "the example command points at the shipped bundle");
+    assert.match(content, /--tab <tabId>/);
+  });
+});
+
 describe("inbound: document integrity against the sender's hash", () => {
   const body = "# Handoff\n\npayload\n";
   const sha = (t: string) => createHash("sha256").update(t, "utf-8").digest("hex");

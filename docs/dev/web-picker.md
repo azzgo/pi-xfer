@@ -214,12 +214,35 @@ oracle is needed.
    the toast shows the `handoff_id` and the target session receives a
    `📨 [Xfer from web-picker]` handoff.
 4. **Page-tool round trip** — with the tab connected, from any shell:
-   `node pi/agent/extensions/xfer/daemon/broker-main.ts page-tool <session-name> page.info`
+   `node pi/agent/extensions/xfer/daemon/broker-main.ts page-tool <session-name> page.info --tab <tabId>`
    → the broker prints the result JSON (`url`, `title`, `viewport`, …). Try
    `dom.query '{"selector":"a","maxCount":3}'` or `console.logs`. The broker log
    shows `[page.request r… ] → tab <id>: …` and `[page.response r…] ok=true`.
    A timeout (default 30s, `--timeout-ms` override) or no connected tabs exits 1
    with the error on stderr.
+
+## The receiving agent's view
+
+The agent that receives the handoff is the one that has to know a page-tool
+channel exists. Without that, its default move is to open a browser — which
+hands it the whole DOM instead of the elements that were picked.
+
+Three places carry the channel, so the agent meets it whichever way it looks:
+
+- **The delivery message** leads with it: the page is still open, and
+  `page-tool` is the way to query it. The example command points at the
+  shipped `dist/broker.cjs`.
+- **The handoff doc** opens with a pointer to its `Follow-up channel`
+  section, which lists every op and the exact command for that tab.
+- **The CLI describes itself:**
+
+```bash
+node dist/broker.cjs page-tool --help   # the page-tool op table
+node dist/broker.cjs --help             # the broker's two modes
+```
+
+`--tab` is mandatory (ADR-0022): the tabId is in the doc's `## Page` section,
+and a guessed id fails as `tab_unreachable`.
 
 ## Site compatibility (v1.15)
 

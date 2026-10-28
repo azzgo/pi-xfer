@@ -279,6 +279,20 @@ async function runCli(xferDir: string, args: string[]): Promise<CliResult> {
   return { code, stdout, stderr };
 }
 
+describe("page-tool self-description", () => {
+  it("prints the op table instead of failing on a missing target", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xfer-page-tool-help-"));
+    const result = await runCli(dir, ["--help"]);
+    assert.equal(result.code, 0, "the help path exits 0");
+    assert.match(result.stdout, /dom\.query/);
+    assert.match(result.stdout, /page\.info/);
+    assert.match(result.stdout, /--tab/);
+    assert.match(result.stdout, /tab_unreachable/);
+    assert.match(result.stdout, /dom\.click/);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 // ---------- HTTP helper (test-side POST /page-tool) ----------
 
 function httpPost(port: number, pathname: string, body: unknown | string): Promise<{ status: number; data: Record<string, unknown> }> {

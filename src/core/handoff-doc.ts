@@ -121,6 +121,25 @@ export interface RenderHandoffDocInput {
 }
 
 /**
+ * The pointer at the very top of a handoff doc.
+ *
+ * The receiving agent meets the document before it knows a page-tool channel
+ * exists, and its default move is to open a browser — which hands it the whole
+ * DOM instead of the elements it was asked about. The pointer names the
+ * channel before the agent decides anything, so the doc's own follow-up
+ * section is found without the human having to mention it.
+ */
+function channelPointer(tabId: string | undefined): string[] {
+  const tab = tabId?.trim() ? ` Its tabId is in the Page section below (${tabId.trim()}).` : "";
+  return [
+    "> The page this handoff came from is still open. Query it through the broker's page-tool",
+    "> channel — see the \"Follow-up channel\" section below. Do not open a browser for it:",
+    `> a browser hands you the whole DOM, page-tool hands you the elements you name.${tab}`,
+    "",
+  ];
+}
+
+/**
  * Fixed follow-up channel section (Wayfinder 009 decision: doc-embedded prompt
  * section, not a skill). Kept ≤10 lines — the bloat criterion for spinning it
  * into a skill stays in force.
@@ -235,6 +254,7 @@ export function renderHandoffDoc({ msgId, prompt, page, picks, record, fromTarge
     // follow-up section below, not a reverse xfer — the sender is a browser.
     formatHandoffKind("task"),
     "",
+    ...channelPointer(page.tabId),
     "## Request",
     "",
     prompt,
@@ -300,6 +320,7 @@ export function renderBagHandoffDoc({ msgId, prompt, items, fromTarget, brokerCl
     "",
     formatHandoffKind("task"),
     "",
+    ...channelPointer(undefined),
     "## Request",
     "",
     prompt,

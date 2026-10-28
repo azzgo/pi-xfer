@@ -124,7 +124,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       "  /xfer desc [<text>]     — set or clear this node's description (no text clears; synced to mesh when online)\n" +
       "  /xfer board <list|new|read|write|del|clean|open> — async collaboration board\n" +
       "  /xfer gc                 — reap zombie peer sockets (dead pid / no listener)\n" +
-      "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle\n" +
+      "  /xfer broker <start|status|stop|logs> — broker daemon lifecycle (owns the page-tool channel)\n" +
       "  /xfer admin [stop]       — local web console (idempotent start + open URL)\n" +
       "  /xfer doctor             — self-check the install (sockets / peers / broker / admin / mesh)",
 
@@ -284,7 +284,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer name [<name>]      — show or set name\n" +
           "   /xfer desc [<text>]     — set or clear this node's description (no text clears; synced to mesh when online)\n" +
           "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
-          "   /xfer broker start|status|stop|logs — broker daemon lifecycle\n" +
+          "   /xfer broker start|status|stop|logs — broker daemon lifecycle (owns the page-tool channel)\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
           "   /xfer mesh [<status|up|down|list|setup|name> <request>] — mesh transport\n" +
           "   /xfer ssh in <host> [name...] | list <host> | status | down — ssh Link (bidirectional)\n" +
@@ -529,7 +529,11 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
       if (cmd === "broker") {
         const sub = parts[1];
         if (sub !== "start" && sub !== "status" && sub !== "stop" && sub !== "logs") {
-          ctx.ui.notify("Usage: /xfer broker <start|status|stop|logs> — start accepts --port N (0 = ephemeral port)", "error");
+          ctx.ui.notify(
+            "Usage: /xfer broker <start|status|stop|logs> — start accepts --port N (0 = ephemeral port)\n" +
+            "The broker also owns the page-tool channel: `node <broker CLI> page-tool --help` prints the op table.",
+            "error",
+          );
           return;
         }
         if (sub === "start") {

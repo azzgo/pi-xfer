@@ -1133,6 +1133,53 @@ function httpPostJson(port: number, pathname: string, body: unknown): Promise<{ 
   });
 }
 
+
+/** `broker.cjs --help` — the daemon's self-description, page-tool included. */
+const BROKER_HELP = [
+  "usage: node broker.cjs [--port <port>] [--xfer-dir <dir>]   — run the web-picker broker",
+  "       node broker.cjs page-tool <target> <op> [paramsJSON] --tab <tabId> [--timeout-ms <ms>]",
+  "",
+  "The broker serves the web picker userscript and owns the page-tool channel:",
+  "it queries the page a handoff came from, so an agent never has to open a browser.",
+  "",
+  "  node broker.cjs page-tool --help    — the page-tool op table",
+  "",
+  "Read-only ops: page.info · dom.query · dom.html · console.logs · network.log ·",
+  "                 framework.inspect · page.wait",
+  "Write ops (need page-write authorization): dom.click · dom.setValue",
+  "",
+  "The page-tool channel is described in every web-picker handoff, under",
+  "\"## Follow-up channel\" — that section carries the exact command and the tabId.",
+].join("\n");
+
+/** `page-tool --help` — the page-tool channel's self-description. */
+const PAGE_TOOL_HELP = [
+  "usage: node broker.cjs page-tool <target> <op> [paramsJSON] --tab <tabId> [--timeout-ms <ms>]",
+  "",
+  "Query the page a web-picker handoff came from — no browser, no full DOM dump.",
+  "Every call names the tab it belongs to (--tab): the tabId is in the handoff's",
+  "\"## Page\" section or in the submit ack. Never guess one.",
+  "",
+  "ops (read):",
+  "  page.info                                     page title + url",
+  "  dom.query {selector, maxCount?, styleProps?}  matched elements",
+  "  dom.html {selector?, maxLength?, maxDepth?}    markup of a subtree",
+  "  console.logs {lastN?, sinceTs?, level?}       captured console entries",
+  "  network.log {lastN?, urlFilter?}              captured requests",
+  "  framework.inspect {selector, props?, maxDepth?} framework props of a node",
+  "  page.wait {selector}                          wait for a selector to appear",
+  "",
+  "ops (write — need page-write authorization):",
+  "  dom.click {selector}                          click an element",
+  "  dom.setValue {selector, value}                set an input's value",
+  "",
+  "example:",
+  "  node broker.cjs page-tool alpha dom.query '{\"selector\":\"button.primary\",\"maxCount\":5}' --tab <tabId>",
+  "",
+  "errors: missing_tab (no --tab) · tab_unreachable (page closed — stop, ask the human)",
+  "        timeout (retry up to 3 times) · denied_op (write without authorization)",
+].join("\n");
+
 /**
  * `node daemon/broker-main.ts page-tool <target> <op> [paramsJSON] --tab <id> [--timeout-ms <ms>]` —
  * reads broker.json (port) from the daemon's xfer dir, POSTs /page-tool, waits
@@ -1141,6 +1188,12 @@ function httpPostJson(port: number, pathname: string, body: unknown): Promise<{ 
  * ADR-0022: --tab is mandatory — the tabId from the handoff/submit ack.
  */
 async function runPageToolCommand(args: string[]): Promise<void> {
+  // The channel states itself: an agent that never saw the docs can ask the
+  // CLI what it can do, instead of opening a browser.
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+    console.log(PAGE_TOOL_HELP);
+    process.exit(0);
+  }
   // Flags may appear anywhere in argv; --xfer-dir is re-read via parseArgs
   // (same resolution as the daemon), so here we only skip it when collecting
   // the positionals <target> <op> [paramsJSON].
@@ -1313,6 +1366,12 @@ export async function main(): Promise<void> {
   if (args[0] === "page-tool") {
     await runPageToolCommand(args.slice(1));
     return;
+  }
+  // The CLI describes itself: an agent that never met the docs can ask what
+  // it can do instead of reaching for a browser.
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+    console.log(BROKER_HELP);
+    process.exit(0);
   }
   const { port, xferDir } = parseArgs(args);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
