@@ -965,16 +965,65 @@
       }
       return { selector, framework, withProps, depth: chain.length, chain };
     }
+    function styleOf(el) {
+      try {
+        return typeof getComputedStyle === "function" ? getComputedStyle(el) : null;
+      } catch (err) {
+        return null;
+      }
+    }
+    function elVisible(el) {
+      const r = el.getBoundingClientRect();
+      if (!(r.width || r.height)) return false;
+      const cs = styleOf(el);
+      return !cs || cs.visibility !== "hidden" && cs.display !== "none";
+    }
+    const SHADOW_SCAN_LIMIT = 3e3;
+    function insideShadow(selector) {
+      let visited = 0;
+      const walk = (root) => {
+        for (const el of root.querySelectorAll("*")) {
+          if (++visited > SHADOW_SCAN_LIMIT) return false;
+          if (el.shadowRoot && (el.shadowRoot.querySelector(selector) || walk(el.shadowRoot))) return true;
+        }
+        return false;
+      };
+      try {
+        return walk(doc);
+      } catch (err) {
+        return false;
+      }
+    }
+    function noMatch(op, selector) {
+      const shadow = insideShadow(selector) ? " — a matching node exists inside a shadow root, which page tools cannot reach (ask a human or use the recorded pick instead)" : "";
+      throw new Error(op + ": no element matches " + selector + shadow);
+    }
+    function assertClickable(el, selector) {
+      if (el.disabled) throw new Error("dom.click: element is disabled (" + selector + ")");
+      if (!elVisible(el)) throw new Error("dom.click: element is not visible (" + selector + ") — wait for it to render (page.wait) or check the page state");
+      try {
+        if (el.scrollIntoView) el.scrollIntoView({ block: "center", inline: "center" });
+      } catch (err) {
+      }
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const hit = typeof doc.elementFromPoint === "function" ? doc.elementFromPoint(cx, cy) : el;
+      if (hit && hit !== el && !(el.contains && el.contains(hit))) {
+        const tag = hit.tagName ? hit.tagName.toLowerCase() + (hit.id ? "#" + hit.id : "") : "unknown";
+        throw new Error("dom.click: click point (" + Math.round(cx) + "," + Math.round(cy) + ") is blocked by " + tag + " — dismiss or close the overlay first (inspect with dom.query)");
+      }
+      return { clientX: cx, clientY: cy };
+    }
     function toolDomClick(params) {
       const el = findOutside(params.selector);
-      if (!el) throw new Error("dom.click: no element matches " + params.selector);
-      const r = el.getBoundingClientRect();
+      if (!el) noMatch("dom.click", params.selector);
+      const at = assertClickable(el, params.selector);
       const opts = {
         bubbles: true,
         cancelable: true,
         view: window,
-        clientX: r.left + r.width / 2,
-        clientY: r.top + r.height / 2,
+        clientX: at.clientX,
+        clientY: at.clientY,
         button: 0
       };
       for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
@@ -986,11 +1035,21 @@
         }
       }
       el.click();
-      return { selector: cssPath(el), clicked: true, tagName: el.tagName.toLowerCase(), disabled: !!el.disabled };
+      const result = { selector: cssPath(el), clicked: true, tagName: el.tagName.toLowerCase(), disabled: false };
+      const expect = params.expect && typeof params.expect === "object" ? params.expect : null;
+      if (expect && typeof expect.selector === "string" && expect.selector) {
+        const wantPresent = expect.present === true;
+        const got = !!doc.querySelector(expect.selector);
+        result.expect = { selector: expect.selector, present: got };
+        if (got !== wantPresent) {
+          throw new Error("dom.click: expect failed — " + expect.selector + " is " + (got ? "still present" : "absent") + " after click (the click likely had no effect)");
+        }
+      }
+      return result;
     }
     function toolDomSetValue(params) {
       const el = findOutside(params.selector);
-      if (!el) throw new Error("dom.setValue: no element matches " + params.selector);
+      if (!el) noMatch("dom.setValue", params.selector);
       if (!("value" in el)) throw new Error("dom.setValue: element has no value property (" + el.tagName.toLowerCase() + ")");
       const value = params.value === void 0 || params.value === null ? "" : String(params.value);
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
@@ -1000,11 +1059,28 @@
       el.dispatchEvent(new Event("change", { bubbles: true }));
       return { selector: cssPath(el), value, tagName: el.tagName.toLowerCase() };
     }
-    function toolPageWait(params) {
+    function elMatches(selector, state) {
+      const el = doc.querySelector(selector);
+      if (!el) return false;
+      if (state === "attached") return true;
+      return elVisible(el) ? state !== "hidden" : state === "hidden";
+    }
+    async function toolPageWait(params) {
       const selector = typeof params.selector === "string" ? params.selector : "";
       if (!selector) throw new Error("page.wait: params.selector (CSS) is required");
-      if (doc.querySelector(selector)) return { selector, found: true, waitedMs: 0 };
-      throw new Error("page.wait: no element matches " + selector + " yet — retry shortly (e.g. every 1-2s, ≤ retry budget)");
+      const state = params.state === "hidden" || params.state === "attached" ? params.state : "visible";
+      const timeoutMs = Math.min(3e4, Math.max(0, Number(params.timeoutMs) || 0));
+      const pollMs = Math.min(2e3, Math.max(16, Number(params.pollMs) || 100));
+      const start = Date.now();
+      if (elMatches(selector, state)) return { selector, state, satisfied: true, waitedMs: 0 };
+      if (!timeoutMs) {
+        throw new Error("page.wait: no element matches " + selector + " yet — retry shortly or pass timeoutMs to poll on the page side");
+      }
+      while (Date.now() - start < timeoutMs) {
+        await new Promise((r) => setTimeout(r, pollMs));
+        if (elMatches(selector, state)) return { selector, state, satisfied: true, waitedMs: Date.now() - start };
+      }
+      return { selector, state, satisfied: false, waitedMs: Date.now() - start };
     }
     const PAGE_TOOLS = {
       [PAGE_OPS.INFO]: toolPageInfo,
@@ -1033,20 +1109,28 @@
         send(f.id, false, "denied_op: " + tool.op + " requires page-write authorization for " + location.origin + " (enable it in the picker settings modal)");
         return;
       }
-      let text;
+      let result;
+      const params = tool.params && typeof tool.params === "object" && !Array.isArray(tool.params) ? tool.params : {};
+      debugLog2("page-tool op:", tool.op, JSON.stringify(params).slice(0, 200));
+      const replyWith = (value) => {
+        const text = jsonSafe(value).text;
+        if (text.length > RESULT_MAX_CHARS) {
+          send(f.id, false, "result_too_large");
+          return;
+        }
+        send(f.id, true, text);
+      };
       try {
-        const params = tool.params && typeof tool.params === "object" && !Array.isArray(tool.params) ? tool.params : {};
-        debugLog2("page-tool op:", tool.op, JSON.stringify(params).slice(0, 200));
-        text = jsonSafe(handler(params)).text;
+        result = handler(params);
       } catch (err) {
         send(f.id, false, err && err.message ? String(err.message) : String(err));
         return;
       }
-      if (text.length > RESULT_MAX_CHARS) {
-        send(f.id, false, "result_too_large");
+      if (!result || typeof result.then !== "function") {
+        replyWith(result);
         return;
       }
-      send(f.id, true, text);
+      result.then(replyWith, (err) => send(f.id, false, err && err.message ? String(err.message) : String(err)));
     }
     return { PAGE_TOOLS, handlePageToolRequest, writeAllowed };
   }

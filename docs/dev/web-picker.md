@@ -243,6 +243,29 @@ Ops: `page.info` · `dom.query` · `dom.html` · `console.logs` · `network.log`
 Use `page-tool` for that page; don't open a browser for it. `--tab` is
 mandatory (ADR-0022) — the tabId is in the doc's `## Page` section.
 
+
+### Write-op reliability (v1.16)
+
+`dom.click` refuses instead of pretending: disabled or invisible targets error
+before dispatch; after `scrollIntoView` the click point is hit-tested via
+`elementFromPoint` and an overlaying element (modal, sticky header) is reported
+as `blocked by <tag>` instead of receiving a phantom click. `params.expect:
+{selector, present?}` adds a single-shot post-click verification — when the
+expected node is not in the wanted state the op answers with
+`expect failed … the click likely had no effect` rather than `clicked:true`.
+
+`page.wait` gains `state` (`visible` default / `hidden` / `attached`) and
+`timeoutMs` + `pollMs` (page-side polling, 30 s / 2 s caps). `timeoutMs` unset
+keeps the single-shot semantics; a timed-out wait answers `satisfied:false`
+(ok=true, never an error masquerade). While waiting, the response is delayed —
+keep `timeoutMs` well under the broker's 30 s page-tool budget.
+
+Known limits, by design (userscript, not CDP): synthetic events are
+`isTrusted:false`, so trusted-event-only sites are out of scope; shadow DOM and
+cross-iframe targets are unreachable — a `dom.click` selector that misses
+reports whether a matching node exists inside a shadow root, so the agent can
+escalate to a human instead of retrying.
+
 ## Site compatibility (v1.15)
 
 Real sites fight userscripts in two specific ways; both are handled, and the picker

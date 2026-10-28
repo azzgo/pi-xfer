@@ -197,6 +197,27 @@ op：`page.info` · `dom.query` · `dom.html` · `console.logs` · `network.log`
 查那个页面就用 `page-tool`，别开浏览器。`--tab` 必填（ADR-0022）——tabId
 在文档的 `## Page` 一节。
 
+
+### 写操作可靠性（v1.16）
+
+`dom.click` 拒绝而不是假装成功：disabled 或不可见的目标在派发前直接报错；
+`scrollIntoView` 之后用 `elementFromPoint` 对点击点做真实 hit-testing，被
+遮挡（modal、吸顶栏）时报 `blocked by <tag>`，而不是把一次幻影点击打进被
+盖住的元素。`params.expect: {selector, present?}` 提供点击后的单次验证——
+期望节点不处于期望状态时，应答是 `expect failed … the click likely had no
+effect`，而不是 `clicked:true`。
+
+`page.wait` 新增 `state`（默认 `visible` / `hidden` / `attached`）和
+`timeoutMs` + `pollMs`（页面侧轮询，上限 30 秒 / 2 秒）。不传 `timeoutMs`
+保持单次检查语义；超时的应答是 `satisfied:false`（ok=true，绝不冒充错误）。
+等待期间应答会被推迟——`timeoutMs` 要留出余量，远小于 broker 30 秒的
+page-tool 预算。
+
+设计上的已知边界（userscript，不是 CDP）：合成事件 `isTrusted:false`，
+只认 trusted 事件的站点不在支持范围；shadow DOM 与跨 iframe 目标不可达——
+`dom.click` 的 selector 未命中时会报告匹配节点是否存在于某个 shadow root
+里，让 agent 转人工而不是反复重试。
+
 ## 站点兼容性（v1.15）
 
 真实站点以两种特定方式与用户脚本对抗；两种都已处理，且 picker 会告诉你看到的是哪一种。

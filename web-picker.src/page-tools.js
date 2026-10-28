@@ -251,28 +251,94 @@ export function createPageTools(env) {
 
   // ---------- write ops (v1.12, gated by per-origin authorization) ----------
 
+  // getComputedStyle / scrollIntoView / elementFromPoint are browser-only; the
+  // node test harness stubs them away, so every precheck degrades gracefully.
+  function styleOf(el) {
+    try { return typeof getComputedStyle === 'function' ? getComputedStyle(el) : null; }
+    catch (err) { return null; }
+  }
+
+  function elVisible(el) {
+    const r = el.getBoundingClientRect();
+    if (!(r.width || r.height)) return false;
+    const cs = styleOf(el);
+    return !cs || (cs.visibility !== 'hidden' && cs.display !== 'none');
+  }
+
+  // selector 没命中时区分"真没有"和"在 shadow root 里"——后者是 userscript
+  // 的能力边界，明确报出来，agent 才能转人工而不是反复重试。
+  const SHADOW_SCAN_LIMIT = 3000;
+  function insideShadow(selector) {
+    let visited = 0;
+    const walk = (root) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (++visited > SHADOW_SCAN_LIMIT) return false;
+        if (el.shadowRoot && (el.shadowRoot.querySelector(selector) || walk(el.shadowRoot))) return true;
+      }
+      return false;
+    };
+    try { return walk(doc); } catch (err) { return false; }
+  }
+
+  function noMatch(op, selector) {
+    const shadow = insideShadow(selector)
+      ? ' — a matching node exists inside a shadow root, which page tools cannot reach (ask a human or use the recorded pick instead)'
+      : '';
+    throw new Error(op + ': no element matches ' + selector + shadow);
+  }
+
+  // 派发前的可点性预检：disabled / 不可见直接拒绝，scrollIntoView 后用
+  // elementFromPoint 做真实 hit-testing——被 overlay 挡住时报出遮挡元素，
+  // 而不是把事件打进被盖住的元素里假装成功。
+  function assertClickable(el, selector) {
+    if (el.disabled) throw new Error('dom.click: element is disabled (' + selector + ')');
+    if (!elVisible(el)) throw new Error('dom.click: element is not visible (' + selector + ') — wait for it to render (page.wait) or check the page state');
+    try { if (el.scrollIntoView) el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (err) { /* best effort */ }
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const hit = typeof doc.elementFromPoint === 'function' ? doc.elementFromPoint(cx, cy) : el;
+    if (hit && hit !== el && !(el.contains && el.contains(hit))) {
+      const tag = hit.tagName ? hit.tagName.toLowerCase() + (hit.id ? '#' + hit.id : '') : 'unknown';
+      throw new Error('dom.click: click point (' + Math.round(cx) + ',' + Math.round(cy) + ') is blocked by ' + tag + ' — dismiss or close the overlay first (inspect with dom.query)');
+    }
+    return { clientX: cx, clientY: cy };
+  }
+
   // 派发完整的 pointer/mouse 序列再补原生 click()：React onClick / 原生按钮 /
-  // 框架代理监听都能命中，不依赖具体框架。
+  // 框架代理监听都能命中，不依赖具体框架。合成事件 isTrusted:false 是
+  // userscript 的物理极限：trusted-event-only 的站点会忽略，属已知不支持。
+  // params.expect: {selector, present?} — 点击后单次验证（不等待），不满足
+  // 即报错，让"点了但页面没反应"变成显式失败而不是 clicked:true 的假成功。
   function toolDomClick(params) {
     const el = findOutside(params.selector);
-    if (!el) throw new Error('dom.click: no element matches ' + params.selector);
-    const r = el.getBoundingClientRect();
+    if (!el) noMatch('dom.click', params.selector);
+    const at = assertClickable(el, params.selector);
     const opts = { bubbles: true, cancelable: true, view: window,
-      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 };
+      clientX: at.clientX, clientY: at.clientY, button: 0 };
     for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
       const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
       try { el.dispatchEvent(new Ctor(type, opts)); }
       catch (err) { el.dispatchEvent(new MouseEvent(type, opts)); }
     }
     el.click();
-    return { selector: cssPath(el), clicked: true, tagName: el.tagName.toLowerCase(), disabled: !!el.disabled };
+    const result = { selector: cssPath(el), clicked: true, tagName: el.tagName.toLowerCase(), disabled: false };
+    const expect = params.expect && typeof params.expect === 'object' ? params.expect : null;
+    if (expect && typeof expect.selector === 'string' && expect.selector) {
+      const wantPresent = expect.present === true;
+      const got = !!doc.querySelector(expect.selector);
+      result.expect = { selector: expect.selector, present: got };
+      if (got !== wantPresent) {
+        throw new Error('dom.click: expect failed — ' + expect.selector + ' is ' + (got ? 'still present' : 'absent') + ' after click (the click likely had no effect)');
+      }
+    }
+    return result;
   }
 
   // React 受控组件兼容：走 native setter（绕过 React 对 value 的 own-property
   // 检测）再派发 input/change，组件状态才会真正更新。
   function toolDomSetValue(params) {
     const el = findOutside(params.selector);
-    if (!el) throw new Error('dom.setValue: no element matches ' + params.selector);
+    if (!el) noMatch('dom.setValue', params.selector);
     if (!('value' in el)) throw new Error('dom.setValue: element has no value property (' + el.tagName.toLowerCase() + ')');
     const value = params.value === undefined || params.value === null ? '' : String(params.value);
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
@@ -285,14 +351,33 @@ export function createPageTools(env) {
     return { selector: cssPath(el), value, tagName: el.tagName.toLowerCase() };
   }
 
-  // 等元素出现（agent 改完代码后验证渲染的最常用原语）。同步快路径：已存在立
-  // 即返回；不存在则报错，由 agent 侧按重试节奏再查（page.response 是同步应答，
-  // 页面侧不做长轮询）。
-  function toolPageWait(params) {
+  function elMatches(selector, state) {
+    const el = doc.querySelector(selector);
+    if (!el) return false;
+    if (state === 'attached') return true;
+    return elVisible(el) ? state !== 'hidden' : state === 'hidden';
+  }
+
+  // 等元素达到目标状态（agent 改完代码后验证渲染的最常用原语）。
+  // state: visible(默认) / hidden / attached；timeoutMs: 0（默认）保持单次
+  // 检查的旧语义，>0 时页面侧轮询至满足或超时。 satisfied:false 即超时，
+  // 绝不冒充成功。
+  async function toolPageWait(params) {
     const selector = typeof params.selector === 'string' ? params.selector : '';
     if (!selector) throw new Error('page.wait: params.selector (CSS) is required');
-    if (doc.querySelector(selector)) return { selector, found: true, waitedMs: 0 };
-    throw new Error('page.wait: no element matches ' + selector + ' yet — retry shortly (e.g. every 1-2s, ≤ retry budget)');
+    const state = params.state === 'hidden' || params.state === 'attached' ? params.state : 'visible';
+    const timeoutMs = Math.min(30000, Math.max(0, Number(params.timeoutMs) || 0));
+    const pollMs = Math.min(2000, Math.max(16, Number(params.pollMs) || 100));
+    const start = Date.now();
+    if (elMatches(selector, state)) return { selector, state, satisfied: true, waitedMs: 0 };
+    if (!timeoutMs) {
+      throw new Error('page.wait: no element matches ' + selector + ' yet — retry shortly or pass timeoutMs to poll on the page side');
+    }
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      if (elMatches(selector, state)) return { selector, state, satisfied: true, waitedMs: Date.now() - start };
+    }
+    return { selector, state, satisfied: false, waitedMs: Date.now() - start };
   }
 
   const PAGE_TOOLS = {
@@ -328,17 +413,24 @@ export function createPageTools(env) {
       send(f.id, false, 'denied_op: ' + tool.op + ' requires page-write authorization for ' + location.origin + ' (enable it in the picker settings modal)');
       return;
     }
-    let text;
+    let result;
+    const params = tool.params && typeof tool.params === 'object' && !Array.isArray(tool.params) ? tool.params : {};
+    debugLog('page-tool op:', tool.op, JSON.stringify(params).slice(0, 200));
+    const replyWith = (value) => {
+      const text = jsonSafe(value).text;
+      if (text.length > RESULT_MAX_CHARS) { send(f.id, false, 'result_too_large'); return; }
+      send(f.id, true, text);
+    };
     try {
-      const params = tool.params && typeof tool.params === 'object' && !Array.isArray(tool.params) ? tool.params : {};
-      debugLog('page-tool op:', tool.op, JSON.stringify(params).slice(0, 200));
-      text = jsonSafe(handler(params)).text;
+      result = handler(params);
     } catch (err) {
       send(f.id, false, err && err.message ? String(err.message) : String(err));
       return;
     }
-    if (text.length > RESULT_MAX_CHARS) { send(f.id, false, 'result_too_large'); return; }
-    send(f.id, true, text);
+    // page.wait(timeoutMs>0) resolves asynchronously; sync ops resolve here and
+    // keep the same-tick reply path the broker's 30s timeout budget assumes.
+    if (!result || typeof result.then !== 'function') { replyWith(result); return; }
+    result.then(replyWith, (err) => send(f.id, false, err && err.message ? String(err.message) : String(err)));
   }
 
   return { PAGE_TOOLS, handlePageToolRequest, writeAllowed };

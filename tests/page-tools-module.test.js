@@ -119,7 +119,7 @@ test('dom.setValue uses the native setter contract and dispatches input+change',
   assert.deepEqual(events, ['input', 'change']);
 });
 
-test('page.wait is a read op: found → ok, missing → error naming the selector', () => {
+test('page.wait is a read op: found → ok, missing → error naming the selector', async () => {
   const { handlePageToolRequest } = createPageTools({
     gm: gmStub,
     doc: makeDoc({ '.done': makeEl({ tagName: 'DIV' }) }),
@@ -127,18 +127,42 @@ test('page.wait is a read op: found → ok, missing → error naming the selecto
   const replies = [];
   const send = (id, ok, payload) => replies.push({ id, ok, payload });
   handlePageToolRequest({ id: 'r5', tool: { op: PAGE_OPS.PAGE_WAIT, params: { selector: '.done' } } }, send);
+  await new Promise((r) => setTimeout(r, 0));
   assert.equal(replies[0].ok, true);
-  assert.equal(JSON.parse(replies[0].payload).found, true);
+  assert.equal(JSON.parse(replies[0].payload).satisfied, true);
   handlePageToolRequest({ id: 'r6', tool: { op: PAGE_OPS.PAGE_WAIT, params: { selector: '.nope' } } }, send);
+  await new Promise((r) => setTimeout(r, 0));
   assert.equal(replies[1].ok, false);
   assert.match(replies[1].payload, /page\.wait: no element matches \.nope/);
 });
 
-test('read ops never hit the write gate', () => {
+test('page.wait with timeoutMs polls until satisfied or times out (satisfied:false, never a fake ok)', async () => {
+  const el = makeEl({ tagName: 'DIV' });
+  const doc = makeDoc({});
+  const { handlePageToolRequest } = createPageTools({ gm: gmStub, doc });
+  const replies = [];
+  const send = (id, ok, payload) => replies.push({ id, ok, payload });
+  const deadline = Date.now() + 120;
+  doc.querySelector = (sel) => (sel === '.late' && Date.now() > deadline ? el : null);
+  handlePageToolRequest({ id: 'w1', tool: { op: PAGE_OPS.PAGE_WAIT, params: { selector: '.late', state: 'visible', timeoutMs: 2000, pollMs: 16 } } }, send);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(replies[0].ok, true);
+  const result = JSON.parse(replies[0].payload);
+  assert.equal(result.satisfied, true);
+  assert.ok(result.waitedMs >= 100, 'should have polled, waitedMs=' + result.waitedMs);
+
+  handlePageToolRequest({ id: 'w2', tool: { op: PAGE_OPS.PAGE_WAIT, params: { selector: '.never', timeoutMs: 80, pollMs: 16 } } }, send);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(replies[1].ok, true, 'timeout is a well-formed answer, not an error');
+  assert.equal(JSON.parse(replies[1].payload).satisfied, false);
+});
+
+test('read ops never hit the write gate', async () => {
   const { handlePageToolRequest } = createPageTools({ gm: gmStub, doc: makeDoc({}) });
   const replies = [];
   handlePageToolRequest({ id: 'r7', tool: { op: PAGE_OPS.PAGE_WAIT, params: { selector: '.x' } } },
     (id, ok, payload) => replies.push({ id, ok, payload }));
+  await new Promise((r) => setTimeout(r, 0));
   assert.equal(replies[0].ok, false);
   assert.ok(!String(replies[0].payload).startsWith('denied_op')); // gate skipped → plain no-match error
 });
