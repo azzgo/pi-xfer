@@ -1079,7 +1079,7 @@
     "escx.title": { en: "Exit pick mode", zh: "退出拾取模式" },
     "bar.exit": { en: "exit", zh: "退出" },
     "fab.title": { en: "pi xfer — pick, record, hand off", zh: "pi xfer — 拾取、录制、交接" },
-    "fab.hint": { en: "Click to start picking · hover for panel / record", zh: "点击开始拾取 · 悬停展开面板 / 录制" },
+    "fab.hint": { en: "Click to start picking · hover for panel / record · right-click for the panel", zh: "点击开始拾取 · 悬停展开面板 / 录制 · 右键打开面板" },
     "fabrow.panel": { en: "Picks", zh: "标注面板" },
     "fabrow.panel.title": { en: "Open the pick panel (⇧⌥L)", zh: "打开标注面板（⇧⌥L）" },
     "fabrow.record": { en: "Record", zh: "录制操作" },
@@ -1144,6 +1144,9 @@
     "bag.entry.title": { en: "Cross-page staging bag (requires broker connection)", zh: "跨页暂存袋（需要连接 broker）" },
     "bag.title": { en: "Staging bag", zh: "暂存袋" },
     "bag.countTruncated": { en: "{n} of {total} markers (sending covers all)", zh: "显示 {n} / 共 {total} 条（发送覆盖全部）" },
+    "bag.refresh.title": { en: "Reload the bag from the broker", zh: "从 broker 重新拉取暂存袋" },
+    "bag.refreshed": { en: "Bag reloaded ({n} markers)", zh: "暂存袋已刷新（{n} 条）" },
+    "bag.refreshFailed": { en: "Reload failed: {detail}", zh: "刷新失败: {detail}" },
     "bag.count": { en: "{pages} pages · {n} markers", zh: "{pages} 页 · {n} 条" },
     "bag.empty": { en: "Bag is empty — on any connected page use ▾ → Stage to broker", zh: "暂存袋是空的 — 在已连接的页面用 ▾ → 暂存到 broker" },
     "bag.sendLabel": { en: "Send whole bag (multi-page provenance in one handoff)", zh: "整袋发送（多页 provenance 合成一只 handoff）" },
@@ -2455,6 +2458,7 @@
     }
     ctx.renderPanel = renderPanel;
     function openPanel() {
+      if (ctx.getBagOpen && ctx.getBagOpen() && ctx.closeBag) ctx.closeBag();
       panelOpen = true;
       renderPanel();
       elPanel.style.display = "flex";
@@ -3300,16 +3304,42 @@
       }
     });
     let sendMenuOpen = false;
+    let sendMenuByHover = false;
+    let sendMenuTimer = 0;
+    const SEND_MENU_HOVER_OPEN_MS = 120;
+    const SEND_MENU_HOVER_CLOSE_MS = 220;
+    function openSendMenu(byHover) {
+      clearTimeout(sendMenuTimer);
+      sendMenuTimer = 0;
+      sendMenuByHover = !!byHover;
+      if (sendMenuOpen) return;
+      sendMenuOpen = true;
+      elSendMenu.classList.add("open");
+    }
     function closeSendMenu() {
+      clearTimeout(sendMenuTimer);
+      sendMenuTimer = 0;
+      sendMenuByHover = false;
       if (!sendMenuOpen) return;
       sendMenuOpen = false;
       elSendMenu.classList.remove("open");
     }
     ctx.closeSendMenu = closeSendMenu;
     ctx.sendMenuOpen = () => sendMenuOpen;
+    elSendGroup.addEventListener("mouseenter", () => {
+      clearTimeout(sendMenuTimer);
+      sendMenuTimer = setTimeout(() => openSendMenu(true), SEND_MENU_HOVER_OPEN_MS);
+    });
+    elSendGroup.addEventListener("mouseleave", () => {
+      clearTimeout(sendMenuTimer);
+      sendMenuTimer = setTimeout(closeSendMenu, SEND_MENU_HOVER_CLOSE_MS);
+    });
     elSendMore.addEventListener("click", () => {
-      sendMenuOpen = !sendMenuOpen;
-      elSendMenu.classList.toggle("open", sendMenuOpen);
+      if (sendMenuOpen && !sendMenuByHover) {
+        closeSendMenu();
+        return;
+      }
+      openSendMenu(false);
     });
     elCopyPrompt.addEventListener("click", copyHandoffPrompt);
     if (elSendOffline) elSendOffline.addEventListener("click", copyHandoffPrompt);
@@ -3471,11 +3501,15 @@
       const count = document.createElement("span");
       count.className = "cnt2";
       count.id = "bagcount";
+      const reload = document.createElement("button");
+      reload.id = "bagrefresh";
+      reload.textContent = "⟳";
+      reload.title = t("bag.refresh.title");
       const close = document.createElement("button");
       close.id = "bagclose";
       close.textContent = "✕";
       close.title = t("panel.pclose.title");
-      bh.append(title, count, close);
+      bh.append(title, count, reload, close);
       const list = document.createElement("div");
       list.id = "baglist";
       const box = document.createElement("div");
@@ -3519,13 +3553,14 @@
     const elBagPrompt = drawer.querySelector("#bagprompt");
     const elBagSend = drawer.querySelector("#bagsend");
     const elBagCopy = drawer.querySelector("#bagcopy");
+    const elBagRefresh = drawer.querySelector("#bagrefresh");
     const elBagCount = drawer.querySelector("#bagcount");
     const elBagList = drawer.querySelector("#baglist");
     const elBagInput = drawer.querySelector("#bagtinput");
     const elBagDrop = drawer.querySelector("#bagtdrop");
     const style = document.createElement("style");
     style.textContent = `
-    #bagdrawer { position: fixed; top: 60px; right: 380px; width: 330px; max-height: 80vh;
+    #bagdrawer { position: fixed; top: 60px; right: 16px; width: 330px; max-height: 80vh;
       display: none; flex-direction: column; background: #fff; border-radius: 12px;
       box-shadow: 0 8px 24px rgba(15,23,42,.35); color: var(--wp-ink); font: 13px/1.5 var(--wp-font);
       z-index: 2147483647; pointer-events: auto; }
@@ -3536,6 +3571,9 @@
     #bagdrawer .cnt2 { color: var(--wp-muted); font-size: 11px; }
     #bagdrawer .bh button { background: transparent; color: var(--wp-muted); border: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
     #bagdrawer .bh button:hover { background: #e8edf3; color: #334155; }
+    #bagdrawer .bh button#bagrefresh { font-size: 13px; line-height: 1; padding: 3px 7px; }
+    #bagdrawer .bh button#bagrefresh.spin { animation: bagspin .7s linear infinite; }
+    @keyframes bagspin { to { transform: rotate(360deg); } }
     #baglist { overflow-y: auto; padding: 10px; flex: 1; }
     #baglist .bempty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 12px; }
     #baglist .bpage { border: 1px solid var(--wp-line); border-radius: 10px; margin-bottom: 8px; overflow: hidden; background: #fff; }
@@ -3649,14 +3687,50 @@
       return res;
     }
     ctx.refreshBag = refresh;
+    let reloading = false;
+    async function reloadBag() {
+      if (reloading) return;
+      reloading = true;
+      elBagRefresh.classList.add("spin");
+      try {
+        if (ctx.refreshTargets) await ctx.refreshTargets();
+        if (bagOpen) renderBagCombo();
+        const res = await refresh();
+        if (res.ok) toast(t("bag.refreshed", { n: items.length }));
+        else toast(t("bag.refreshFailed", { detail: res.code + (res.message ? " — " + res.message : "") }));
+      } finally {
+        reloading = false;
+        elBagRefresh.classList.remove("spin");
+      }
+    }
+    ctx.reloadBag = reloadBag;
+    elBagRefresh.addEventListener("click", () => {
+      void reloadBag();
+    });
+    function adoptPanelSlot() {
+      const panel = ctx.els.elPanel;
+      const panelWasOpen = !!(ctx.getPanelOpen && ctx.getPanelOpen());
+      const rect = panelWasOpen && panel ? panel.getBoundingClientRect() : null;
+      if (panelWasOpen && ctx.closePanel) ctx.closePanel();
+      drawer.style.display = "flex";
+      const w = drawer.getBoundingClientRect().width || 330;
+      const right = rect && rect.width ? rect.right : window.innerWidth - 16;
+      const top = rect && rect.top ? rect.top : 60;
+      drawer.style.left = Math.max(4, Math.round(right - w)) + "px";
+      drawer.style.top = Math.round(top) + "px";
+      drawer.style.right = "auto";
+    }
     function openDrawer() {
       if (bagOpen) return;
       bagOpen = true;
-      drawer.style.display = "flex";
-      if (ctx.els.elPanel && !ctx.getPanelOpen()) ctx.togglePanel();
+      adoptPanelSlot();
       render();
       void refresh();
-      if (conn.getState() === "on" && ctx.refreshTargets) void ctx.refreshTargets();
+      if (conn.getState() === "on" && ctx.refreshTargets) {
+        void ctx.refreshTargets().then(() => {
+          if (bagOpen) renderBagCombo();
+        });
+      }
       renderBagCombo();
     }
     function closeDrawer() {
@@ -3917,6 +3991,13 @@
       e.stopPropagation();
       ctx.toggleRecord();
     });
+    window.addEventListener("contextmenu", (e) => {
+      if (!ctx.isFabTarget(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      drag = null;
+      ctx.togglePanel();
+    }, true);
     window.addEventListener("pointerdown", fabPointerDown, true);
     window.addEventListener("pointermove", fabPointerMove, true);
     window.addEventListener("pointerup", fabPointerUp, true);

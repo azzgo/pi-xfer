@@ -87,6 +87,7 @@ export function initPanel(ctx) {
   ctx.renderPanel = renderPanel;
 
   function openPanel() {
+    if (ctx.getBagOpen && ctx.getBagOpen() && ctx.closeBag) ctx.closeBag();  // 一次只留一个浮窗
     panelOpen = true;
     renderPanel();
     elPanel.style.display = 'flex';

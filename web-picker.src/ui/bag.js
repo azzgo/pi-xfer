@@ -1,5 +1,6 @@
 // Bag drawer — the cross-page staging inbox (variant B of the prototype):
-// opens beside the note panel, lists the broker-side Bag grouped by page
+// takes over the note panel's slot (the two never share the screen), lists the
+// broker-side Bag grouped by page
 // (url+title accordion), and sends the whole bag with its own prompt +
 // target combo. The drawer is reachable only while the broker link is up —
 // the bag lives in the broker, so an offline entry button is a lie (the
@@ -36,8 +37,10 @@ export function initBag(ctx) {
     const bh = document.createElement('div'); bh.className = 'bh';
     const title = document.createElement('b'); title.textContent = t('bag.title');
     const count = document.createElement('span'); count.className = 'cnt2'; count.id = 'bagcount';
+    const reload = document.createElement('button'); reload.id = 'bagrefresh'; reload.textContent = '⟳';
+    reload.title = t('bag.refresh.title');
     const close = document.createElement('button'); close.id = 'bagclose'; close.textContent = '✕'; close.title = t('panel.pclose.title');
-    bh.append(title, count, close);
+    bh.append(title, count, reload, close);
     const list = document.createElement('div'); list.id = 'baglist';
     const box = document.createElement('div'); box.className = 'bsendbox';
     const lbl1 = document.createElement('div'); lbl1.className = 'lbl'; lbl1.textContent = t('bag.sendLabel');
@@ -61,6 +64,7 @@ export function initBag(ctx) {
   const elBagPrompt = drawer.querySelector('#bagprompt');
   const elBagSend = drawer.querySelector('#bagsend');
   const elBagCopy = drawer.querySelector('#bagcopy');
+  const elBagRefresh = drawer.querySelector('#bagrefresh');
   const elBagCount = drawer.querySelector('#bagcount');
   const elBagList = drawer.querySelector('#baglist');
   const elBagInput = drawer.querySelector('#bagtinput');
@@ -68,7 +72,7 @@ export function initBag(ctx) {
 
   const style = document.createElement('style');
   style.textContent = `
-    #bagdrawer { position: fixed; top: 60px; right: 380px; width: 330px; max-height: 80vh;
+    #bagdrawer { position: fixed; top: 60px; right: 16px; width: 330px; max-height: 80vh;
       display: none; flex-direction: column; background: #fff; border-radius: 12px;
       box-shadow: 0 8px 24px rgba(15,23,42,.35); color: var(--wp-ink); font: 13px/1.5 var(--wp-font);
       z-index: 2147483647; pointer-events: auto; }
@@ -79,6 +83,9 @@ export function initBag(ctx) {
     #bagdrawer .cnt2 { color: var(--wp-muted); font-size: 11px; }
     #bagdrawer .bh button { background: transparent; color: var(--wp-muted); border: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
     #bagdrawer .bh button:hover { background: #e8edf3; color: #334155; }
+    #bagdrawer .bh button#bagrefresh { font-size: 13px; line-height: 1; padding: 3px 7px; }
+    #bagdrawer .bh button#bagrefresh.spin { animation: bagspin .7s linear infinite; }
+    @keyframes bagspin { to { transform: rotate(360deg); } }
     #baglist { overflow-y: auto; padding: 10px; flex: 1; }
     #baglist .bempty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 12px; }
     #baglist .bpage { border: 1px solid var(--wp-line); border-radius: 10px; margin-bottom: 8px; overflow: hidden; background: #fff; }
@@ -209,15 +216,53 @@ export function initBag(ctx) {
   }
   ctx.refreshBag = refresh;
 
+  // 手动重载：袋是 broker 状态，别的页面暂存进来的条目不会自己出现在这个快照里。
+  // 一次点击同时刷新袋内容和 target 列表（▾ 之外的第二条「拉新」路径）。
+  let reloading = false;
+  async function reloadBag() {
+    if (reloading) return;
+    reloading = true;
+    elBagRefresh.classList.add('spin');
+    try {
+      if (ctx.refreshTargets) await ctx.refreshTargets();
+      if (bagOpen) renderBagCombo();
+      const res = await refresh();
+      if (res.ok) toast(t('bag.refreshed', { n: items.length }));
+      else toast(t('bag.refreshFailed', { detail: res.code + (res.message ? ' — ' + res.message : '') }));
+    } finally {
+      reloading = false;
+      elBagRefresh.classList.remove('spin');
+    }
+  }
+  ctx.reloadBag = reloadBag;
+  elBagRefresh.addEventListener('click', () => { void reloadBag(); });
+
   // ---------- open/close ----------
+  // 袋与标注面板不同时出现（同一时刻只留一个浮窗）：开袋即收起面板，并把袋
+  // 放到面板刚才的槽位上——否则关掉面板后袋停在场中，和 fab / 页面内容都没关系。
+  function adoptPanelSlot() {
+    const panel = ctx.els.elPanel;
+    const panelWasOpen = !!(ctx.getPanelOpen && ctx.getPanelOpen());
+    const rect = panelWasOpen && panel ? panel.getBoundingClientRect() : null;
+    if (panelWasOpen && ctx.closePanel) ctx.closePanel();
+    drawer.style.display = 'flex';
+    const w = drawer.getBoundingClientRect().width || 330;
+    const right = rect && rect.width ? rect.right : window.innerWidth - 16;
+    const top = rect && rect.top ? rect.top : 60;
+    drawer.style.left = Math.max(4, Math.round(right - w)) + 'px';
+    drawer.style.top = Math.round(top) + 'px';
+    drawer.style.right = 'auto';
+  }
+
   function openDrawer() {
     if (bagOpen) return;
     bagOpen = true;
-    drawer.style.display = 'flex';
-    if (ctx.els.elPanel && !ctx.getPanelOpen()) ctx.togglePanel();  // drawer opens beside the panel
+    adoptPanelSlot();
     render();
     void refresh();
-    if (conn.getState() === 'on' && ctx.refreshTargets) void ctx.refreshTargets();
+    if (conn.getState() === 'on' && ctx.refreshTargets) {
+      void ctx.refreshTargets().then(() => { if (bagOpen) renderBagCombo(); });
+    }
     renderBagCombo();
   }
   function closeDrawer() { bagOpen = false; drawer.style.display = 'none'; closeBagDrop(); }
@@ -240,8 +285,8 @@ export function initBag(ctx) {
 
   drawer.querySelector('#bagclose').addEventListener('click', closeDrawer);
 
-  // 抽屉可拖（handle = 标题栏）；位置不持久 —— 每次打开贴回面板左侧的默认位，
-  // 与面板的联动布局（right: 380px）由 CSS 默认值给出，拖走后面板移动不追随（v1 取舍）。
+  // 抽屉可拖（handle = 标题栏）；位置不持久 —— 每次打开由 adoptPanelSlot() 重新落位
+  // （接面板的槽位，没有面板就贴右上角），拖走之后不跟随任何东西（v1 取舍）。
   makeDraggable(drawer, drawer.querySelector('.bh'), {});
 
   // ---------- accordion + note edit + delete ----------

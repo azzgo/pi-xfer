@@ -98,16 +98,44 @@ export function initSend(ctx) {
 
   // ---------- 更多下拉（split button 的 ▾）----------
   let sendMenuOpen = false;
+  let sendMenuByHover = false;
+  let sendMenuTimer = 0;
+  // 悬停即展开：▾ 背后是什么动作不必先点一下才知道（与 fab 的悬停扇出同一手感）。
+  // 展开延迟挡掉「只是路过发送键」的误触；收起延迟留出跨过按钮与菜单之间
+  // 6px 空隙的时间，指针进到菜单里就不会收（菜单是 #sendgroup 的后代）。
+  const SEND_MENU_HOVER_OPEN_MS = 120;
+  const SEND_MENU_HOVER_CLOSE_MS = 220;
+  function openSendMenu(byHover) {
+    clearTimeout(sendMenuTimer);
+    sendMenuTimer = 0;
+    sendMenuByHover = !!byHover;
+    if (sendMenuOpen) return;
+    sendMenuOpen = true;
+    elSendMenu.classList.add('open');
+  }
   function closeSendMenu() {
+    clearTimeout(sendMenuTimer);
+    sendMenuTimer = 0;
+    sendMenuByHover = false;
     if (!sendMenuOpen) return;
     sendMenuOpen = false;
     elSendMenu.classList.remove('open');
   }
   ctx.closeSendMenu = closeSendMenu;
   ctx.sendMenuOpen = () => sendMenuOpen;
+  elSendGroup.addEventListener('mouseenter', () => {
+    clearTimeout(sendMenuTimer);
+    sendMenuTimer = setTimeout(() => openSendMenu(true), SEND_MENU_HOVER_OPEN_MS);
+  });
+  elSendGroup.addEventListener('mouseleave', () => {
+    clearTimeout(sendMenuTimer);
+    sendMenuTimer = setTimeout(closeSendMenu, SEND_MENU_HOVER_CLOSE_MS);
+  });
+  // 悬停已经把菜单展开了：这一次点击只负责把它钉住（再点才收起），
+  // 否则「悬停展开 → 点 ▾ → 立刻关掉」看起来就是坏的。
   elSendMore.addEventListener('click', () => {
-    sendMenuOpen = !sendMenuOpen;
-    elSendMenu.classList.toggle('open', sendMenuOpen);
+    if (sendMenuOpen && !sendMenuByHover) { closeSendMenu(); return; }
+    openSendMenu(false);
   });
   elCopyPrompt.addEventListener('click', copyHandoffPrompt);
   if (elSendOffline) elSendOffline.addEventListener('click', copyHandoffPrompt);

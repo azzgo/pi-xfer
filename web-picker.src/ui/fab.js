@@ -40,6 +40,15 @@ export function initFab(ctx) {
   }
   elFabRowPanel.addEventListener('click', (e) => { e.stopPropagation(); ctx.togglePanel(); });
   elFabRowRecord.addEventListener('click', (e) => { e.stopPropagation(); ctx.toggleRecord(); });
+  // 右键 = 直接开/收面板：不用先悬停等扇出、再点那一行。页面自己的右键菜单在
+  // fab 上让位给这条捷径（capture 阶段拦掉，页面脚本收不到）。
+  window.addEventListener('contextmenu', (e) => {
+    if (!ctx.isFabTarget(e)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    drag = null;
+    ctx.togglePanel();
+  }, true);
   window.addEventListener('pointerdown', fabPointerDown, true);
   window.addEventListener('pointermove', fabPointerMove, true);
   window.addEventListener('pointerup', fabPointerUp, true);

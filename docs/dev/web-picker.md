@@ -14,13 +14,16 @@ page side:
   picked annotations, delivered as an xfer handoff into a local pi session
   (`annotation.submit` → `ack`). ⌘/Ctrl+Enter in the prompt textarea sends.
 - **Copy handoff prompt (v1.10)** — the send button is a split button group
-  (发送 → + ▾). The ▾ dropdown's **复制 handoff prompt** asks the broker to
-  render the exact handoff document a submit would deliver
-  (`annotation.compose` → `ack{prompt}` — render only, nothing is written or
-  delivered) and copies it to the clipboard. Non-pi coding agents that have
-  bash but no xfer can then receive the same handoff: paste the prompt and
-  they can call `node daemon/broker-main.ts page-tool <target> <op>` for follow-up
-  page queries themselves.
+  (发送 → + ▾). The ▾ dropdown opens on hover (~120 ms) as well as on click, so
+  the two extra actions are visible before the first click; clicking ▾ while it
+  is already hover-open pins it instead of closing it. Its
+  **复制 handoff prompt** asks the broker to render the exact handoff document
+  a submit would deliver (`annotation.compose` → `ack{prompt}` — render only,
+  nothing is written or delivered) and copies it to the clipboard. Non-pi
+  coding agents that have bash but no xfer can then receive the same handoff:
+  paste the prompt and they can call
+  `node daemon/broker-main.ts page-tool <target> <op>` for follow-up page
+  queries themselves.
 - **Page tools (v1.6 + v1.12 write ops)** — agent tool calls arrive as
   `page.request{tool:{op, params}}` frames and run against this page:
   `page.info` · `dom.query` · `dom.html` · `console.logs` · `network.log` ·
@@ -172,7 +175,9 @@ actions live in a hover fan-out above it — **Picks** opens the note panel (tha
 is the way to reach targets / reverse lookup / network / logs even when you have
 no marker to annotate) and **Record** starts/stops recording. The badge is a
 read-out, not a second hit target: an icon and a badge sharing one visual
-body made the click result a guess.
+body made the click result a guess. A right-click on the fab is the shortcut to
+that same panel: no hover, no second click (the page's own context menu is
+suppressed while the pointer is on the fab).
 
 When the note panel is empty it carries its own two entries (**⌖ Pick elements**
 and **● Record actions**) in place of the list. They disappear as soon as the
@@ -311,10 +316,13 @@ several pages, then send the whole bag from any of them.
   connected (the bag is broker state; an offline entry would be a lie).
   The drawer lists the bag grouped by page (url+title accordion, each page
   header carrying its tabId) with its own prompt textarea, target combo and
-  发送整袋 button. The note panel itself is untouched — the two paths stay
-  visually separate. A successful 发送整袋 closes the drawer, the same way a
-  successful send closes the note panel: the panel is a way to look at things,
-  not a place to sit after the handoff is gone.
+  发送整袋 button. The two floaters never share the screen: opening the bag
+  closes the note panel and the drawer takes over its slot, and opening the
+  panel closes the drawer. The drawer header carries a ⟳ that re-reads the bag
+  from the broker (plus the target list) — another page may have staged
+  something since this snapshot. A successful 发送整袋 closes the drawer, the
+  same way a successful send closes the note panel: the panel is a way to look
+  at things, not a place to sit after the handoff is gone.
 - **Lifecycle** — one default bag, in memory only (lost on broker restart;
   every entry carries provenance, restaging is cheap). `bag.submit` consumes
   the bag: it clears on success and is kept on failure (retry the submit).
