@@ -1,6 +1,6 @@
 {
   "name": "pi-xfer",
-  "version": "0.10.4",
+  "version": "0.10.5",
   "description": "Cross-context handoff extension for pi coding agents: structured markdown handoffs over local sockets, cross-machine mesh transport, async board, and web picker.",
   "keywords": [
     "pi",
