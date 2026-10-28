@@ -223,26 +223,20 @@ oracle is needed.
 
 ## The receiving agent's view
 
-The agent that receives the handoff is the one that has to know a page-tool
-channel exists. Without that, its default move is to open a browser — which
-hands it the whole DOM instead of the elements that were picked.
-
-Three places carry the channel, so the agent meets it whichever way it looks:
-
-- **The delivery message** leads with it: the page is still open, and
-  `page-tool` is the way to query it. The example command points at the
-  shipped `dist/broker.cjs`.
-- **The handoff doc** opens with a pointer to its `Follow-up channel`
-  section, which lists every op and the exact command for that tab.
-- **The CLI describes itself:**
+The handoff carries a follow-up channel: the broker's `page-tool` CLI queries
+the page the handoff came from.
 
 ```bash
-node dist/broker.cjs page-tool --help   # the page-tool op table
+node dist/broker.cjs page-tool --help   # the op table
 node dist/broker.cjs --help             # the broker's two modes
 ```
 
-`--tab` is mandatory (ADR-0022): the tabId is in the doc's `## Page` section,
-and a guessed id fails as `tab_unreachable`.
+Ops: `page.info` · `dom.query` · `dom.html` · `console.logs` · `network.log` ·
+`framework.inspect` · `page.wait` (read) · `dom.click` · `dom.setValue`
+(write, needs page-write authorization).
+
+Use `page-tool` for that page; don't open a browser for it. `--tab` is
+mandatory (ADR-0022) — the tabId is in the doc's `## Page` section.
 
 ## Site compatibility (v1.15)
 

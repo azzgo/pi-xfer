@@ -201,11 +201,10 @@ function formatHandoffKind(kind) {
 
 // src/core/handoff-doc.ts
 function channelPointer(tabId) {
-  const tab = tabId?.trim() ? ` Its tabId is in the Page section below (${tabId.trim()}).` : "";
+  const tab = tabId?.trim() ? ` tabId: ${tabId.trim()}` : "";
   return [
-    "> The page this handoff came from is still open. Query it through the broker's page-tool",
-    '> channel — see the "Follow-up channel" section below. Do not open a browser for it:',
-    `> a browser hands you the whole DOM, page-tool hands you the elements you name.${tab}`,
+    "> The page this handoff came from is still open — query it with the broker's page-tool CLI",
+    `> (ops table in the "Follow-up channel" section below). Use it instead of opening a browser.${tab}`,
     ""
   ];
 }

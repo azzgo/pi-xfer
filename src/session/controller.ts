@@ -107,14 +107,12 @@ export class XferController {
             // Web-picker senders are not xfer peers: steer the agent to the
             // page-tool pull channel instead of a doomed xfer_to reply.
             `📨 [Xfer from **${FROM_WEB_PICKER}** (browser userscript)]\n\n` +
-            // The channel comes FIRST: an agent that does not know page-tool exists
-            // opens a browser, and a browser hands it the whole DOM instead of the
-            // elements it was asked about. Naming the channel before the request
-            // is what makes the default the right one.
-            `🖥 The page this handoff came from is still open — query it through the broker's\n` +
-            `page-tool channel. Do not open a browser for it: a browser hands you the whole DOM,\n` +
-            `page-tool hands you the elements you name.\n\n` +
-            `The exact command is in the doc's "## Follow-up channel" section; the shape is:\n` +
+            // The channel comes FIRST: the agent needs to know it exists before it
+            // picks how to work.
+            `🖥 The page this handoff came from is still open — query it with the broker's\n` +
+            `page-tool CLI (ops table in the doc's "## Follow-up channel" section). Use it\n` +
+            `instead of opening a browser.\n\n` +
+            `The command shape is:\n` +
             `\`node ${path.join(import.meta.dirname, "../../dist/broker.cjs")} page-tool ${state.identity?.name ?? "<own-name>"} dom.query '{"selector":"button","maxCount":5}' --tab <tabId>\`\n` +
             `The tabId is in the doc's "## Page" section — read it, never guess it.\n\n` +
             body +

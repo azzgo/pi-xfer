@@ -121,20 +121,14 @@ export interface RenderHandoffDocInput {
 }
 
 /**
- * The pointer at the very top of a handoff doc.
- *
- * The receiving agent meets the document before it knows a page-tool channel
- * exists, and its default move is to open a browser — which hands it the whole
- * DOM instead of the elements it was asked about. The pointer names the
- * channel before the agent decides anything, so the doc's own follow-up
- * section is found without the human having to mention it.
+ * The pointer at the very top of a handoff doc: the page-tool channel is the
+ * way to read the page this handoff came from.
  */
 function channelPointer(tabId: string | undefined): string[] {
-  const tab = tabId?.trim() ? ` Its tabId is in the Page section below (${tabId.trim()}).` : "";
+  const tab = tabId?.trim() ? ` tabId: ${tabId.trim()}` : "";
   return [
-    "> The page this handoff came from is still open. Query it through the broker's page-tool",
-    "> channel — see the \"Follow-up channel\" section below. Do not open a browser for it:",
-    `> a browser hands you the whole DOM, page-tool hands you the elements you name.${tab}`,
+    "> The page this handoff came from is still open — query it with the broker's page-tool CLI",
+    `> (ops table in the \"Follow-up channel\" section below). Use it instead of opening a browser.${tab}`,
     "",
   ];
 }

@@ -179,24 +179,20 @@ pid），daemon 会告警并回退到临时端口——`/xfer broker start` 会 
 
 ## 接收方 agent 的视角
 
-收到 handoff 的 agent，必须知道 page-tool 通道的存在。否则它的默认动作是
-自己开浏览器——那会给它整片 DOM，而不是被拾取的那些元素。
-
-通道出现在三个地方，agent 无论从哪条路看都会遇见它：
-
-- **投递消息把它放在最前面**：页面还开着，查它就该走 `page-tool`。示例命令
-  指向随包发布的 `dist/broker.cjs`。
-- **handoff 文档开头**就指向它的 `Follow-up channel` 一节，那里列着全部
-  op 和该 tab 的确切命令。
-- **CLI 会自述**：
+handoff 自带一条后续通道：broker 的 `page-tool` CLI 可以查这份 handoff
+来自的那个页面。
 
 ```bash
-node dist/broker.cjs page-tool --help   # the page-tool op table
+node dist/broker.cjs page-tool --help   # the op table
 node dist/broker.cjs --help             # the broker's two modes
 ```
 
-`--tab` 是必填的（ADR-0022）：tabId 在文档的 `## Page` 一节，猜出来的 id 会
-以 `tab_unreachable` 失败。
+op：`page.info` · `dom.query` · `dom.html` · `console.logs` · `network.log` ·
+`framework.inspect` · `page.wait`（读）· `dom.click` · `dom.setValue`
+（写，需要 page-write 授权）。
+
+查那个页面就用 `page-tool`，别开浏览器。`--tab` 必填（ADR-0022）——tabId
+在文档的 `## Page` 一节。
 
 ## 站点兼容性（v1.15）
 

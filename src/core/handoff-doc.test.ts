@@ -49,9 +49,8 @@ const GOLDEN = `# Web annotation handoff
 
 kind: task
 
-> The page this handoff came from is still open. Query it through the broker's page-tool
-> channel — see the "Follow-up channel" section below. Do not open a browser for it:
-> a browser hands you the whole DOM, page-tool hands you the elements you name. Its tabId is in the Page section below (tab-mvn0alj273ujp).
+> The page this handoff came from is still open — query it with the broker's page-tool CLI
+> (ops table in the "Follow-up channel" section below). Use it instead of opening a browser. tabId: tab-mvn0alj273ujp
 
 ## Request
 
@@ -123,9 +122,9 @@ describe("renderHandoffDoc", () => {
     const pointer = doc.indexOf("page-tool");
     assert.ok(pointer > 0, "the doc names the channel");
     assert.ok(pointer < doc.indexOf("## Request"), "the channel is named before the request");
-    assert.ok(doc.includes("Do not open a browser"), "the pointer says what NOT to do");
+    assert.ok(doc.includes("Use it instead of opening a browser"), "the pointer says what to use");
     assert.ok(
-      doc.includes("Its tabId is in the Page section below (tab-mvn0alj273ujp)"),
+      doc.includes("tabId: tab-mvn0alj273ujp"),
       "the pointer names the tabId instead of leaving the agent to guess",
     );
   });
@@ -133,7 +132,7 @@ describe("renderHandoffDoc", () => {
   it("keeps the pointer but omits a tabId it does not have", () => {
     const doc = renderHandoffDoc(input({ page: { url: "https://example.com/app", title: "Example App", ts: 1725148800000 } }));
     assert.ok(doc.includes("page-tool"));
-    assert.ok(!doc.includes("Its tabId is in the Page section below"), "no invented tabId");
+    assert.ok(!doc.includes("tabId:"), "no invented tabId");
   });
 
   it("points at the channel in a staging-bag doc too", () => {

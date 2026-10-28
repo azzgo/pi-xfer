@@ -111,10 +111,9 @@ This only removes the **mesh** half: the local socket and the inbox are untouche
 ## Web picker follow-ups (page-tool)
 
 **A web-picker handoff carries its own follow-up channel: the broker's
-page-tool CLI. Use it — do not open a browser.** A browser hands you the whole
-DOM; page-tool hands you the elements you name. The channel is described in
-the handoff itself, under `## Follow-up channel`, and the delivery message
-names it too. `node <broker CLI> page-tool --help` prints the whole op table.
+page-tool CLI — use it instead of opening a browser.** The channel is described
+in the handoff itself, under `## Follow-up channel`; the op table is also
+available as `node <broker CLI> page-tool --help`.
 
 Every call must name its tab explicitly (ADR-0022 — the tabId is in the handoff's `## Page`
 section, `- tabId: <id>`; the command example in the same doc already carries

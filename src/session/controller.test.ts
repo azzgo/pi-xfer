@@ -256,7 +256,7 @@ describe("inbound: the web-picker delivery names the page-tool channel first", (
     const channel = content.indexOf("page-tool");
     assert.ok(channel > 0, "the delivery names the channel");
     assert.ok(channel < content.indexOf("**Request**"), "the channel comes before the request");
-    assert.match(content, /Do not open a browser/i);
+    assert.match(content, /instead of opening a browser/i);
     assert.match(content, /dist\/broker\.cjs/, "the example command points at the shipped bundle");
     assert.match(content, /--tab <tabId>/);
   });
