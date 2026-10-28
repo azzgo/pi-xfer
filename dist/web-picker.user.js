@@ -3501,15 +3501,11 @@
       const count = document.createElement("span");
       count.className = "cnt2";
       count.id = "bagcount";
-      const reload = document.createElement("button");
-      reload.id = "bagrefresh";
-      reload.textContent = "⟳";
-      reload.title = t("bag.refresh.title");
       const close = document.createElement("button");
       close.id = "bagclose";
       close.textContent = "✕";
       close.title = t("panel.pclose.title");
-      bh.append(title, count, reload, close);
+      bh.append(title, count, close);
       const list = document.createElement("div");
       list.id = "baglist";
       const box = document.createElement("div");
@@ -3535,7 +3531,12 @@
       const drop = document.createElement("div");
       drop.id = "bagtdrop";
       combo.append(input, drop);
-      row1.append(lbl2, combo);
+      const reload = document.createElement("button");
+      reload.className = "ghost icon";
+      reload.id = "bagrefresh";
+      reload.textContent = "⟳";
+      reload.title = t("bag.refresh.title");
+      row1.append(lbl2, combo, reload);
       const row2 = document.createElement("div");
       row2.className = "brow2";
       const send = document.createElement("button");
@@ -3571,8 +3572,8 @@
     #bagdrawer .cnt2 { color: var(--wp-muted); font-size: 11px; }
     #bagdrawer .bh button { background: transparent; color: var(--wp-muted); border: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; }
     #bagdrawer .bh button:hover { background: #e8edf3; color: #334155; }
-    #bagdrawer .bh button#bagrefresh { font-size: 13px; line-height: 1; padding: 3px 7px; }
-    #bagdrawer .bh button#bagrefresh.spin { animation: bagspin .7s linear infinite; }
+    #bagdrawer button#bagrefresh { flex: 0 0 auto; padding: 7px 9px; font-size: 13px; line-height: 1; }
+    #bagdrawer button#bagrefresh.spin { animation: bagspin .7s linear infinite; }
     @keyframes bagspin { to { transform: rotate(360deg); } }
     #baglist { overflow-y: auto; padding: 10px; flex: 1; }
     #baglist .bempty { color: #94a3b8; text-align: center; padding: 28px 0; font-size: 12px; }

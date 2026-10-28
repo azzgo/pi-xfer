@@ -318,11 +318,12 @@ several pages, then send the whole bag from any of them.
   header carrying its tabId) with its own prompt textarea, target combo and
   发送整袋 button. The two floaters never share the screen: opening the bag
   closes the note panel and the drawer takes over its slot, and opening the
-  panel closes the drawer. The drawer header carries a ⟳ that re-reads the bag
-  from the broker (plus the target list) — another page may have staged
-  something since this snapshot. A successful 发送整袋 closes the drawer, the
-  same way a successful send closes the note panel: the panel is a way to look
-  at things, not a place to sit after the handoff is gone.
+  panel closes the drawer. The target row carries a ⟳ — the same spot the note
+  panel puts it — that re-reads the bag from the broker (plus the target list):
+  another page may have staged something since this snapshot. A successful
+  发送整袋 closes the drawer, the same way a successful send closes the note
+  panel: the panel is a way to look at things, not a place to sit after the
+  handoff is gone.
 - **Lifecycle** — one default bag, in memory only (lost on broker restart;
   every entry carries provenance, restaging is cheap). `bag.submit` consumes
   the bag: it clears on success and is kept on failure (retry the submit).
