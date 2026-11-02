@@ -89,10 +89,20 @@ export function initPanel(ctx) {
 
   let markRaf = 0;
   function resolvePick(rec) {
+    let best = null;
     try {
-      const el = document.querySelector(rec.selector);
-      if (el) return el;
+      const hits = document.querySelectorAll(rec.selector);
+      const rect = rec.rect;
+      for (const el of hits) {
+        if (!rect) return el;
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) continue;
+        const score = Math.abs(r.left - rect.x) + Math.abs(r.top - rect.y)
+          + Math.abs(r.width - rect.w) + Math.abs(r.height - rect.h);
+        if (!best || score < best.score) best = { el, score };
+      }
     } catch (e) { /* a cssPath can throw on ragged attribute values */ }
+    if (best) return best.el;
     if (!rec.xpath) return null;
     try {
       const found = document.evaluate(rec.xpath, document, null, 9, null);
