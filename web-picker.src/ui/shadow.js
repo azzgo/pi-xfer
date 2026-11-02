@@ -132,6 +132,11 @@ export function buildUI() {
       #fab.large { width: 46px; height: 46px; border-radius: 14px; }
       #fab.large svg { width: 20px; height: 20px; }
       #fab.large #dot { top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px; }
+      /* 隐藏态：同一位置缩成半透明小圆点，hover 还原整个 36px 控件，不重排 */
+      #fabstack.hidden #fab { transform: scale(.28); opacity: .5; border-radius: 50%; }
+      #fabstack.hidden #fab:hover { transform: translateY(-2px); opacity: 1; border-radius: 11px; }
+      #fabstack.hidden #cnt, #fabstack.hidden #dot { display: none; }
+      #fabstack.pickmode { display: none; }
       /* 角标只报数，不再是第二个可点热区 */
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
@@ -413,23 +418,42 @@ export function buildUI() {
         elSAuto = $('sauto'), elSWrite = $('swrite');
   if (gm.get(GM_FAB_SIZE, 'small') === 'large') { elFab.classList.add('large'); elFabStack.classList.add('large'); }
 
-  let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
+  const defaultFabPos = () => ({ x: window.innerWidth - 68, y: window.innerHeight - 96 });
+  let pos = defaultFabPos();
+  let placed = false;
   try {
     const saved = sessionStorage.getItem(KEY_POS);
-    if (saved) { const p = JSON.parse(saved); if (typeof p.x === 'number' && typeof p.y === 'number') pos = p; }
-  } catch (e) { /* fall back to default position */ }
+    if (saved) {
+      const p = JSON.parse(saved);
+      if (typeof p.x === 'number' && typeof p.y === 'number') { pos = p; placed = true; }
+    }
+  } catch (e) { /* no saved position — wait for the first pointer */ }
   // 视口缩小（如打开 devtools）后保存的位置可能落在可视区外，统一 clamp 回来
   function clampFabPos() {
     pos.x = Math.max(4, Math.min(window.innerWidth - 50, pos.x));
     pos.y = Math.max(4, Math.min(window.innerHeight - 50, pos.y));
   }
-  clampFabPos();
-  elFabStack.style.left = pos.x + 'px';
-  elFabStack.style.top = pos.y + 'px';
-  window.addEventListener('resize', () => {
+  function applyFabPos() {
     clampFabPos();
     elFabStack.style.left = pos.x + 'px';
     elFabStack.style.top = pos.y + 'px';
+    elFabStack.style.visibility = '';
+  }
+  function placeFabAtPointer(x, y) {
+    if (placed) return false;
+    pos = { x: x + 12, y: y + 12 };
+    placed = true;
+    applyFabPos();
+    return true;
+  }
+  if (placed) applyFabPos();
+  else {
+    elFabStack.style.visibility = 'hidden';
+    setTimeout(() => { if (!placed) { placed = true; applyFabPos(); } }, 400);
+  }
+  window.addEventListener('resize', () => {
+    if (!placed) return;
+    applyFabPos();
     try { sessionStorage.setItem(KEY_POS, JSON.stringify(pos)); } catch (err) { /* position won't persist */ }
   }, true);
 
@@ -454,9 +478,7 @@ export function buildUI() {
   function reinjectTrigger() {
     if (host.isConnected) return true;
     document.documentElement.appendChild(host);
-    clampFabPos();
-    elFabStack.style.left = pos.x + 'px';
-    elFabStack.style.top = pos.y + 'px';
+    if (placed) applyFabPos();
     return host.isConnected;
   }
   function observeHostRemoval() {
@@ -467,5 +489,5 @@ export function buildUI() {
   if (document.documentElement) observeHostRemoval();
   else document.addEventListener('DOMContentLoaded', observeHostRemoval, { once: true });
 
-  return { host, root, $, els, toast, clampFabPos, reinjectTrigger, get pos() { return pos; } };
+  return { host, root, $, els, toast, clampFabPos, placeFabAtPointer, reinjectTrigger, get pos() { return pos; } };
 }

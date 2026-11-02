@@ -126,6 +126,22 @@ if (!window.__PI_WEBPICKER__) {
       GM_registerMenuCommand(t('menu.openPanel'), ctx.togglePanel);
       GM_registerMenuCommand(t('menu.startPick'), () => ctx.setActive(true));
       GM_registerMenuCommand(t('menu.toggleRecord'), () => ctx.toggleRecord());
+      let fabMenuItem = null;
+      const canReregisterMenu = () => typeof GM_unregisterMenuCommand === 'function';
+      const refreshFabMenu = () => {
+        try {
+          if (fabMenuItem !== null) {
+            if (!canReregisterMenu()) return;
+            GM_unregisterMenuCommand(fabMenuItem);
+          }
+          fabMenuItem = GM_registerMenuCommand(
+            t(ctx.isFabHidden() ? 'menu.toggleFab.show' : 'menu.toggleFab.hide'),
+            () => ctx.toggleFab(),
+          );
+        } catch (e) { /* menu registration unavailable in this manager */ }
+      };
+      ctx.refreshFabMenu = refreshFabMenu;
+      refreshFabMenu();
       GM_registerMenuCommand(t('menu.reinject'), () => {
         ui.toast(ui.reinjectTrigger() ? t('toast.reinjected') : t('toast.reinjectStuck'));
       });

@@ -1,7 +1,7 @@
 // Freeze UI + hotkeys + press isolation.
 // Radix 等模态弹窗的 FocusScope / DismissableLayer 兼容逻辑（focusin /
 // pointerdown 拦截 + composed:false 克隆补发）也在这里。
-
+import { HOTKEY } from '../constants.js';
 import { t } from '../i18n.js';
 
 export function initHotkeys(ctx) {
@@ -24,6 +24,8 @@ export function initHotkeys(ctx) {
   ctx.toggleFreeze = toggleFreeze;
 
   window.addEventListener('keydown', (e) => {
+    const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
+    if (isHot) { e.preventDefault(); e.stopPropagation(); ctx.toggleFab(); return; }
     if (ctx.pickState.pickMode && !ctx.pickState.pinned && e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       e.preventDefault(); e.stopPropagation();
       toggleFreeze();

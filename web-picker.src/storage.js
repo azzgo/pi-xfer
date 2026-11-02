@@ -15,6 +15,10 @@ export const gm = {
   },
 };
 
+export function fabHiddenKey(origin) {
+  return 'wp.fabHidden.' + origin;
+}
+
 export function debugLog(...args) {
   if (gm.get(GM_DEBUG, false) !== true) return;
   console.log('[pi.wp]', ...args);

@@ -18,12 +18,16 @@ const STRINGS = {
   'menu.reinject': { en: 'Re-inject trigger', zh: '重新注入 trigger' },
   'menu.lang': { en: 'Language → 中文', zh: '语言 → English' },
   'menu.fabSize': { en: 'Fab size → large', zh: '悬浮按钮 → 大' },
+  'menu.toggleFab.hide': { en: 'Hide trigger', zh: '隐藏 trigger' },
+  'menu.toggleFab.show': { en: 'Show trigger', zh: '显示 trigger' },
 
   'toast.autoRevoked': { en: 'Auto-connect revoked for {origin}', zh: '已撤销 {origin} 的自动连接授权' },
   'toast.reinjected': { en: 'Trigger re-injected', zh: 'trigger 已重新注入' },
   'toast.reinjectStuck': { en: 'Trigger still on the page', zh: 'trigger 仍在页面上' },
   'toast.langSwitched': { en: 'Language set to English — reload the page to apply', zh: '语言已设为中文 — 刷新页面生效' },
   'toast.fabSize': { en: 'Fab size: {size}', zh: '悬浮按钮大小：{size}' },
+  'toast.fabHidden': { en: 'Trigger hidden — hover the dot or use the menu to restore it', zh: 'trigger 已隐藏 — 悬停小圆点或用菜单恢复' },
+  'toast.fabShown': { en: 'Trigger shown', zh: 'trigger 已显示' },
 
   'bar.cycle': { en: 'cycle layer', zh: '切层' },
   'bar.jump': { en: 'jump', zh: '跳层' },

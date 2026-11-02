@@ -2,12 +2,29 @@
 // three makeDraggable instances (pick toolbar / note card / note panel).
 
 import { KEY_POS, KEY_BAR_POS, KEY_PANEL_POS } from '../constants.js';
+import { gm, fabHiddenKey } from '../storage.js';
+import { t } from '../i18n.js';
 import { makeDraggable } from './draggable.js';
 
 export function initFab(ctx) {
   const { ui, toast } = ctx;
   const { host, els } = ui;
   const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elBar, elCard, elPanel, elPH } = els;
+
+
+  const fabKey = fabHiddenKey(location.origin);
+  let fabHidden = gm.get(fabKey, false) === true;
+  function applyFabHidden() { elFabStack.classList.toggle('hidden', fabHidden); }
+  function toggleFab() {
+    fabHidden = !fabHidden;
+    gm.set(fabKey, fabHidden);
+    applyFabHidden();
+    toast(fabHidden ? t('toast.fabHidden') : t('toast.fabShown'));
+    if (ctx.refreshFabMenu) ctx.refreshFabMenu();
+  }
+  ctx.toggleFab = toggleFab;
+  ctx.isFabHidden = () => fabHidden;
+  applyFabHidden();
 
   let drag = null;
   function fabPointerDown(e) {
@@ -18,6 +35,8 @@ export function initFab(ctx) {
     try { elFab.setPointerCapture(e.pointerId); } catch (err) { /* capture unsupported — drag still works via move handler */ }
   }
   function fabPointerMove(e) {
+    ctx.lastPointer = { x: e.clientX, y: e.clientY };
+    ui.placeFabAtPointer(e.clientX, e.clientY);
     if (!ctx.isFabTarget(e) && !drag) return;
     e.stopPropagation(); e.preventDefault();
     if (!drag) return;

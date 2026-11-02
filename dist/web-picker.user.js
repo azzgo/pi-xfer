@@ -7,6 +7,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @grant        GM_setClipboard
 // @grant        unsafeWindow
 // @connect      127.0.0.1
@@ -127,6 +128,7 @@
   var GM_DEBUG = "pi.wp.debug";
   var HOST_FLAG = "data-pi-wp-host";
   var MAX_DEPTH = 8;
+  var HOTKEY = { code: "KeyP", alt: true, shift: true };
   var GM_BROKER = "wp.brokerUrl";
   var GM_TARGET = "wp.lastTarget";
   var GM_FPROPS = "wp.frameworkProps";
@@ -180,6 +182,9 @@
       }
     }
   };
+  function fabHiddenKey(origin) {
+    return "wp.fabHidden." + origin;
+  }
   function debugLog(...args) {
     if (gm.get(GM_DEBUG, false) !== true) return;
     console.log("[pi.wp]", ...args);
@@ -1146,11 +1151,15 @@
     "menu.reinject": { en: "Re-inject trigger", zh: "重新注入 trigger" },
     "menu.lang": { en: "Language → 中文", zh: "语言 → English" },
     "menu.fabSize": { en: "Fab size → large", zh: "悬浮按钮 → 大" },
+    "menu.toggleFab.hide": { en: "Hide trigger", zh: "隐藏 trigger" },
+    "menu.toggleFab.show": { en: "Show trigger", zh: "显示 trigger" },
     "toast.autoRevoked": { en: "Auto-connect revoked for {origin}", zh: "已撤销 {origin} 的自动连接授权" },
     "toast.reinjected": { en: "Trigger re-injected", zh: "trigger 已重新注入" },
     "toast.reinjectStuck": { en: "Trigger still on the page", zh: "trigger 仍在页面上" },
     "toast.langSwitched": { en: "Language set to English — reload the page to apply", zh: "语言已设为中文 — 刷新页面生效" },
     "toast.fabSize": { en: "Fab size: {size}", zh: "悬浮按钮大小：{size}" },
+    "toast.fabHidden": { en: "Trigger hidden — hover the dot or use the menu to restore it", zh: "trigger 已隐藏 — 悬停小圆点或用菜单恢复" },
+    "toast.fabShown": { en: "Trigger shown", zh: "trigger 已显示" },
     "bar.cycle": { en: "cycle layer", zh: "切层" },
     "bar.jump": { en: "jump", zh: "跳层" },
     "bar.select": { en: "select", zh: "选中" },
@@ -2102,6 +2111,11 @@
       #fab.large { width: 46px; height: 46px; border-radius: 14px; }
       #fab.large svg { width: 20px; height: 20px; }
       #fab.large #dot { top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px; }
+      /* 隐藏态：同一位置缩成半透明小圆点，hover 还原整个 36px 控件，不重排 */
+      #fabstack.hidden #fab { transform: scale(.28); opacity: .5; border-radius: 50%; }
+      #fabstack.hidden #fab:hover { transform: translateY(-2px); opacity: 1; border-radius: 11px; }
+      #fabstack.hidden #cnt, #fabstack.hidden #dot { display: none; }
+      #fabstack.pickmode { display: none; }
       /* 角标只报数，不再是第二个可点热区 */
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
@@ -2369,12 +2383,17 @@
       elFab.classList.add("large");
       elFabStack.classList.add("large");
     }
-    let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
+    const defaultFabPos = () => ({ x: window.innerWidth - 68, y: window.innerHeight - 96 });
+    let pos = defaultFabPos();
+    let placed = false;
     try {
       const saved = sessionStorage.getItem(KEY_POS);
       if (saved) {
         const p = JSON.parse(saved);
-        if (typeof p.x === "number" && typeof p.y === "number") pos = p;
+        if (typeof p.x === "number" && typeof p.y === "number") {
+          pos = p;
+          placed = true;
+        }
       }
     } catch (e) {
     }
@@ -2382,13 +2401,32 @@
       pos.x = Math.max(4, Math.min(window.innerWidth - 50, pos.x));
       pos.y = Math.max(4, Math.min(window.innerHeight - 50, pos.y));
     }
-    clampFabPos();
-    elFabStack.style.left = pos.x + "px";
-    elFabStack.style.top = pos.y + "px";
-    window.addEventListener("resize", () => {
+    function applyFabPos() {
       clampFabPos();
       elFabStack.style.left = pos.x + "px";
       elFabStack.style.top = pos.y + "px";
+      elFabStack.style.visibility = "";
+    }
+    function placeFabAtPointer(x, y) {
+      if (placed) return false;
+      pos = { x: x + 12, y: y + 12 };
+      placed = true;
+      applyFabPos();
+      return true;
+    }
+    if (placed) applyFabPos();
+    else {
+      elFabStack.style.visibility = "hidden";
+      setTimeout(() => {
+        if (!placed) {
+          placed = true;
+          applyFabPos();
+        }
+      }, 400);
+    }
+    window.addEventListener("resize", () => {
+      if (!placed) return;
+      applyFabPos();
       try {
         sessionStorage.setItem(KEY_POS, JSON.stringify(pos));
       } catch (err) {
@@ -2458,9 +2496,7 @@
     function reinjectTrigger() {
       if (host.isConnected) return true;
       document.documentElement.appendChild(host);
-      clampFabPos();
-      elFabStack.style.left = pos.x + "px";
-      elFabStack.style.top = pos.y + "px";
+      if (placed) applyFabPos();
       return host.isConnected;
     }
     function observeHostRemoval() {
@@ -2471,7 +2507,7 @@
     }
     if (document.documentElement) observeHostRemoval();
     else document.addEventListener("DOMContentLoaded", observeHostRemoval, { once: true });
-    return { host, root, $, els, toast, clampFabPos, reinjectTrigger, get pos() {
+    return { host, root, $, els, toast, clampFabPos, placeFabAtPointer, reinjectTrigger, get pos() {
       return pos;
     } };
   }
@@ -2740,7 +2776,7 @@
       host.style.pointerEvents = "none";
       elBar.style.display = on ? "flex" : "none";
       if (on) ctx.barDrag.clamp();
-      els.elFabStack.style.display = on ? "none" : "flex";
+      els.elFabStack.classList.toggle("pickmode", on);
       document.body.style.cursor = on ? "crosshair" : "";
       if (on) {
         frozen = true;
@@ -4030,6 +4066,21 @@
     const { ui, toast } = ctx;
     const { host, els } = ui;
     const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elBar, elCard, elPanel, elPH } = els;
+    const fabKey = fabHiddenKey(location.origin);
+    let fabHidden = gm.get(fabKey, false) === true;
+    function applyFabHidden() {
+      elFabStack.classList.toggle("hidden", fabHidden);
+    }
+    function toggleFab() {
+      fabHidden = !fabHidden;
+      gm.set(fabKey, fabHidden);
+      applyFabHidden();
+      toast(fabHidden ? t("toast.fabHidden") : t("toast.fabShown"));
+      if (ctx.refreshFabMenu) ctx.refreshFabMenu();
+    }
+    ctx.toggleFab = toggleFab;
+    ctx.isFabHidden = () => fabHidden;
+    applyFabHidden();
     let drag = null;
     function fabPointerDown(e) {
       if (!ctx.isFabTarget(e)) return;
@@ -4043,6 +4094,8 @@
       }
     }
     function fabPointerMove(e) {
+      ctx.lastPointer = { x: e.clientX, y: e.clientY };
+      ui.placeFabAtPointer(e.clientX, e.clientY);
       if (!ctx.isFabTarget(e) && !drag) return;
       e.stopPropagation();
       e.preventDefault();
@@ -4126,6 +4179,13 @@
     }
     ctx.toggleFreeze = toggleFreeze;
     window.addEventListener("keydown", (e) => {
+      const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
+      if (isHot) {
+        e.preventDefault();
+        e.stopPropagation();
+        ctx.toggleFab();
+        return;
+      }
       if (ctx.pickState.pickMode && !ctx.pickState.pinned && e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -4626,6 +4686,23 @@
         GM_registerMenuCommand(t("menu.openPanel"), ctx.togglePanel);
         GM_registerMenuCommand(t("menu.startPick"), () => ctx.setActive(true));
         GM_registerMenuCommand(t("menu.toggleRecord"), () => ctx.toggleRecord());
+        let fabMenuItem = null;
+        const canReregisterMenu = () => typeof GM_unregisterMenuCommand === "function";
+        const refreshFabMenu = () => {
+          try {
+            if (fabMenuItem !== null) {
+              if (!canReregisterMenu()) return;
+              GM_unregisterMenuCommand(fabMenuItem);
+            }
+            fabMenuItem = GM_registerMenuCommand(
+              t(ctx.isFabHidden() ? "menu.toggleFab.show" : "menu.toggleFab.hide"),
+              () => ctx.toggleFab()
+            );
+          } catch (e) {
+          }
+        };
+        ctx.refreshFabMenu = refreshFabMenu;
+        refreshFabMenu();
         GM_registerMenuCommand(t("menu.reinject"), () => {
           ui.toast(ui.reinjectTrigger() ? t("toast.reinjected") : t("toast.reinjectStuck"));
         });

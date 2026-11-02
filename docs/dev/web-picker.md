@@ -158,6 +158,7 @@ corner.
 
 | Shortcut | Action |
 |----------|--------|
+| ⇧⌥P | show / hide the trigger (collapses to a semi-transparent dot; remembered per domain) |
 | ⇧Enter / ⇧click (pick mode) | add / remove the highlighted element to the pending group |
 | Enter (with a pending group) | open the group note card → one shared note for all members |
 | Enter (no pending group) | pin the highlighted element for a solo note, as before |
@@ -175,6 +176,18 @@ read-out, not a second hit target: an icon and a badge sharing one visual
 body made the click result a guess. A right-click on the fab is the shortcut to
 that same panel: no hover, no second click (the page's own context menu is
 suppressed while the pointer is on the fab).
+
+**⇧⌥P** hides the trigger: it keeps its position and collapses to a ~10px
+semi-transparent dot, and hovering that dot restores the full control and its
+hover fan-out. The hidden flag is remembered per origin (`wp.fabHidden.<origin>`
+in GM storage) while the position stays per-tab (`sessionStorage`). The same
+toggle is in the Tampermonkey menu, whose label follows the current state —
+`⇧⌥P` is also the recovery path when there is no pointer handy.
+
+On a reload the trigger returns to the saved per-tab position. With no saved
+position (first visit in that tab) it waits for the first pointer move and
+appears next to the cursor — kept `visibility:hidden` until then, and falling
+back to the bottom-right corner after ~400 ms so it can never stay invisible.
 
 When the note panel is empty it carries its own two entries (**⌖ Pick elements**
 and **● Record actions**) in place of the list. They disappear as soon as the
