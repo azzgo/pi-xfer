@@ -426,16 +426,13 @@ export function buildUI() {
         elSAuto = $('sauto'), elSWrite = $('swrite');
   if (gm.get(GM_FAB_SIZE, 'small') === 'large') { elFab.classList.add('large'); elFabStack.classList.add('large'); }
 
-  const defaultFabPos = () => ({ x: window.innerWidth - 68, y: window.innerHeight - 96 });
-  let pos = defaultFabPos();
-  let placed = false;
+  let pos = { x: window.innerWidth - 68, y: window.innerHeight - 96 };
   try {
     const saved = sessionStorage.getItem(KEY_POS);
-    if (saved) {
-      const p = JSON.parse(saved);
-      if (typeof p.x === 'number' && typeof p.y === 'number') { pos = p; placed = true; }
-    }
-  } catch (e) { /* no saved position — wait for the first pointer */ }
+    const p = saved && JSON.parse(saved);
+    if (p && typeof p.x === 'number' && typeof p.y === 'number') pos = p;
+  } catch (e) { /* fall back to the default corner */ }
+  applyFabPos();
   // 视口缩小（如打开 devtools）后保存的位置可能落在可视区外，统一 clamp 回来
   function clampFabPos() {
     pos.x = Math.max(4, Math.min(window.innerWidth - 50, pos.x));
@@ -445,24 +442,18 @@ export function buildUI() {
     clampFabPos();
     elFabStack.style.left = pos.x + 'px';
     elFabStack.style.top = pos.y + 'px';
-    elFabStack.style.visibility = '';
   }
-  function placeFabAtPointer(x, y, force) {
-    if (placed && !force) return false;
+  function placeFabAtPointer(x, y) {
     pos = { x: x + 12, y: y + 12 };
-    placed = true;
     applyFabPos();
-    return true;
   }
   function snapFabToEdge() {
     const margin = 6;
     const center = pos.x + 18;
     pos.x = center <= window.innerWidth / 2 ? margin : window.innerWidth - 42;
-    placed = true;
     applyFabPos();
   }
   window.addEventListener('resize', () => {
-    if (!placed) return;
     applyFabPos();
     if (elFabStack.classList.contains('hidden')) return;
     try { sessionStorage.setItem(KEY_POS, JSON.stringify(pos)); } catch (err) { /* position won't persist */ }
@@ -489,7 +480,8 @@ export function buildUI() {
   function reinjectTrigger() {
     if (host.isConnected) return true;
     document.documentElement.appendChild(host);
-    if (placed) applyFabPos();
+    document.documentElement.appendChild(host);
+    applyFabPos();
     return host.isConnected;
   }
   function observeHostRemoval() {

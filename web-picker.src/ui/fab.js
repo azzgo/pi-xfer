@@ -19,7 +19,7 @@ export function initFab(ctx) {
     fabHidden = !fabHidden;
     gm.set(fabKey, fabHidden);
     if (fabHidden) snapHidden();
-    else if (ctx.lastPointer) ui.placeFabAtPointer(ctx.lastPointer.x, ctx.lastPointer.y, true);
+    else if (ctx.lastPointer) ui.placeFabAtPointer(ctx.lastPointer.x, ctx.lastPointer.y);
     applyFabHidden();
     toast(fabHidden ? t('toast.fabHidden') : t('toast.fabShown'));
     if (ctx.refreshFabMenu) ctx.refreshFabMenu();
