@@ -34,7 +34,6 @@ export function initFab(ctx) {
     try { elFab.setPointerCapture(e.pointerId); } catch (err) { /* capture unsupported — drag still works via move handler */ }
   }
   function fabPointerMove(e) {
-    ctx.lastPointer = { x: e.clientX, y: e.clientY };
     ui.placeFabAtPointer(e.clientX, e.clientY);
     if (!ctx.isFabTarget(e) && !drag) return;
     e.stopPropagation(); e.preventDefault();
