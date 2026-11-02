@@ -2118,11 +2118,10 @@
       #fab.large { width: 46px; height: 46px; border-radius: 14px; }
       #fab.large svg { width: 20px; height: 20px; }
       #fab.large #dot { top: -4px; left: -4px; width: 12px; height: 12px; border-radius: 6px; }
-      /* 隐藏态：同一位置缩成半透明小圆点，hover 还原整个 36px 控件，不重排 */
+      /* 隐藏态：贴边缩成半透明小圆点，hover 还原整个 36px 控件，不重排 */
       #fabstack.hidden #fab { transform: scale(.28); opacity: .5; border-radius: 50%; }
       #fabstack.hidden #fab:hover { transform: translateY(-2px); opacity: 1; border-radius: 11px; }
       #fabstack.hidden #cnt, #fabstack.hidden #dot { display: none; }
-      #fabstack.pickmode { display: none; }
       /* 角标只报数，不再是第二个可点热区 */
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
@@ -2415,26 +2414,24 @@
       elFabStack.style.top = pos.y + "px";
       elFabStack.style.visibility = "";
     }
-    function placeFabAtPointer(x, y) {
-      if (placed) return false;
+    function placeFabAtPointer(x, y, force) {
+      if (placed && !force) return false;
       pos = { x: x + 12, y: y + 12 };
       placed = true;
       applyFabPos();
       return true;
     }
-    if (placed) applyFabPos();
-    else {
-      elFabStack.style.visibility = "hidden";
-      setTimeout(() => {
-        if (!placed) {
-          placed = true;
-          applyFabPos();
-        }
-      }, 400);
+    function snapFabToEdge() {
+      const margin = 6;
+      const center = pos.x + 18;
+      pos.x = center <= window.innerWidth / 2 ? margin : window.innerWidth - 42;
+      placed = true;
+      applyFabPos();
     }
     window.addEventListener("resize", () => {
       if (!placed) return;
       applyFabPos();
+      if (elFabStack.classList.contains("hidden")) return;
       try {
         sessionStorage.setItem(KEY_POS, JSON.stringify(pos));
       } catch (err) {
@@ -4137,15 +4134,21 @@
     function applyFabHidden() {
       elFabStack.classList.toggle("hidden", fabHidden);
     }
+    function snapHidden() {
+      if (fabHidden) ui.snapFabToEdge();
+    }
     function toggleFab() {
       fabHidden = !fabHidden;
       gm.set(fabKey, fabHidden);
+      if (fabHidden) snapHidden();
+      else if (ctx.lastPointer) ui.placeFabAtPointer(ctx.lastPointer.x, ctx.lastPointer.y, true);
       applyFabHidden();
       toast(fabHidden ? t("toast.fabHidden") : t("toast.fabShown"));
       if (ctx.refreshFabMenu) ctx.refreshFabMenu();
     }
     ctx.toggleFab = toggleFab;
     ctx.isFabHidden = () => fabHidden;
+    snapHidden();
     applyFabHidden();
     let drag = null;
     function fabPointerDown(e) {
@@ -4160,6 +4163,7 @@
       }
     }
     function fabPointerMove(e) {
+      ctx.lastPointer = { x: e.clientX, y: e.clientY };
       ui.placeFabAtPointer(e.clientX, e.clientY);
       if (!ctx.isFabTarget(e) && !drag) return;
       e.stopPropagation();

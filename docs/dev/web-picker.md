@@ -177,16 +177,21 @@ body made the click result a guess. A right-click on the fab is the shortcut to
 that same panel: no hover, no second click (the page's own context menu is
 suppressed while the pointer is on the fab).
 
-**⇧⌥P** hides the trigger: it keeps its position and collapses to a ~10px
-semi-transparent dot, and hovering that dot restores the full control and its
-hover fan-out. The hidden flag is remembered per origin (`wp.fabHidden.<origin>`
-in GM storage) while the position stays per-tab (`sessionStorage`). The same
+**⇧⌥P** hides the trigger: it snaps to the nearest vertical screen edge
+(keeping its current y) and collapses to a ~10px semi-transparent dot, and
+hovering that dot restores the full control at the edge position. The snap is a
+purely visual state: the saved per-tab position keeps belonging to the shown
+state, so un-hiding does not restore the pre-hide spot — the trigger reappears
+at the current pointer position (+12px offset) when one is known, otherwise at
+the edge. The hidden flag is remembered per origin (`wp.fabHidden.<origin>` in
+GM storage) while the position stays per-tab (`sessionStorage`). The same
 toggle is in the Tampermonkey menu, whose label follows the current state —
 `⇧⌥P` is also the recovery path when there is no pointer handy.
 
-On a reload the trigger returns to the saved per-tab position. With no saved
-position (first visit in that tab) it waits for the first pointer move and
-appears next to the cursor — kept `visibility:hidden` until then, and falling
+On a reload the trigger returns to the saved per-tab position (or, if hidden,
+reappears collapsed at the edge). With no saved position (first visit in that
+tab) it waits for the first pointer move and appears next to the cursor — kept
+`visibility:hidden` until then, and falling
 back to the bottom-right corner after ~400 ms so it can never stay invisible.
 
 When the note panel is empty it carries its own two entries (**⌖ Pick elements**

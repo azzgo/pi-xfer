@@ -14,17 +14,20 @@ export function initFab(ctx) {
   const fabKey = fabHiddenKey(location.origin);
   let fabHidden = gm.get(fabKey, false) === true;
   function applyFabHidden() { elFabStack.classList.toggle('hidden', fabHidden); }
+  function snapHidden() { if (fabHidden) ui.snapFabToEdge(); }
   function toggleFab() {
     fabHidden = !fabHidden;
     gm.set(fabKey, fabHidden);
+    if (fabHidden) snapHidden();
+    else if (ctx.lastPointer) ui.placeFabAtPointer(ctx.lastPointer.x, ctx.lastPointer.y, true);
     applyFabHidden();
     toast(fabHidden ? t('toast.fabHidden') : t('toast.fabShown'));
     if (ctx.refreshFabMenu) ctx.refreshFabMenu();
   }
   ctx.toggleFab = toggleFab;
   ctx.isFabHidden = () => fabHidden;
+  snapHidden();
   applyFabHidden();
-
   let drag = null;
   function fabPointerDown(e) {
     if (!ctx.isFabTarget(e)) return;
@@ -34,6 +37,7 @@ export function initFab(ctx) {
     try { elFab.setPointerCapture(e.pointerId); } catch (err) { /* capture unsupported — drag still works via move handler */ }
   }
   function fabPointerMove(e) {
+    ctx.lastPointer = { x: e.clientX, y: e.clientY };
     ui.placeFabAtPointer(e.clientX, e.clientY);
     if (!ctx.isFabTarget(e) && !drag) return;
     e.stopPropagation(); e.preventDefault();
