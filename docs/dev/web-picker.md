@@ -83,7 +83,7 @@ the problem by hand; the picker records the timeline and scene data as one
 submit. No replay step — the human operation IS the evidence (rationale:
 ADR 0007).
 
-- **Usage** — ⇧⌥R (or fab menu 「开始/停止录制」/ `__PI_WP_API__.record()`)
+- **Usage** — fab menu 「开始/停止录制」 or `__PI_WP_API__.record()`
   enters record mode and starts immediately (the banner is the start marker).
   A banner at the bottom shows ● REC · N events with 停止/丢弃 buttons; operate
   the page freely, then 停止 → the record appears as a summary card at the top
@@ -158,9 +158,6 @@ corner.
 
 | Shortcut | Action |
 |----------|--------|
-| ⇧⌥P | enter / exit pick mode |
-| ⇧⌥L | toggle the note panel (send box inside) |
-| ⇧⌥R | start / stop record mode (temporal marker sequence, see Record mode above) |
 | ⇧Enter / ⇧click (pick mode) | add / remove the highlighted element to the pending group |
 | Enter (with a pending group) | open the group note card → one shared note for all members |
 | Enter (no pending group) | pin the highlighted element for a solo note, as before |
@@ -212,7 +209,8 @@ oracle is needed.
 
 1. **Connect** — grey dot → 连接设置… → confirm `ws://127.0.0.1:4719` →
    保存并连接. The dot turns green ("broker 已连接").
-2. **Pick** — ⇧⌥P, hover elements, ⇧⌥L for the panel, edit / delete notes.
+2. **Pick** — click the fab, hover elements, press Enter to note a pick; leave
+   pick mode (Esc) and open the panel from the fab's hover fan-out to edit / delete notes.
 3. **Send** — pick a few elements, write a prompt (or leave it empty: the agent
    gets a default instruction to respond to each pick's note / explain its
    rendering), choose the target session in the dropdown (⟳ refreshes), 发送 →

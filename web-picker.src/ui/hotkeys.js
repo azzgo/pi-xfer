@@ -2,7 +2,6 @@
 // Radix 等模态弹窗的 FocusScope / DismissableLayer 兼容逻辑（focusin /
 // pointerdown 拦截 + composed:false 克隆补发）也在这里。
 
-import { HOTKEY, HOTKEY_REC } from '../constants.js';
 import { t } from '../i18n.js';
 
 export function initHotkeys(ctx) {
@@ -25,17 +24,6 @@ export function initHotkeys(ctx) {
   ctx.toggleFreeze = toggleFreeze;
 
   window.addEventListener('keydown', (e) => {
-    const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
-    const isRecHot = e.code === HOTKEY_REC.code && e.altKey === HOTKEY_REC.alt && e.shiftKey === HOTKEY_REC.shift && !e.ctrlKey && !e.metaKey;
-    const isList = e.code === 'KeyL' && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
-    if (isRecHot) { e.preventDefault(); e.stopPropagation(); ctx.toggleRecord(); return; }
-    if (isList) { e.preventDefault(); e.stopPropagation(); ctx.togglePanel(); return; }
-    if (isHot) {
-      e.preventDefault(); e.stopPropagation();
-      if (ctx.pickState.pickMode) { if (ctx.pickState.pinned) ctx.unpin(); else ctx.setActive(false); }
-      else ctx.setActive(true);
-      return;
-    }
     if (ctx.pickState.pickMode && !ctx.pickState.pinned && e.code === 'KeyF' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       e.preventDefault(); e.stopPropagation();
       toggleFreeze();

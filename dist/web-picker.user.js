@@ -2,7 +2,7 @@
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
 // @version      1.15.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.15.0：fab 只保留一个动作（点击 = 开始拾取），标注面板与录制操作收进悬停扇出——角标不再兼职第二个热区；备注面板空态自带「⌖ 拾取元素」「● 录制操作」入口，有标注后自动消失；暂存袋发送成功后抽屉自动收起；v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.15.0：fab 只保留一个动作（点击 = 开始拾取），标注面板与录制操作收进悬停扇出——角标不再兼职第二个热区；备注面板空态自带「⌖ 拾取元素」「● 录制操作」入口，有标注后自动消失；暂存袋发送成功后抽屉自动收起；v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -18,8 +18,8 @@
  *
  * Pick/note core (unchanged from v1.0.0): Shadow-DOM overlay UI, fab with drag +
  * pick entry, frozen pick mode with layer switching (and 1-9 batch picks), IME-safe
- * note card, note panel, per-item delete, hotkeys ⇧⌥P (pick) / ⇧⌥L (panel), and
- * framework source extraction (React/Vue dev builds → source file:line).
+ * note card, note panel, per-item delete, pick-mode keys (Enter / Esc / [ ] / 1-9
+ * for layer + batch, ⇧Enter / ⌫ for the pending group, F for freeze), and
  *
  * Shift group (new in v1.5): ⇧Enter / ⇧click toggles the highlighted element into
  * a pending group (amber dashed marks, in-memory only — DOM refs can't persist);
@@ -111,8 +111,8 @@
  *   1. Open the Tampermonkey Dashboard → "+" (Create a new script).
  *   2. Replace the editor content with this entire file and save (Ctrl/Cmd+S).
  *   3. Reload any page: the round fab appears near the bottom-right corner.
- *      ⇧⌥P = enter/exit pick mode, ⇧⌥L = toggle the note panel (send box inside);
- *      in pick mode ⇧Enter/⇧click add elements to a group, Enter submits its note,
+ *      click the fab to start / stop picking (panel, record and the trigger
+ *      toggle all live in its hover fan-out and the Tampermonkey menu);
  *      ⌫ (or the toolbar chip / a group mark's number badge) clears pending group
  *      members; toolbar / note card / panel are all draggable.
  */
@@ -127,8 +127,6 @@
   var GM_DEBUG = "pi.wp.debug";
   var HOST_FLAG = "data-pi-wp-host";
   var MAX_DEPTH = 8;
-  var HOTKEY = { code: "KeyP", alt: true, shift: true };
-  var HOTKEY_REC = { code: "KeyR", alt: true, shift: true };
   var GM_BROKER = "wp.brokerUrl";
   var GM_TARGET = "wp.lastTarget";
   var GM_FPROPS = "wp.frameworkProps";
@@ -1142,9 +1140,9 @@
     "menu.disconnect": { en: "Disconnect broker", zh: "断开 broker" },
     "menu.settings": { en: "Connection settings…", zh: "连接设置…" },
     "menu.revokeAuto": { en: "Revoke auto-connect for this page", zh: "撤销本页自动连接" },
-    "menu.openPanel": { en: "Open pick panel (⇧⌥L)", zh: "打开标注面板 (⇧⌥L)" },
-    "menu.startPick": { en: "Start picking (⇧⌥P)", zh: "开始拾取 (⇧⌥P)" },
-    "menu.toggleRecord": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制 (⇧⌥R)" },
+    "menu.openPanel": { en: "Open pick panel", zh: "打开标注面板" },
+    "menu.startPick": { en: "Start picking", zh: "开始拾取" },
+    "menu.toggleRecord": { en: "Start/stop recording", zh: "开始/停止录制" },
     "menu.reinject": { en: "Re-inject trigger", zh: "重新注入 trigger" },
     "menu.lang": { en: "Language → 中文", zh: "语言 → English" },
     "menu.fabSize": { en: "Fab size → large", zh: "悬浮按钮 → 大" },
@@ -1165,14 +1163,14 @@
     "fab.title": { en: "pi xfer — pick, record, hand off", zh: "pi xfer — 拾取、录制、交接" },
     "fab.hint": { en: "Click to start picking · hover for panel / record · right-click for the panel", zh: "点击开始拾取 · 悬停展开面板 / 录制 · 右键打开面板" },
     "fabrow.panel": { en: "Picks", zh: "标注面板" },
-    "fabrow.panel.title": { en: "Open the pick panel (⇧⌥L)", zh: "打开标注面板（⇧⌥L）" },
+    "fabrow.panel.title": { en: "Open the pick panel", zh: "打开标注面板" },
     "fabrow.record": { en: "Record", zh: "录制操作" },
-    "fabrow.record.title": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制（⇧⌥R）" },
+    "fabrow.record.title": { en: "Start/stop recording", zh: "开始/停止录制" },
     "cnt.title": { en: "Picked elements / record", zh: "已选元素 / 录制" },
     "panel.pick": { en: "⌖ Pick elements", zh: "⌖ 拾取元素" },
-    "panel.pick.title": { en: "Start picking elements (⇧⌥P)", zh: "开始拾取元素（⇧⌥P）" },
+    "panel.pick.title": { en: "Start picking elements", zh: "开始拾取元素" },
     "panel.record": { en: "● Record actions", zh: "● 录制操作" },
-    "panel.record.title": { en: "Start/stop recording (⇧⌥R)", zh: "开始/停止录制（⇧⌥R）" },
+    "panel.record.title": { en: "Start/stop recording", zh: "开始/停止录制" },
     "recbadge": { en: "panel", zh: "面板" },
     "recstop": { en: "■ Stop", zh: "■ 停止" },
     "recdiscard": { en: "Discard", zh: "丢弃" },
@@ -1202,7 +1200,7 @@
     "note.synced": { en: " (synced to {n} in group)", zh: "（已同步组内 {n} 项）" },
     "record.deleted": { en: "Record deleted", zh: "已删除操作记录" },
     "record.summary": { en: "⏺ Record {id} · {n} events", zh: "⏺ 记录 {id} · {n} 事件" },
-    "record.started": { en: "Recording started · interact with the page, ⇧⌥R to stop", zh: "录制开始 · 操作页面，⇧⌥R 停止" },
+    "record.started": { en: "Recording started · interact with the page, stop from the banner or menu", zh: "录制开始 · 操作页面，用横幅或菜单停止" },
     "record.discarded": { en: "Recording discarded", zh: "录制已丢弃" },
     "record.done": { en: "Recording done · {n} events · open the panel to send", zh: "录制完成 · {n} 事件 · 打开面板发送" },
     "send.label": { en: "Send to agent (⌘/Ctrl+Enter to send · prompt optional)", zh: "发送到 agent（⌘/Ctrl+Enter 发送 · prompt 可留空）" },
@@ -4128,30 +4126,6 @@
     }
     ctx.toggleFreeze = toggleFreeze;
     window.addEventListener("keydown", (e) => {
-      const isHot = e.code === HOTKEY.code && e.altKey === HOTKEY.alt && e.shiftKey === HOTKEY.shift && !e.ctrlKey && !e.metaKey;
-      const isRecHot = e.code === HOTKEY_REC.code && e.altKey === HOTKEY_REC.alt && e.shiftKey === HOTKEY_REC.shift && !e.ctrlKey && !e.metaKey;
-      const isList = e.code === "KeyL" && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
-      if (isRecHot) {
-        e.preventDefault();
-        e.stopPropagation();
-        ctx.toggleRecord();
-        return;
-      }
-      if (isList) {
-        e.preventDefault();
-        e.stopPropagation();
-        ctx.togglePanel();
-        return;
-      }
-      if (isHot) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (ctx.pickState.pickMode) {
-          if (ctx.pickState.pinned) ctx.unpin();
-          else ctx.setActive(false);
-        } else ctx.setActive(true);
-        return;
-      }
       if (ctx.pickState.pickMode && !ctx.pickState.pinned && e.code === "KeyF" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -4604,7 +4578,7 @@
       if (ctx.renderSendAffordance) ctx.renderSendAffordance(conn.getState());
       conn.maybeAutoConnect();
       conn.maybeProbePolicyBlocked();
-      debugLog("ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · " + location.host);
+      debugLog("ready — ⇧Enter group · ⌫ clear group · " + location.host);
       window.__PI_WP_API__ = {
         start: () => {
           ctx.setActive(true);

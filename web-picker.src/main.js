@@ -73,7 +73,7 @@ if (!window.__PI_WEBPICKER__) {
     initFab(ctx);
     ctx.consoleRing = consoleRing;   // record stop 时按窗口切片用
     ctx.netRing = netRing;
-    initRecord(ctx);       // 先于 hotkeys，⇧⌥R 才有目标
+    initRecord(ctx);       // 先于 hotkeys，菜单里的录制开关才有目标
     initHotkeys(ctx);
 
     ctx.refreshCount();
@@ -87,7 +87,7 @@ if (!window.__PI_WEBPICKER__) {
   // broker 的站点，光看状态行要用户点一下才知道——这一次探测让 blocked 徽标立刻
   // 出现，且该判定按 origin 记住（policyBlockedKey），此后不再重复探测。
   conn.maybeProbePolicyBlocked();
-    debugLog('ready — ⇧⌥P pick · ⇧⌥L panel · ⇧Enter group · ⌫ clear group · ' + location.host);
+    debugLog('ready — ⇧Enter group · ⌫ clear group · ' + location.host);
 
     // ---------- programmatic API (DevTools console) ----------
     window.__PI_WP_API__ = {

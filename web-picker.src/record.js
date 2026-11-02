@@ -1,5 +1,5 @@
 // Record mode — the temporal half of the marker pair (Pick = where, Record =
-// when). The user enters record mode (⇧⌥R / fab menu / API) and operates the
+// when). The user enters record mode (fab menu / API) and operates the
 // page freely; passive capture listeners record core actions (click,
 // field-level input, SPA route change, commits) into one sequence. Stop
 // freezes the timeline, slices the console/net rings over the same window,

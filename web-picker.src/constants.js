@@ -11,7 +11,6 @@ export const GM_DEBUG = 'pi.wp.debug';           // debug flag (GM storage)
 export const HOST_FLAG = 'data-pi-wp-host';
 export const MAX_DEPTH = 8;
 export const HOTKEY = { code: 'KeyP', alt: true, shift: true };
-export const HOTKEY_REC = { code: 'KeyR', alt: true, shift: true };
 export const GM_BROKER = 'wp.brokerUrl';        // broker WS URL override (settings modal)
 export const GM_TARGET = 'wp.lastTarget';       // last used local target name
 export const GM_FPROPS = 'wp.frameworkProps';   // framework.inspect props/state opt-in (default off)

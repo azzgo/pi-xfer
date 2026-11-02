@@ -2,7 +2,7 @@
 // @name         Xfer Web Picker
 // @namespace    pi.dotfiles
 // @version      1.15.0
-// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.15.0：fab 只保留一个动作（点击 = 开始拾取），标注面板与录制操作收进悬停扇出——角标不再兼职第二个热区；备注面板空态自带「⌖ 拾取元素」「● 录制操作」入口，有标注后自动消失；暂存袋发送成功后抽屉自动收起；v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式 ⇧⌥R 记时序事件与现场切片）
+// @description  元素拾取 + 备注批注 + broker 连接/send + 复制 handoff prompt + 页面工具只读采集（v1.15.0：fab 只保留一个动作（点击 = 开始拾取），标注面板与录制操作收进悬停扇出——角标不再兼职第二个热区；备注面板空态自带「⌖ 拾取元素」「● 录制操作」入口，有标注后自动消失；暂存袋发送成功后抽屉自动收起；v1.14.1：fab 上的 marker 角标常驻显示——无 marker 时为灰色 0，仍可点开标注面板取目标/反查/网络/日志；v1.14.0：SSE 内容捕获——fetch text/event-stream 经 clone 旁路解析、EventSource 记录 message/命名事件，每流保留最近 50 条、逐条 8KB 尾部截断，SSE 专用 1MB 预算；network.sse op 分页读取事件内容；v1.13：Record 模式记时序事件与现场切片）
 // @match        *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -18,8 +18,8 @@
  *
  * Pick/note core (unchanged from v1.0.0): Shadow-DOM overlay UI, fab with drag +
  * pick entry, frozen pick mode with layer switching (and 1-9 batch picks), IME-safe
- * note card, note panel, per-item delete, hotkeys ⇧⌥P (pick) / ⇧⌥L (panel), and
- * framework source extraction (React/Vue dev builds → source file:line).
+ * note card, note panel, per-item delete, pick-mode keys (Enter / Esc / [ ] / 1-9
+ * for layer + batch, ⇧Enter / ⌫ for the pending group, F for freeze), and
  *
  * Shift group (new in v1.5): ⇧Enter / ⇧click toggles the highlighted element into
  * a pending group (amber dashed marks, in-memory only — DOM refs can't persist);
@@ -111,8 +111,8 @@
  *   1. Open the Tampermonkey Dashboard → "+" (Create a new script).
  *   2. Replace the editor content with this entire file and save (Ctrl/Cmd+S).
  *   3. Reload any page: the round fab appears near the bottom-right corner.
- *      ⇧⌥P = enter/exit pick mode, ⇧⌥L = toggle the note panel (send box inside);
- *      in pick mode ⇧Enter/⇧click add elements to a group, Enter submits its note,
+ *      click the fab to start / stop picking (panel, record and the trigger
+ *      toggle all live in its hover fan-out and the Tampermonkey menu);
  *      ⌫ (or the toolbar chip / a group mark's number badge) clears pending group
  *      members; toolbar / note card / panel are all draggable.
  */
