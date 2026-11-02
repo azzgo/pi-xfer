@@ -1144,7 +1144,7 @@
     "menu.connect": { en: "Connect broker", zh: "连接 broker" },
     "menu.disconnect": { en: "Disconnect broker", zh: "断开 broker" },
     "menu.settings": { en: "Connection settings…", zh: "连接设置…" },
-    "menu.revokeAuto": { en: "Revoke auto-connect for this page", zh: "撤销本页自动连接" },
+    "menu.revokeAuto": { en: "Disable auto-connect for this domain", zh: "关闭本域名的自动连接" },
     "menu.openPanel": { en: "Open pick panel", zh: "打开标注面板" },
     "menu.startPick": { en: "Start picking", zh: "开始拾取" },
     "menu.toggleRecord": { en: "Start/stop recording", zh: "开始/停止录制" },
@@ -1258,7 +1258,7 @@
     "settings.title": { en: "Connection settings", zh: "连接设置" },
     "settings.burl": { en: "BROKER URL (WS)", zh: "BROKER 地址（WS）" },
     "settings.sprops": { en: "framework.inspect includes component props/state (default off)", zh: "framework.inspect 附带组件 props/state（默认关）" },
-    "settings.sauto": { en: "Auto-connect broker on this domain (authorized after one manual connect; silently reconnects on reload)", zh: "本域名自动连接 broker（手动连上过一次即授权，页面刷新后静默重连）" },
+    "settings.sauto": { en: "Auto-connect broker on this domain (whitelist; reconnects automatically on reload)", zh: "本域名自动连接 broker（白名单；页面刷新后自动重连）" },
     "settings.swrite": { en: "Allow agent to operate this page (dom.click / dom.setValue, default off)", zh: "允许 agent 操作本页（dom.click / dom.setValue，默认关）" },
     "settings.cancel": { en: "Cancel", zh: "取消" },
     "settings.save": { en: "Save & connect", zh: "保存并连接" },
@@ -1486,7 +1486,6 @@
         if (!f || typeof f.type !== "string") return;
         if (f.type === WIRE.KIND_WELCOME) {
           setState("on");
-          if (!silent) gm2.set(autoLinkKey(location.origin), true);
           gm2.set(policyBlockedKey(location.origin), false);
           clearBackoff();
           const wasSilent = silent;
@@ -1617,7 +1616,7 @@
     function revokeAutoLink() {
       gm2.set(autoLinkKey(location.origin), false);
     }
-    const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：本页已授权 broker 自动重连，修改代码导致页面刷新后，连接会自动恢复（重连期间 page.request 可能短暂返回 no_tabs/timeout，等几秒重试即可，重试上限 3 次）。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。";
+    const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：若本域已在设置勾选「本域名自动连接 broker」（白名单），页面刷新后连接会自动恢复；未在白名单时刷新后不会自动重连，page.request 可能返回 no_tabs/timeout，请提示用户手动重连或勾选白名单。重连/重试期间等几秒再试，上限 3 次。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。";
     function submitToAgent(prompt, targetName, record) {
       return new Promise((resolve) => {
         if (wsState !== "on") {

@@ -75,14 +75,14 @@ beforeEach(() => {
   globalThis.document = makeDocument();
 });
 
-test('manual connect success authorizes auto-link for the origin', async () => {
+test('manual connect does NOT persist auto-link authorization', async () => {
   const { conn } = makeConn();
   assert.equal(gmStore.get(ORIGIN_KEY), undefined);
   const attempt = conn.connect();
   lastSock().open();
   lastSock().message({ type: 'welcome' });
   assert.equal(await attempt, true);
-  assert.equal(gmStore.get(ORIGIN_KEY), true);
+  assert.equal(gmStore.get(ORIGIN_KEY), undefined);
 });
 
 test('failed manual connect does NOT authorize auto-link', async () => {

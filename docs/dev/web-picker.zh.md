@@ -26,10 +26,11 @@
   外加受门控的写操作 `dom.click` · `dom.setValue`（见下文的自动连接/授权）。结果以
   `page.response{ok:true, text:<JSON>}` 返回。console 与 network 抓取是常开的环形缓冲
   （200 条），因此 agent 也能看到请求之前的历史。v1.2 的询问模态框已移除。
-- **自动连接（v1.12）** — 第一次**手动**连接成功即授权该 origin
-  （GM storage 中的 `wp.autoLink.<origin>`）：此后刷新（HMR 整页刷新、broker 重启）都会
-  以指数退避（1s/4s/16s→60s）静默重连。按 origin 撤销：设置里的复选框「本域名自动连接
-  broker」或 GM 菜单「撤销本页自动连接」；手动断开只会暂停当前这次页面加载的自动连接。
+- **自动连接（v1.12，自 F1 起为白名单）** — 自动连接是显式的按 origin 白名单：
+  设置里的复选框「本域名自动连接 broker」或 GM 菜单将 GM storage 中的
+  `wp.autoLink.<origin>` 置为 `true`；只有白名单内的 origin 会在刷新（HMR 整页刷新、
+  broker 重启）时以指数退避（1s/4s/16s→60s）静默重连。手动连接只对当前这次页面加载
+  生效，不再授权任何东西；手动断开只会暂停当前这次页面加载的自动连接。
   另一个按 origin 的复选框「允许 agent 操作本页」（`wp.writeOps.<origin>`）开启写操作——
   `dom.click`（pointer/mouse 序列 + native click）、`dom.setValue`
   （native setter + input/change，让 React 受控输入框得以更新）以及读操作 `page.wait`。

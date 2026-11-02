@@ -15,12 +15,12 @@
 // cannot succeed on that page, so backoff stops and the UI says "policy", not
 // "broker down".
 //
-// Auto-link (v1.12): the first MANUAL successful connect writes a per-origin
-// authorization (`wp.autoLink.<origin>` in GM storage) — the user has linked
-// this origin once, so reloads/HMR full refreshes may reconnect on their own.
-// Auto attempts are silent (no toast) and back off 1s/4s/16s… capped at 60s;
-// a manual `disconnect()` cancels the loop for this page load (the
-// authorization itself is revoked only via settings/menu).
+// Auto-link (v1.12): per-origin whitelist — only `wp.autoLink.<origin> ===
+// true` in GM storage (settings checkbox / GM menu) lets reloads/HMR full
+// refreshes reconnect on their own. Auto attempts are silent (no toast) and
+// back off 1s/4s/16s… capped at 60s; a manual connect serves the current
+// page load only; a manual `disconnect()` cancels the loop for this page
+// load.
 
 import { GM_BROKER, DEFAULT_BROKER_URL } from './constants.js';
 import { t } from './i18n.js';
@@ -188,9 +188,6 @@ export function createBrokerConn(deps) {
       if (!f || typeof f.type !== 'string') return;
       if (f.type === PROTOCOL.KIND_WELCOME) {
         setState('on');
-        // 首次手动连接成功 = 用户已在本 origin 授权自动 link；此后 reload/HMR
-        // 整页刷新都会静默自动重连（撤销走设置弹窗 / GM 菜单）。
-        if (!silent) gm.set(autoLinkKey(location.origin), true);
         gm.set(policyBlockedKey(location.origin), false);   // reachable again — forget the verdict
         clearBackoff();
         const wasSilent = silent; silent = false;
@@ -330,7 +327,7 @@ export function createBrokerConn(deps) {
   // 反向查询规则随每次 send 下发（prompt 尾部追加）：v1.12 起，用户手动连过
   // broker 的域名会在刷新后自动重连，所以改代码 → 页面刷新 → 重连后 agent 可以
   // 重新查询验证结果；只在 auto-link 未授权的页面才维持「改代码前一次查完」。
-  const PAGE_QUERY_RULE = '\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：本页已授权 broker 自动重连，修改代码导致页面刷新后，连接会自动恢复（重连期间 page.request 可能短暂返回 no_tabs/timeout，等几秒重试即可，重试上限 3 次）。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。';
+  const PAGE_QUERY_RULE = '\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：若本域已在设置勾选「本域名自动连接 broker」（白名单），页面刷新后连接会自动恢复；未在白名单时刷新后不会自动重连，page.request 可能返回 no_tabs/timeout，请提示用户手动重连或勾选白名单。重连/重试期间等几秒再试，上限 3 次。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。';
 
   // record (v1.13)：可选的 Record-mode 时间线，随帧带出（加性字段，旧 broker 忽略）。
   function submitToAgent(prompt, targetName, record) {

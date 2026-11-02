@@ -33,12 +33,13 @@ page side:
   `page.response{ok:true, text:<JSON>}`. Console and network captures are
   always-on ring buffers (200 entries), so the agent sees pre-request
   history too. The v1.2 ask modal was removed.
-- **Auto-link (v1.12)** — the first MANUAL successful connect authorizes the
-  origin (`wp.autoLink.<origin>` in GM storage): from then on reloads (HMR
-  full refresh, broker restart) reconnect silently with exponential backoff
-  (1s/4s/16s→60s). Revoke per origin via the settings checkbox 「本域名自动连接
-  broker」 or the GM menu 「撤销本页自动连接」; a manual disconnect only pauses
-  auto-link for the current page load. A companion per-origin checkbox
+- **Auto-link (v1.12, whitelist since F1)** — auto-connect is an explicit
+  per-origin whitelist: the settings checkbox 「本域名自动连接 broker」 or the
+  GM menu sets `wp.autoLink.<origin> === true` in GM storage; only whitelisted
+  origins reconnect silently across reloads (HMR full refresh, broker
+  restart) with exponential backoff (1s/4s/16s→60s). A manual connect serves
+  the current page load only and no longer authorizes anything; a manual
+  disconnect only pauses auto-link for the current page load. A companion per-origin checkbox
   「允许 agent 操作本页」 (`wp.writeOps.<origin>`) enables the write ops —
   `dom.click` (pointer/mouse sequence + native click), `dom.setValue`
   (native setter + input/change so React controlled inputs update) and the
