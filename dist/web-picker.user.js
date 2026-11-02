@@ -2122,6 +2122,7 @@
       #fabstack.hidden #fab { transform: scale(.28); opacity: .5; border-radius: 50%; }
       #fabstack.hidden #fab:hover { transform: translateY(-2px); opacity: 1; border-radius: 11px; }
       #fabstack.hidden #cnt, #fabstack.hidden #dot { display: none; }
+      #fabstack.pickmode { display: none; }
       /* 角标只报数，不再是第二个可点热区 */
       #cnt { position: absolute; bottom: -6px; right: -6px; min-width: 20px; height: 20px; border-radius: 10px;
         background: #475569; color: #f1f5f9; font: 700 11px/20px var(--wp-font); text-align: center; padding: 0 5px;
