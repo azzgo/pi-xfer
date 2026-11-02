@@ -232,9 +232,9 @@ export interface BoardApi {
 
 const BOARD_SUBS: BoardCompletion[] = [
   { value: "board list", label: "list", description: "List cards on the board" },
-  { value: "board new", label: "new", description: "Create a card (title optional — the agent names it)" },
+  { value: "board new", label: "new", description: "Create a card (quoted title allowed; no title — the agent names it)" },
   { value: "board read", label: "read", description: "Inject a card's full content into the conversation" },
-  { value: "board write", label: "write", description: "Append an entry — the agent composes it from your intent" },
+  { value: "board write", label: "write", description: "Append an entry (text optional — the agent composes it)" },
   { value: "board del", label: "del", description: "Delete a single card (confirm)" },
   { value: "board clean", label: "clean", description: "Delete all cards (confirm)" },
   { value: "board open", label: "open", description: "Open the board directory in the file manager" },

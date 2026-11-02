@@ -4,6 +4,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { AdminManager, DEFAULT_ADMIN_PORT } from "./admin/admin-manager.ts";
+import { stripOuterQuotes } from "./board/args.ts";
 import { registerBoard, renderCard } from "./board/board.ts";
 import type { XferController } from "./session/controller.ts";
 import { BrokerManager } from "./broker/broker-manager.ts";
@@ -283,7 +284,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           "   /xfer status             — listener status\n" +
           "   /xfer name [<name>]      — show or set name\n" +
           "   /xfer desc [<text>]     — set or clear this node's description (no text clears; synced to mesh when online)\n" +
-          "   /xfer board list|new|read|write|del|clean|open — async collaboration board\n" +
+          "   /xfer board list|new|read|write|del|clean|open — async collaboration board (new [title...], write <id> [text...])\n" +
           "   /xfer broker start|status|stop|logs — broker daemon lifecycle (owns the page-tool channel)\n" +
           "   /xfer admin [stop]       — local web console (start is idempotent, opens the URL)\n" +
           "   /xfer mesh [<status|up|down|list|setup|name> <request>] — mesh transport\n" +
@@ -755,9 +756,9 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         if (!sub || sub === "help") {
           ctx.ui.notify(
             "📋 /xfer board list              — list cards\n" +
-            "   /xfer board new [title...]   — create a card (title optional — the agent names it)\n" +
+            "   /xfer board new [title...]   — create a card (quoted title allowed; no title — the agent names it)\n" +
             "   /xfer board read <id>        — inject a card into the conversation\n" +
-            "   /xfer board write <id> <intent> — the agent composes an entry from your intent\n" +
+            "   /xfer board write <id> [text...] — append an entry (text optional — the agent composes it from the conversation)\n" +
             "   /xfer board del <id>         — delete a single card\n" +
             "   /xfer board clean            — delete all cards\n" +
             "   /xfer board open             — open the board directory in the file manager",
@@ -778,7 +779,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         }
 
         if (sub === "new") {
-          const title = rest.join(" ").trim();
+          const title = stripOuterQuotes(rest.join(" "));
           if (title) {
             const card = board.board.create(title, author);
             ctx.ui.notify(`🆕 ${card.id} — ${card.title}`, "info");
@@ -817,25 +818,34 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           );
           return;
         }
-
         if (sub === "write") {
           const id = rest[0];
-          const intent = rest.slice(1).join(" ").trim();
+          const intent = stripOuterQuotes(rest.slice(1).join(" "));
           const card = id ? board.board.read(id) : null;
           if (!card) {
             ctx.ui.notify(`❌ Card not found: ${id ?? "(no id given)"} — see /xfer board list`, "error");
             return;
           }
-          if (!intent) {
-            ctx.ui.notify("Usage: /xfer board write <id> <intent> — describe what to record", "error");
+          board.board.setPending({ cardId: card.id, isNew: false });
+          if (intent) {
+            pi.sendUserMessage(
+              `## Board Entry Request\n\n` +
+              `Card \`${card.id}\` — ${card.title}\n\n` +
+              `Human intent: ${intent}\n\n` +
+              `Based on the conversation and this intent, compose one entry for the card.\n\n` +
+              `Reply with ONLY a fenced code block tagged \`board-entry\`, nothing else:\n\n` +
+              "```board-entry\n" +
+              "type: note | finding | question | answer\n" +
+              "---\n" +
+              "<markdown body of the entry>\n" +
+              "```",
+              { deliverAs: "followUp", triggerTurn: true },
+            );
             return;
           }
-          board.board.setPending({ cardId: card.id, isNew: false });
           pi.sendUserMessage(
             `## Board Entry Request\n\n` +
-            `Card \`${card.id}\` — ${card.title}\n\n` +
-            `Human intent: ${intent}\n\n` +
-            `Based on the conversation and this intent, compose one entry for the card.\n\n` +
+            `Based on the current conversation, append one entry to the existing card \`${card.id}\` — ${card.title}.\n\n` +
             `Reply with ONLY a fenced code block tagged \`board-entry\`, nothing else:\n\n` +
             "```board-entry\n" +
             "type: note | finding | question | answer\n" +
