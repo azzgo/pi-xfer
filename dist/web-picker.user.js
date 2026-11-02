@@ -2514,7 +2514,7 @@
     }
     if (document.documentElement) observeHostRemoval();
     else document.addEventListener("DOMContentLoaded", observeHostRemoval, { once: true });
-    return { host, root, $, els, toast, clampFabPos, placeFabAtPointer, reinjectTrigger, get pos() {
+    return { host, root, $, els, toast, clampFabPos, placeFabAtPointer, snapFabToEdge, reinjectTrigger, get pos() {
       return pos;
     } };
   }
