@@ -11,7 +11,6 @@ export function initFab(ctx) {
   const { host, els } = ui;
   const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elBar, elCard, elPanel, elPH } = els;
 
-
   const fabKey = fabHiddenKey(location.origin);
   let fabHidden = gm.get(fabKey, false) === true;
   function applyFabHidden() { elFabStack.classList.toggle('hidden', fabHidden); }

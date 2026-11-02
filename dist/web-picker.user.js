@@ -2035,6 +2035,13 @@
       .gmark .gi { position: absolute; top: -16px; left: -2px; background: var(--wp-amber);
         color: #fff; font: 700 10px/16px var(--wp-mono); padding: 0 5px;
         border-radius: 4px 4px 4px 0; white-space: nowrap; pointer-events: auto; cursor: pointer; }
+      /* ---- picked markers while the note panel is open (read-only, blue) ---- */
+      #pmarks { position: fixed; inset: 0; pointer-events: none; display: none; }
+      .pmark { position: fixed; margin: 0; border: 2px solid var(--wp-accent);
+        background: rgba(79,140,255,.10); border-radius: 3px; pointer-events: none; }
+      .pmark .pi { position: absolute; top: -16px; left: -2px; background: var(--wp-accent);
+        color: #fff; font: 700 10px/16px var(--wp-mono); padding: 0 5px;
+        border-radius: 4px 4px 0 0; white-space: nowrap; pointer-events: none; }
       #badge { position: fixed; top: 0; left: 0; transform: translate(-50%, -150%);
         background: var(--wp-dark); color: #fff; font: 600 11px/1.4 var(--wp-font);
         padding: 4px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; display: none;
@@ -2285,6 +2292,7 @@
     </style>
     <div id="hl"></div>
     <div id="gwrap"></div>
+    <div id="pmarks"></div>
     <div id="badge"></div>
     <div id="info"></div>
     <div id="bar"><b>PICK</b>
@@ -2378,7 +2386,7 @@
     </div>
   `);
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elFabStack = $("fabstack"), elFabRowPanel = $("frow-panel"), elFabRowRecord = $("frow-record"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elPMarks = $("pmarks"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elFabStack = $("fabstack"), elFabRowPanel = $("frow-panel"), elFabRowRecord = $("frow-record"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
     if (gm.get(GM_FAB_SIZE, "small") === "large") {
       elFab.classList.add("large");
       elFabStack.classList.add("large");
@@ -2441,6 +2449,7 @@
     const els = {
       elHL,
       elGWrap,
+      elPMarks,
       elBadge,
       elInfo,
       elBar,
@@ -2515,7 +2524,7 @@
   // web-picker.src/ui/panel.js
   function initPanel(ctx) {
     const { els, toast } = ctx;
-    const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
+    const { elCnt, elPanel, elPlist, elPcount, elPclose, elPMarks } = els;
     let panelOpen = false;
     function refreshCount() {
       const n = loadBatch().length + (ctx.getRecord && ctx.getRecord() ? 1 : 0);
@@ -2568,13 +2577,65 @@
       elPcount.textContent = b.length || recHtml ? t("count.items", { n: b.length + (recHtml ? 1 : 0) }) : "";
       if (!b.length && !recHtml) {
         renderEmptyState();
+        renderPickMarks();
         return;
       }
       setHTML(elPlist, recHtml + b.map(
         (r, i) => '<div class="item" data-i="' + i + '"><div class="psel">' + escapeHtml(r.selector) + "</div>" + (r.group ? `<div class="pgroup">${t("group.label", { g: escapeHtml(r.group) })}</div>` : "") + (r.source && r.source.file ? '<div class="psrc">⌘ ' + escapeHtml(r.source.component + " · " + r.source.file + ":" + r.source.line) + "</div>" : "") + (r.textPreview ? '<div class="pprev">' + escapeHtml(r.textPreview) + "</div>" : "") + `<textarea placeholder="${t("note.placeholder")}">` + escapeHtml(r.note || "") + '</textarea><div class="prow"><span class="pts">' + new Date(r.ts).toLocaleTimeString() + `</span><button class="del">${t("btn.delete")}</button></div></div>`
       ).join(""));
+      renderPickMarks();
     }
     ctx.renderPanel = renderPanel;
+    let markRaf = 0;
+    function resolvePick(rec) {
+      try {
+        const el = document.querySelector(rec.selector);
+        if (el) return el;
+      } catch (e) {
+      }
+      if (!rec.xpath) return null;
+      try {
+        const found = document.evaluate(rec.xpath, document, null, 9, null);
+        return found && found.singleNodeValue ? found.singleNodeValue : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    function renderPickMarks() {
+      clearHTML(elPMarks);
+      if (!panelOpen) {
+        elPMarks.style.display = "none";
+        return;
+      }
+      let drawn = false;
+      loadBatch().forEach((rec, i) => {
+        const el = resolvePick(rec);
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        if (r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) return;
+        const m = document.createElement("div");
+        m.className = "pmark";
+        Object.assign(m.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" });
+        const tag = document.createElement("span");
+        tag.className = "pi";
+        tag.textContent = String(i + 1);
+        m.appendChild(tag);
+        elPMarks.appendChild(m);
+        drawn = true;
+      });
+      elPMarks.style.display = drawn ? "block" : "none";
+    }
+    ctx.renderPickMarks = renderPickMarks;
+    function schedulePickMarks() {
+      if (!panelOpen || markRaf) return;
+      markRaf = requestAnimationFrame(() => {
+        markRaf = 0;
+        renderPickMarks();
+      });
+    }
+    window.addEventListener("scroll", schedulePickMarks, { passive: true, capture: true });
+    window.addEventListener("resize", schedulePickMarks, { passive: true, capture: true });
     function openPanel() {
       if (ctx.getBagOpen && ctx.getBagOpen() && ctx.closeBag) ctx.closeBag();
       panelOpen = true;
@@ -2586,9 +2647,14 @@
     }
     function closePanel() {
       panelOpen = false;
+      if (markRaf) {
+        cancelAnimationFrame(markRaf);
+        markRaf = 0;
+      }
       ctx.closeDrop();
       ctx.closeSendMenu();
       elPanel.style.display = "none";
+      renderPickMarks();
     }
     ctx.closePanel = closePanel;
     function togglePanel() {

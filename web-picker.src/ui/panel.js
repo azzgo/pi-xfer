@@ -12,7 +12,7 @@ import { setHTML, clearHTML } from '../tt.js';
 
 export function initPanel(ctx) {
   const { els, toast } = ctx;
-  const { elCnt, elPanel, elPlist, elPcount, elPclose } = els;
+  const { elCnt, elPanel, elPlist, elPcount, elPclose, elPMarks } = els;
 
   let panelOpen = false;
 
@@ -71,7 +71,7 @@ export function initPanel(ctx) {
     const b = loadBatch();
     const recHtml = ctx.renderRecordSummary ? ctx.renderRecordSummary() : '';
     elPcount.textContent = (b.length || recHtml) ? t('count.items', { n: b.length + (recHtml ? 1 : 0) }) : '';
-    if (!b.length && !recHtml) { renderEmptyState(); return; }
+    if (!b.length && !recHtml) { renderEmptyState(); renderPickMarks(); return; }
     setHTML(elPlist, recHtml + b.map((r, i) =>
       '<div class="item" data-i="' + i + '">' +
         '<div class="psel">' + escapeHtml(r.selector) + '</div>' +
@@ -83,8 +83,54 @@ export function initPanel(ctx) {
         `<button class="del">${t('btn.delete')}</button></div>` +
       '</div>'
     ).join(''));
+    renderPickMarks();
   }
   ctx.renderPanel = renderPanel;
+
+  let markRaf = 0;
+  function resolvePick(rec) {
+    try {
+      const el = document.querySelector(rec.selector);
+      if (el) return el;
+    } catch (e) { /* a cssPath can throw on ragged attribute values */ }
+    if (!rec.xpath) return null;
+    try {
+      const found = document.evaluate(rec.xpath, document, null, 9, null);
+      return found && found.singleNodeValue ? found.singleNodeValue : null;
+    } catch (e) { return null; }
+  }
+  function renderPickMarks() {
+    clearHTML(elPMarks);
+    if (!panelOpen) { elPMarks.style.display = 'none'; return; }
+    let drawn = false;
+    loadBatch().forEach((rec, i) => {
+      const el = resolvePick(rec);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) return;
+      if (r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) return;
+      const m = document.createElement('div');
+      m.className = 'pmark';
+      Object.assign(m.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+      const tag = document.createElement('span');
+      tag.className = 'pi';
+      tag.textContent = String(i + 1);
+      m.appendChild(tag);
+      elPMarks.appendChild(m);
+      drawn = true;
+    });
+    elPMarks.style.display = drawn ? 'block' : 'none';
+  }
+  ctx.renderPickMarks = renderPickMarks;
+  function schedulePickMarks() {
+    if (!panelOpen || markRaf) return;
+    markRaf = requestAnimationFrame(() => {
+      markRaf = 0;
+      renderPickMarks();
+    });
+  }
+  window.addEventListener('scroll', schedulePickMarks, { passive: true, capture: true });
+  window.addEventListener('resize', schedulePickMarks, { passive: true, capture: true });
 
   function openPanel() {
     if (ctx.getBagOpen && ctx.getBagOpen() && ctx.closeBag) ctx.closeBag();  // 一次只留一个浮窗
@@ -94,7 +140,12 @@ export function initPanel(ctx) {
     ctx.panelDrag.clamp();
     if (ctx.conn.getState() === 'on') ctx.refreshTargets(); else ctx.renderTargetCombo();
   }
-  function closePanel() { panelOpen = false; ctx.closeDrop(); ctx.closeSendMenu(); elPanel.style.display = 'none'; }
+  function closePanel() {
+    panelOpen = false;
+    if (markRaf) { cancelAnimationFrame(markRaf); markRaf = 0; }
+    ctx.closeDrop(); ctx.closeSendMenu(); elPanel.style.display = 'none';
+    renderPickMarks();
+  }
   ctx.closePanel = closePanel;
   function togglePanel() { if (panelOpen) closePanel(); else openPanel(); }
   ctx.togglePanel = togglePanel;

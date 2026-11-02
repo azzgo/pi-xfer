@@ -56,6 +56,13 @@ export function buildUI() {
       .gmark .gi { position: absolute; top: -16px; left: -2px; background: var(--wp-amber);
         color: #fff; font: 700 10px/16px var(--wp-mono); padding: 0 5px;
         border-radius: 4px 4px 4px 0; white-space: nowrap; pointer-events: auto; cursor: pointer; }
+      /* ---- picked markers while the note panel is open (read-only, blue) ---- */
+      #pmarks { position: fixed; inset: 0; pointer-events: none; display: none; }
+      .pmark { position: fixed; margin: 0; border: 2px solid var(--wp-accent);
+        background: rgba(79,140,255,.10); border-radius: 3px; pointer-events: none; }
+      .pmark .pi { position: absolute; top: -16px; left: -2px; background: var(--wp-accent);
+        color: #fff; font: 700 10px/16px var(--wp-mono); padding: 0 5px;
+        border-radius: 4px 4px 0 0; white-space: nowrap; pointer-events: none; }
       #badge { position: fixed; top: 0; left: 0; transform: translate(-50%, -150%);
         background: var(--wp-dark); color: #fff; font: 600 11px/1.4 var(--wp-font);
         padding: 4px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; display: none;
@@ -306,6 +313,7 @@ export function buildUI() {
     </style>
     <div id="hl"></div>
     <div id="gwrap"></div>
+    <div id="pmarks"></div>
     <div id="badge"></div>
     <div id="info"></div>
     <div id="bar"><b>PICK</b>
@@ -400,7 +408,7 @@ export function buildUI() {
   `);
 
   const $ = (id) => root.getElementById(id);
-  const elHL = $('hl'), elGWrap = $('gwrap'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
+  const elHL = $('hl'), elGWrap = $('gwrap'), elPMarks = $('pmarks'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
         elGCLEAR = $('gclear'), elEscX = $('escx'),
         elFab = $('fab'), elFabStack = $('fabstack'), elFabRowPanel = $('frow-panel'), elFabRowRecord = $('frow-record'),
         elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
@@ -464,7 +472,7 @@ export function buildUI() {
     toast._t = setTimeout(() => elToast.classList.remove('show'), 2200);
   }
 
-  const els = { elHL, elGWrap, elBadge, elInfo, elBar, elGH, elGCLEAR, elEscX,
+  const els = { elHL, elGWrap, elPMarks, elBadge, elInfo, elBar, elGH, elGCLEAR, elEscX,
     elRecBar, elRecCount, elRecBadge, elRecStop, elRecDiscard,
     elFab, elFabStack, elFabRowPanel, elFabRowRecord, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
     elPanel, elPH, elPlist, elPcount, elPclose, elBagEntry, elPrompt, elTCombo, elTInput,

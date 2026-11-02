@@ -195,6 +195,15 @@ panel has something in it — with picks on screen, the list *is* the next step,
 and a row of mode buttons next to **Bag ▾** in the header only muddled which
 row meant what.
 
+While the panel is open every pick's stored `selector` (with the `xpath` as a
+fallback) is resolved and outlined in blue, numbered like its panel row — the
+amber group marks stay a pick-mode thing. The overlay is read-only (no page DOM
+or CSS mutation, no storage): it recomputes rects on scroll / resize in a
+rAF-throttled pass, draws only in-viewport items, and silently skips a pick
+whose element cannot be resolved (a closed modal, a collapsed section) without
+touching its panel row. A selector can of course resolve to a different element
+after the page mutates; the overlay only reports what the page currently shows.
+
 > The script only ever talks to `127.0.0.1` (`@connect` header). Nothing is
 > sent anywhere until you explicitly connect the broker and click 发送.
 
