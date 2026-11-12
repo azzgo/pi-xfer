@@ -39,6 +39,18 @@
  * pending group. The panel's 清空 no longer asks for confirmation —
  * annotations are lightweight by design.
  *
+ * Hover-expanded chrome (new in v1.12): the pick toolbar collapses to a PICK
+ * pill and unfolds its key hints on hover, so an always-open hint strip no
+ * longer covers the elements being annotated. Every hint chip is clickable and
+ * does exactly what its key does — [ / ] step a layer, the 1-9 digits jump to
+ * that layer, Enter pins, ⇧Enter toggles the pending group, F freezes, Esc
+ * exits — so a mouse-only session never needs the keyboard. The fab's hover
+ * fan-out rows hold their expanded state too, because collapsing the instant the
+ * cursor crosses the edge made the chips impossible to reach. The two holds are
+ * deliberately different: the toolbar keeps its hints for BAR_HOLD_MS (10s) —
+ * it sits mid-screen with many chips — while the fab and its two rows use
+ * FAB_HOLD_MS (3s), a corner trigger with a single obvious target.
+ *
  * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
  *   - v1.10: the send button becomes a split button group (发送 → + ▾ more
  *     dropdown). The dropdown's 复制 handoff prompt asks the broker to render
@@ -1161,6 +1173,8 @@
     "toast.fabHidden": { en: "Trigger hidden — hover the dot or use the menu to restore it", zh: "trigger 已隐藏 — 悬停小圆点或用菜单恢复" },
     "toast.fabShown": { en: "Trigger shown", zh: "trigger 已显示" },
     "bar.cycle": { en: "cycle layer", zh: "切层" },
+    "bar.prev": { en: "Previous layer", zh: "上一层" },
+    "bar.next": { en: "Next layer", zh: "下一层" },
     "bar.jump": { en: "jump", zh: "跳层" },
     "bar.select": { en: "select", zh: "选中" },
     "bar.group": { en: "add/remove group", zh: "加组/移出" },
@@ -1204,7 +1218,6 @@
     "group.cleared": { en: "Pending group cleared ({n} items)", zh: "已清空待处理组合（{n} 项）" },
     "group.tagTitle": { en: "Click to remove from group", zh: "点击移出组合" },
     "group.selected": { en: "Picked {n} · group {gid}", zh: "已选中 {n} 项 · 组 {gid}" },
-    "gh.note": { en: " · <kbd>Enter</kbd>group note ({n})", zh: " · <kbd>Enter</kbd>组备注({n})" },
     "note.saved": { en: "Note saved", zh: "备注已保存" },
     "note.synced": { en: " (synced to {n} in group)", zh: "（已同步组内 {n} 项）" },
     "record.deleted": { en: "Record deleted", zh: "已删除操作记录" },
@@ -2057,16 +2070,28 @@
         padding: 9px 16px; border-radius: 999px; display: none; gap: 14px; align-items: center;
         box-shadow: 0 8px 24px rgba(15,23,42,.35); user-select: none; pointer-events: auto;
         cursor: move; backdrop-filter: blur(6px); }
+      /* 默认收成 PICK 小胶囊，hover 才摊开快捷键提示；gclear（组合计数点）
+         常驻在胶囊旁——有待处理组合时不用 hover 也能看见/清空 */
+      #bar #hints { display: inline-flex; gap: 14px; align-items: center; max-width: 0;
+        overflow: hidden; white-space: nowrap; opacity: 0; transition: max-width .22s ease, opacity .16s ease, margin-left .22s ease; }
+      /* .open 由 JS 在离开时延迟移除，避免鼠标刚移开就收起、来不及点 */
+      #bar:hover #hints, #bar:focus-within #hints, #bar.open #hints { max-width: 620px; opacity: 1; margin-left: 10px; }
+      #bar #gclear { margin-left: 10px; }
+      #bar #gclear kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
+      #bar #gn { color: #fde68a; }
       #bar b { color: #fff; letter-spacing: .08em; font-size: 11px; }
       #bar kbd { background: #1e293b; border: 1px solid #334155; border-bottom-width: 2px;
         border-radius: 4px; padding: 1px 5px; font: 10.5px var(--wp-mono); color: #e2e8f0; }
       #bar .muted { color: #94a3b8; display: inline-flex; gap: 3px; align-items: center; }
-      /* 可点的提示块（清空组合 / 冻结 / 退出）给 pointer 反馈；其余纯提示保持 move */
-      #bar #gclear, #bar #fz, #bar #escx { cursor: pointer; }
-      #bar #gclear:hover, #bar #fz:hover, #bar #escx:hover { color: #fff; }
+      /* 每个提示块都是一次点击：和对应快捷键等价，鼠标用户不必碰键盘 */
+      #bar .act { cursor: pointer; border-radius: 5px; padding: 1px 3px; margin: -1px -3px; }
+      #bar .act:hover { color: #fff; background: rgba(148,163,184,.18); }
+      #bar #nums { gap: 1px; }
+      #bar #nums b { color: #94a3b8; letter-spacing: 0; font: 600 10px/1 var(--wp-mono);
+        padding: 2px 3px; border-radius: 3px; cursor: pointer; }
+      #bar #nums b:hover { background: #334155; color: #fff; }
       #bar #fz.on kbd { background: #0c4a6e; border-color: #0369a1; color: #e0f2fe; }
       #bar #gh.on kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
-      /* ---- record-mode banner ---- */
       #recbar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
         background: rgba(15,21,34,.96); color: #cbd5e1; font: 12px/1 var(--wp-font);
         padding: 9px 16px; border-radius: 999px; display: none; gap: 12px; align-items: center;
@@ -2094,7 +2119,8 @@
       #fabrows .frow { display: flex; align-items: center; gap: 8px; opacity: 0; transform: translateY(6px) scale(.92);
         transform-origin: bottom right; transition: opacity .16s ease, transform .18s cubic-bezier(.2,.9,.3,1.2);
         pointer-events: none; }
-      #fabstack:hover #fabrows .frow { opacity: 1; transform: none; pointer-events: auto; }
+      /* .open 由 JS 延迟移除，和工具栏的提示展开同一套悬停语义 */
+      #fabstack:hover #fabrows .frow, #fabstack.open #fabrows .frow { opacity: 1; transform: none; pointer-events: auto; }
       #fabrows .flab { background: rgba(15,21,34,.96); color: #e2e8f0; font: 600 11.5px var(--wp-font);
         padding: 5px 9px; border-radius: 7px; white-space: nowrap; box-shadow: 0 4px 12px rgba(10,14,25,.4); }
       #fabrows .fbtn { width: 34px; height: 34px; border-radius: 11px; padding: 0; cursor: pointer;
@@ -2295,13 +2321,16 @@
     <div id="badge"></div>
     <div id="info"></div>
     <div id="bar"><b>PICK</b>
-      <span class="muted"><kbd>[</kbd><kbd>]</kbd>${t("bar.cycle")}</span>
-      <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>${t("bar.jump")}</span>
-      <span class="muted"><kbd>Enter</kbd>${t("bar.select")}</span>
-      <span class="muted" id="gh"><kbd>⇧Enter</kbd>${t("bar.group")}</span>
-      <span class="muted" id="gclear" style="display:none" title="${t("gclear.title")}"><kbd>⌫</kbd>${t("bar.clearGroup")}</span>
-      <span class="muted" id="fz"><kbd>F</kbd>${t("bar.freeze")}</span>
-      <span class="muted" id="escx" title="${t("escx.title")}"><kbd>Esc</kbd>${t("bar.exit")}</span>
+      <span class="muted act" id="gclear" style="display:none" data-act="cleargroup" title="${t("gclear.title")}"><kbd>⌫</kbd><b id="gn">0</b></span>
+      <span id="hints">
+        <span class="muted act" data-act="step:-1" title="${t("bar.prev")}"><kbd>[</kbd></span>
+        <span class="muted act" data-act="step:1" title="${t("bar.next")}"><kbd>]</kbd></span>
+        <span class="muted" id="nums" title="${t("bar.jump")}"><b data-act="jump:1">1</b><b data-act="jump:2">2</b><b data-act="jump:3">3</b><b data-act="jump:4">4</b><b data-act="jump:5">5</b><b data-act="jump:6">6</b><b data-act="jump:7">7</b><b data-act="jump:8">8</b><b data-act="jump:9">9</b></span>
+        <span class="muted act" data-act="pin" title="${t("bar.select")}"><kbd>Enter</kbd>${t("bar.select")}</span>
+        <span class="muted act" id="gh" data-act="group" title="${t("bar.group")}"><kbd>⇧Enter</kbd>${t("bar.group")}</span>
+        <span class="muted act" id="fz" data-act="freeze" title="${t("bar.freeze")}"><kbd>F</kbd>${t("bar.freeze")}</span>
+        <span class="muted act" id="escx" data-act="exit" title="${t("escx.title")}"><kbd>Esc</kbd>${t("bar.exit")}</span>
+      </span>
     </div>
     <div id="recbar">
       <span class="rdot"></span><b>REC</b>
@@ -2852,6 +2881,7 @@
         elBadge.style.display = "none";
         elInfo.style.display = "none";
         renderGroupMarks();
+        if (ctx.collapseBar) ctx.collapseBar();
       }
       ctx.updateFreezeUI();
       ctx.refreshCount();
@@ -2932,6 +2962,12 @@
       refresh();
     }
     ctx.shiftLayer = shiftLayer;
+    function jumpLayer(n) {
+      if (!stack.length || !(n >= 1)) return;
+      idx = Math.min(stack.length - 1, n - 1);
+      refresh();
+    }
+    ctx.jumpLayer = jumpLayer;
     function pin() {
       const el = currentEl();
       if (!el) return;
@@ -3029,8 +3065,9 @@
     function updateGroupUI() {
       const n = groupEls.length;
       elGH.classList.toggle("on", n > 0);
-      setHTML(elGH, `<kbd>⇧Enter</kbd>${t("bar.group")}` + (n ? t("gh.note", { n }) : ""));
       elGCLEAR.style.display = n ? "inline-flex" : "none";
+      const gn = root.getElementById("gn");
+      if (gn) gn.textContent = String(n);
     }
     ctx.updateGroupUI = updateGroupUI;
     function openGroupCard() {
@@ -4203,14 +4240,47 @@
     window.addEventListener("pointerdown", fabPointerDown, true);
     window.addEventListener("pointermove", fabPointerMove, true);
     window.addEventListener("pointerup", fabPointerUp, true);
+    const FAB_HOLD_MS = 3e3;
+    const BAR_HOLD_MS = 1e4;
+    function hoverHold(el, openClass, holdMs) {
+      let timer = 0;
+      const keep = () => {
+        clearTimeout(timer);
+        el.classList.add(openClass);
+      };
+      const release = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => el.classList.remove(openClass), holdMs);
+      };
+      const close = () => {
+        clearTimeout(timer);
+        el.classList.remove(openClass);
+      };
+      el.addEventListener("pointerenter", keep);
+      el.addEventListener("pointerleave", release);
+      return { keep, release, close };
+    }
+    const barHold = hoverHold(elBar, "open", BAR_HOLD_MS);
+    hoverHold(elFabStack, "open", FAB_HOLD_MS);
+    ctx.collapseBar = barHold.close;
+    function runBarAction(target) {
+      const hit = target && target.closest ? target.closest("[data-act]") : null;
+      if (!hit) return false;
+      const [act, arg] = String(hit.getAttribute("data-act")).split(":");
+      if (act === "cleargroup") ctx.clearPendingGroup();
+      else if (act === "step") ctx.shiftLayer(Number(arg));
+      else if (act === "jump") ctx.jumpLayer(Number(arg));
+      else if (act === "pin") ctx.pin();
+      else if (act === "group") ctx.toggleGroup(ctx.currentEl());
+      else if (act === "freeze") ctx.toggleFreeze();
+      else if (act === "exit") ctx.setActive(false);
+      else return false;
+      return true;
+    }
     const barDrag = makeDraggable(elBar, elBar, {
       key: KEY_BAR_POS,
       onTap(target) {
-        const t2 = target && target.closest ? target : null;
-        if (!t2) return;
-        if (t2.closest("#gclear")) ctx.clearPendingGroup();
-        else if (t2.closest("#fz")) ctx.toggleFreeze();
-        else if (t2.closest("#escx")) ctx.setActive(false);
+        runBarAction(target);
       }
     });
     const cardDrag = makeDraggable(elCard, elCard, {});
@@ -4258,7 +4328,7 @@
         toggleFreeze();
       }
     }, true);
-    document.addEventListener("keydown", (e) => {
+    window.addEventListener("keydown", (e) => {
       const ps = ctx.pickState;
       if (ctx.sendMenuOpen() && e.key === "Escape" && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault();
@@ -4274,6 +4344,7 @@
       }
       if (ctx.getPanelOpen() && e.key === "Escape" && !e.isComposing && e.keyCode !== 229) {
         e.preventDefault();
+        e.stopPropagation();
         ctx.closePanel();
         return;
       }
@@ -4281,10 +4352,13 @@
       if (ps.groupCard) {
         if (e.isComposing || e.keyCode === 229) return;
         const firstTarget = e.composedPath && e.composedPath()[0] || e.target;
-        if (e.key === "Enter" && firstTarget === elTxt && !e.shiftKey) {
+        if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
-          ctx.submitGroup();
+          e.stopPropagation();
+          if (firstTarget === elTxt) ctx.submitGroup();
         } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
           ctx.closeGroupCard();
         }
         return;
@@ -4292,10 +4366,13 @@
       if (ps.pinned) {
         if (e.isComposing || e.keyCode === 229) return;
         const firstTarget = e.composedPath && e.composedPath()[0] || e.target;
-        if (e.key === "Enter" && firstTarget === elTxt && !e.shiftKey) {
+        if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
-          ctx.submit();
+          e.stopPropagation();
+          if (firstTarget === elTxt) ctx.submit();
         } else if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
           ctx.unpin();
         }
         return;
@@ -4316,26 +4393,31 @@
         case "]":
         case "ArrowDown":
           e.preventDefault();
+          e.stopPropagation();
           ctx.shiftLayer(1);
           break;
         case "[":
         case "ArrowUp":
           e.preventDefault();
+          e.stopPropagation();
           ctx.shiftLayer(-1);
           break;
         case "Enter":
         case " ":
           e.preventDefault();
+          e.stopPropagation();
           if (ps.groupCount) ctx.openGroupCard();
           else ctx.pin();
           break;
         case "Escape":
           e.preventDefault();
+          e.stopPropagation();
           ctx.setActive(false);
           break;
         default:
           if (/^[1-9]$/.test(e.key)) {
             e.preventDefault();
+            e.stopPropagation();
             ps.idx = Math.min(ps.stack.length - 1, +e.key - 1);
             ctx.refresh();
           }

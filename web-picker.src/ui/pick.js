@@ -90,6 +90,7 @@ export function initPick(ctx) {
       closeGroupCard();
       elCard.style.display = 'none'; elHL.style.display = 'none'; elBadge.style.display = 'none'; elInfo.style.display = 'none';
       renderGroupMarks();           // pickMode 已为 false → 隐藏 marks（组合本身保留在内存）
+      if (ctx.collapseBar) ctx.collapseBar();   // 下次进入拾取模式回到收起态
     }
     ctx.updateFreezeUI();
     ctx.refreshCount();
@@ -164,6 +165,12 @@ export function initPick(ctx) {
     refresh();
   }
   ctx.shiftLayer = shiftLayer;
+  function jumpLayer(n) {
+    if (!stack.length || !(n >= 1)) return;
+    idx = Math.min(stack.length - 1, n - 1);
+    refresh();
+  }
+  ctx.jumpLayer = jumpLayer;
 
   // ---------- pin → note ----------
   function pin() {
@@ -256,9 +263,9 @@ export function initPick(ctx) {
   function updateGroupUI() {
     const n = groupEls.length;
     elGH.classList.toggle('on', n > 0);
-    setHTML(elGH, `<kbd>⇧Enter</kbd>${t('bar.group')}` +
-      (n ? t('gh.note', { n }) : ''));
     elGCLEAR.style.display = n ? 'inline-flex' : 'none';
+    const gn = root.getElementById('gn');
+    if (gn) gn.textContent = String(n);
   }
   ctx.updateGroupUI = updateGroupUI;
   function openGroupCard() {

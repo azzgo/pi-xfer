@@ -79,16 +79,28 @@ export function buildUI() {
         padding: 9px 16px; border-radius: 999px; display: none; gap: 14px; align-items: center;
         box-shadow: 0 8px 24px rgba(15,23,42,.35); user-select: none; pointer-events: auto;
         cursor: move; backdrop-filter: blur(6px); }
+      /* 默认收成 PICK 小胶囊，hover 才摊开快捷键提示；gclear（组合计数点）
+         常驻在胶囊旁——有待处理组合时不用 hover 也能看见/清空 */
+      #bar #hints { display: inline-flex; gap: 14px; align-items: center; max-width: 0;
+        overflow: hidden; white-space: nowrap; opacity: 0; transition: max-width .22s ease, opacity .16s ease, margin-left .22s ease; }
+      /* .open 由 JS 在离开时延迟移除，避免鼠标刚移开就收起、来不及点 */
+      #bar:hover #hints, #bar:focus-within #hints, #bar.open #hints { max-width: 620px; opacity: 1; margin-left: 10px; }
+      #bar #gclear { margin-left: 10px; }
+      #bar #gclear kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
+      #bar #gn { color: #fde68a; }
       #bar b { color: #fff; letter-spacing: .08em; font-size: 11px; }
       #bar kbd { background: #1e293b; border: 1px solid #334155; border-bottom-width: 2px;
         border-radius: 4px; padding: 1px 5px; font: 10.5px var(--wp-mono); color: #e2e8f0; }
       #bar .muted { color: #94a3b8; display: inline-flex; gap: 3px; align-items: center; }
-      /* 可点的提示块（清空组合 / 冻结 / 退出）给 pointer 反馈；其余纯提示保持 move */
-      #bar #gclear, #bar #fz, #bar #escx { cursor: pointer; }
-      #bar #gclear:hover, #bar #fz:hover, #bar #escx:hover { color: #fff; }
+      /* 每个提示块都是一次点击：和对应快捷键等价，鼠标用户不必碰键盘 */
+      #bar .act { cursor: pointer; border-radius: 5px; padding: 1px 3px; margin: -1px -3px; }
+      #bar .act:hover { color: #fff; background: rgba(148,163,184,.18); }
+      #bar #nums { gap: 1px; }
+      #bar #nums b { color: #94a3b8; letter-spacing: 0; font: 600 10px/1 var(--wp-mono);
+        padding: 2px 3px; border-radius: 3px; cursor: pointer; }
+      #bar #nums b:hover { background: #334155; color: #fff; }
       #bar #fz.on kbd { background: #0c4a6e; border-color: #0369a1; color: #e0f2fe; }
       #bar #gh.on kbd { background: #451a03; border-color: #b45309; color: #fde68a; }
-      /* ---- record-mode banner ---- */
       #recbar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
         background: rgba(15,21,34,.96); color: #cbd5e1; font: 12px/1 var(--wp-font);
         padding: 9px 16px; border-radius: 999px; display: none; gap: 12px; align-items: center;
@@ -116,7 +128,8 @@ export function buildUI() {
       #fabrows .frow { display: flex; align-items: center; gap: 8px; opacity: 0; transform: translateY(6px) scale(.92);
         transform-origin: bottom right; transition: opacity .16s ease, transform .18s cubic-bezier(.2,.9,.3,1.2);
         pointer-events: none; }
-      #fabstack:hover #fabrows .frow { opacity: 1; transform: none; pointer-events: auto; }
+      /* .open 由 JS 延迟移除，和工具栏的提示展开同一套悬停语义 */
+      #fabstack:hover #fabrows .frow, #fabstack.open #fabrows .frow { opacity: 1; transform: none; pointer-events: auto; }
       #fabrows .flab { background: rgba(15,21,34,.96); color: #e2e8f0; font: 600 11.5px var(--wp-font);
         padding: 5px 9px; border-radius: 7px; white-space: nowrap; box-shadow: 0 4px 12px rgba(10,14,25,.4); }
       #fabrows .fbtn { width: 34px; height: 34px; border-radius: 11px; padding: 0; cursor: pointer;
@@ -317,13 +330,16 @@ export function buildUI() {
     <div id="badge"></div>
     <div id="info"></div>
     <div id="bar"><b>PICK</b>
-      <span class="muted"><kbd>[</kbd><kbd>]</kbd>${t('bar.cycle')}</span>
-      <span class="muted"><kbd>1</kbd>-<kbd>9</kbd>${t('bar.jump')}</span>
-      <span class="muted"><kbd>Enter</kbd>${t('bar.select')}</span>
-      <span class="muted" id="gh"><kbd>⇧Enter</kbd>${t('bar.group')}</span>
-      <span class="muted" id="gclear" style="display:none" title="${t('gclear.title')}"><kbd>⌫</kbd>${t('bar.clearGroup')}</span>
-      <span class="muted" id="fz"><kbd>F</kbd>${t('bar.freeze')}</span>
-      <span class="muted" id="escx" title="${t('escx.title')}"><kbd>Esc</kbd>${t('bar.exit')}</span>
+      <span class="muted act" id="gclear" style="display:none" data-act="cleargroup" title="${t('gclear.title')}"><kbd>⌫</kbd><b id="gn">0</b></span>
+      <span id="hints">
+        <span class="muted act" data-act="step:-1" title="${t('bar.prev')}"><kbd>[</kbd></span>
+        <span class="muted act" data-act="step:1" title="${t('bar.next')}"><kbd>]</kbd></span>
+        <span class="muted" id="nums" title="${t('bar.jump')}"><b data-act="jump:1">1</b><b data-act="jump:2">2</b><b data-act="jump:3">3</b><b data-act="jump:4">4</b><b data-act="jump:5">5</b><b data-act="jump:6">6</b><b data-act="jump:7">7</b><b data-act="jump:8">8</b><b data-act="jump:9">9</b></span>
+        <span class="muted act" data-act="pin" title="${t('bar.select')}"><kbd>Enter</kbd>${t('bar.select')}</span>
+        <span class="muted act" id="gh" data-act="group" title="${t('bar.group')}"><kbd>⇧Enter</kbd>${t('bar.group')}</span>
+        <span class="muted act" id="fz" data-act="freeze" title="${t('bar.freeze')}"><kbd>F</kbd>${t('bar.freeze')}</span>
+        <span class="muted act" id="escx" data-act="exit" title="${t('escx.title')}"><kbd>Esc</kbd>${t('bar.exit')}</span>
+      </span>
     </div>
     <div id="recbar">
       <span class="rdot"></span><b>REC</b>

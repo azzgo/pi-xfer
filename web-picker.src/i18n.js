@@ -30,6 +30,8 @@ const STRINGS = {
   'toast.fabShown': { en: 'Trigger shown', zh: 'trigger 已显示' },
 
   'bar.cycle': { en: 'cycle layer', zh: '切层' },
+  'bar.prev': { en: 'Previous layer', zh: '上一层' },
+  'bar.next': { en: 'Next layer', zh: '下一层' },
   'bar.jump': { en: 'jump', zh: '跳层' },
   'bar.select': { en: 'select', zh: '选中' },
   'bar.group': { en: 'add/remove group', zh: '加组/移出' },
@@ -76,7 +78,6 @@ const STRINGS = {
   'group.cleared': { en: 'Pending group cleared ({n} items)', zh: '已清空待处理组合（{n} 项）' },
   'group.tagTitle': { en: 'Click to remove from group', zh: '点击移出组合' },
   'group.selected': { en: 'Picked {n} · group {gid}', zh: '已选中 {n} 项 · 组 {gid}' },
-  'gh.note': { en: ' · <kbd>Enter</kbd>group note ({n})', zh: ' · <kbd>Enter</kbd>组备注({n})' },
 
   'note.saved': { en: 'Note saved', zh: '备注已保存' },
   'note.synced': { en: ' (synced to {n} in group)', zh: '（已同步组内 {n} 项）' },

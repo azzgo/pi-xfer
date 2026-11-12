@@ -73,15 +73,44 @@ export function initFab(ctx) {
   window.addEventListener('pointermove', fabPointerMove, true);
   window.addEventListener('pointerup', fabPointerUp, true);
 
+  // 悬停展开的浮层统一「离开后延迟收起」：鼠标从中轴移向可点块的中途一旦
+  // 出界，立即收起就点不到了。fab（trigger + 它扇出的两行菜单）在屏幕角落、
+  // 目标明确，3s 够用；拾取工具栏在屏幕正中、提示块多，留 10s 才来得及点。
+  const FAB_HOLD_MS = 3000;
+  const BAR_HOLD_MS = 10000;
+  function hoverHold(el, openClass, holdMs) {
+    let timer = 0;
+    const keep = () => { clearTimeout(timer); el.classList.add(openClass); };
+    const release = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => el.classList.remove(openClass), holdMs);
+    };
+    const close = () => { clearTimeout(timer); el.classList.remove(openClass); };
+    el.addEventListener('pointerenter', keep);
+    el.addEventListener('pointerleave', release);
+    return { keep, release, close };
+  }
+  const barHold = hoverHold(elBar, 'open', BAR_HOLD_MS);
+  hoverHold(elFabStack, 'open', FAB_HOLD_MS);
+  ctx.collapseBar = barHold.close;
+
+  function runBarAction(target) {
+    const hit = target && target.closest ? target.closest('[data-act]') : null;
+    if (!hit) return false;
+    const [act, arg] = String(hit.getAttribute('data-act')).split(':');
+    if (act === 'cleargroup') ctx.clearPendingGroup();
+    else if (act === 'step') ctx.shiftLayer(Number(arg));
+    else if (act === 'jump') ctx.jumpLayer(Number(arg));
+    else if (act === 'pin') ctx.pin();
+    else if (act === 'group') ctx.toggleGroup(ctx.currentEl());
+    else if (act === 'freeze') ctx.toggleFreeze();
+    else if (act === 'exit') ctx.setActive(false);
+    else return false;
+    return true;
+  }
   const barDrag = makeDraggable(elBar, elBar, {
     key: KEY_BAR_POS,
-    onTap(target) {
-      const t = target && target.closest ? target : null;
-      if (!t) return;
-      if (t.closest('#gclear')) ctx.clearPendingGroup();
-      else if (t.closest('#fz')) ctx.toggleFreeze();
-      else if (t.closest('#escx')) ctx.setActive(false);
-    },
+    onTap(target) { runBarAction(target); },
   });
   const cardDrag = makeDraggable(elCard, elCard, {});
   const panelDrag = makeDraggable(elPanel, elPH, { key: KEY_PANEL_POS });

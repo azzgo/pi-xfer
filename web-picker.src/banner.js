@@ -39,6 +39,18 @@
  * pending group. The panel's 清空 no longer asks for confirmation —
  * annotations are lightweight by design.
  *
+ * Hover-expanded chrome (new in v1.12): the pick toolbar collapses to a PICK
+ * pill and unfolds its key hints on hover, so an always-open hint strip no
+ * longer covers the elements being annotated. Every hint chip is clickable and
+ * does exactly what its key does — [ / ] step a layer, the 1-9 digits jump to
+ * that layer, Enter pins, ⇧Enter toggles the pending group, F freezes, Esc
+ * exits — so a mouse-only session never needs the keyboard. The fab's hover
+ * fan-out rows hold their expanded state too, because collapsing the instant the
+ * cursor crosses the edge made the chips impossible to reach. The two holds are
+ * deliberately different: the toolbar keeps its hints for BAR_HOLD_MS (10s) —
+ * it sits mid-screen with many chips — while the fab and its two rows use
+ * FAB_HOLD_MS (3s), a corner trigger with a single obvious target.
+ *
  * Broker layer (new in v1.1; protocol v0.1 — NO token, localhost-trust model):
  *   - v1.10: the send button becomes a split button group (发送 → + ▾ more
  *     dropdown). The dropdown's 复制 handoff prompt asks the broker to render

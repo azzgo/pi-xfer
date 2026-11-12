@@ -32,8 +32,11 @@ export function initHotkeys(ctx) {
     }
   }, true);
 
-  // 挂 document capture（保持 v1.10 原样：卡片未出现时键盘行为与旧版一致）
-  document.addEventListener('keydown', (e) => {
+  // 挂 window capture（比页面的 document 监听更早）：pick 模式下我们处理过的
+  // 按键一律 stopPropagation——keydown 是 composed 事件，卡片/面板打开时 target
+  // 是 host，页面侧的「Enter 提交」监听器原样收得到，写备注回车就变成了发送。
+  // 自家输入框的正常打字不走这些分支，事件继续传播到 shadow 内部，不受影响。
+  window.addEventListener('keydown', (e) => {
     const ps = ctx.pickState;
     // Esc 收起「更多」下拉（在 target 下拉/面板之前处理）
     if (ctx.sendMenuOpen() && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
@@ -44,15 +47,17 @@ export function initHotkeys(ctx) {
       e.preventDefault(); e.stopPropagation(); ctx.closeDrop(); return;
     }
     if (ctx.getPanelOpen() && e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault(); ctx.closePanel(); return;
+      e.preventDefault(); e.stopPropagation(); ctx.closePanel(); return;
     }
     if (!ps.pickMode) return;
     if (ps.groupCard) {
       if (e.isComposing || e.keyCode === 229) return;
       const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
-      if (e.key === 'Enter' && firstTarget === elTxt && !e.shiftKey) {
-        e.preventDefault(); ctx.submitGroup();
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault(); e.stopPropagation();
+        if (firstTarget === elTxt) ctx.submitGroup();   // 焦点漂出输入框时只吞掉，不再 pin 也不漏给页面
       } else if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
         ctx.closeGroupCard();
       }
       return;
@@ -60,16 +65,18 @@ export function initHotkeys(ctx) {
     if (ps.pinned) {
       if (e.isComposing || e.keyCode === 229) return;
       const firstTarget = (e.composedPath && e.composedPath()[0]) || e.target;
-      if (e.key === 'Enter' && firstTarget === elTxt && !e.shiftKey) {
-        e.preventDefault(); ctx.submit();
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault(); e.stopPropagation();
+        if (firstTarget === elTxt) ctx.submit();
       } else if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
         ctx.unpin();
       }
       return;
     }
     if (e.key === 'Backspace' && ps.groupCount && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault(); e.stopPropagation();
-      ctx.clearPendingGroup();                 // ⌫：清空待处理组合（工具栏 chip 同款）
+      ctx.clearPendingGroup();                 // ⌫：清空待处理组合（工具栏计数点同款）
       return;
     }
     if (e.key === 'Enter' && e.shiftKey && !e.isComposing && e.keyCode !== 229) {
@@ -78,18 +85,17 @@ export function initHotkeys(ctx) {
       return;
     }
     switch (e.key) {
-      case ']': case 'ArrowDown': e.preventDefault(); ctx.shiftLayer(1); break;
-      case '[': case 'ArrowUp': e.preventDefault(); ctx.shiftLayer(-1); break;
+      case ']': case 'ArrowDown': e.preventDefault(); e.stopPropagation(); ctx.shiftLayer(1); break;
+      case '[': case 'ArrowUp': e.preventDefault(); e.stopPropagation(); ctx.shiftLayer(-1); break;
       case 'Enter': case ' ':
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation();
         if (ps.groupCount) ctx.openGroupCard(); else ctx.pin();   // 有待处理组合时 Enter = 组备注
         break;
-      case 'Escape': e.preventDefault(); ctx.setActive(false); break;
+      case 'Escape': e.preventDefault(); e.stopPropagation(); ctx.setActive(false); break;
       default:
-        if (/^[1-9]$/.test(e.key)) { e.preventDefault(); ps.idx = Math.min(ps.stack.length - 1, +e.key - 1); ctx.refresh(); }
+        if (/^[1-9]$/.test(e.key)) { e.preventDefault(); e.stopPropagation(); ps.idx = Math.min(ps.stack.length - 1, +e.key - 1); ctx.refresh(); }
     }
   }, true);
-
   // Radix 等模态弹窗的 FocusScope 会在 document 上监听 focusin（capture），发现焦点
   // 落到弹窗容器之外就把焦点拉回去——host 挂在 documentElement 下，天然在 trap 外，
   // 备注卡片/面板的输入框一聚焦就被抢走。window capture 先于 document 上的页面监听
