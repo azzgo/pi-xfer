@@ -2,7 +2,7 @@
 useDefault = true
 
 [allowlist]
-description = "historical commits adding RFC_SAMPLE_KEY test fixtures"
+description = "historical commits adding RFC_SAMPLE_KEY test fixtures, plus the loopback-engine verification recipe"
 commits = [
   "0488388b5453db0a3f42045dfdc3486b6ee581db",
   "28642fe19e3fcd9248c89a522b9e560a958af666",
@@ -10,4 +10,11 @@ commits = [
   "6d0b70c074d8f3fd7d64c80fac864e85724ac904",
   "6eeb6c501d1aafbd5dda642abb468fa0f91aea65",
   "733ba5ae1ae9709ad8e25f006bbebb3f7fe4bec9",
+]
+# .agents/skills/verify/SKILL.md documents the loopback engine recipe, where
+# the throwaway `admin_token` is passed to curl. `curl-auth-header` flags any
+# Authorization header, so that line is a permanent false positive: the token is
+# a local test value for an engine on 127.0.0.1, never a real credential.
+paths = [
+  '''^\.agents/skills/verify/SKILL\.md$''',
 ]
