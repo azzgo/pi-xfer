@@ -252,3 +252,28 @@ test('the blocked toast still fires on a manual attempt (not silent)', async () 
   assert.equal(conn.getState(), 'blocked');
   assert.equal(calls.toasts.filter((m) => m.includes('策略') || m.includes('policy')).length, 1);
 });
+
+// Regression: a record carrying the SSE back-link (`sseStream.rec === entry`)
+// used to make JSON.stringify throw inside the send path, which the connection
+// layer reported as not_connected — "the broker is connected, why can't it send".
+test('an unserializable record fails as serialize_failed, not not_connected', async () => {
+  const { conn } = makeConn();
+  const attempt = conn.connect();
+  lastSock().open();
+  lastSock().message({ type: 'welcome' });
+  await attempt;
+
+  const entry = { method: 'GET', url: '/events', ts: 1, kind: 'sse' };
+  entry.sseStream = { id: 's1', rec: entry, ring: [], chars: 0 };
+  const record = { id: 'r1', start: 1, end: 2, events: [], net: [entry] };
+
+  const submit = await conn.submitToAgent('hi', 'agent', record);
+  assert.equal(submit.ok, false);
+  assert.equal(submit.code, 'serialize_failed');
+
+  const composed = await conn.requestCompose('hi', 'agent', record);
+  assert.equal(composed.ok, false);
+  assert.equal(composed.code, 'serialize_failed');
+
+  assert.equal(lastSock().sent.length, 1, 'only the hello frame reached the socket');
+});

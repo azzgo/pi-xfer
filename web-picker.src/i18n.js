@@ -183,6 +183,7 @@ const STRINGS = {
   'conn.disconnected': { en: 'Disconnected', zh: '已断开' },
   'conn.notConnected': { en: 'broker not connected', zh: 'broker 未连接' },
   'conn.noResponse': { en: 'broker no response', zh: 'broker 无响应' },
+  'conn.sendFailed': { en: 'the page could not send this request (its payload is not serializable)', zh: '页面发不出这条请求（负载无法序列化）' },
 };
 
 let lang = (function detect() {

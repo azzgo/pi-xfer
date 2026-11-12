@@ -182,6 +182,20 @@ export function initRecord(ctx) {
     toast(t('record.started'));
   }
 
+  // 停录的切片必须是纯 JSON：netRing 的记录挂着指向实时 SSE 缓冲的内部回链
+  // （entry.sseStream.rec === entry），带环的对象 JSON.stringify 会抛错 —— 发帧层
+  // 曾把这次失败报成「broker 未连接」，sessionStorage 持久化也一并静默失效。
+  // 复制而非就地删：sseStream 是 SSE 预算逐出的依据，实时环还要继续用它。
+  function plainNetEntry(n) {
+    const out = Object.assign({}, n);
+    delete out.sseStream;
+    if (out.sse && Array.isArray(out.sse.events)) {
+      out.sse = Object.assign({}, out.sse, { events: out.sse.events.map((ev) => Object.assign({}, ev)) });
+    }
+    return out;
+  }
+  function plainConsoleEntry(c) { return Object.assign({}, c); }
+
   function stop(discard) {
     if (status !== 'rec' || !rec) return;
     stopUrlWatch();
@@ -206,8 +220,8 @@ export function initRecord(ctx) {
       toast(t('record.discarded'));
     } else {
       status = 'done';
-      rec.console = ctx.consoleRing.filter((c) => c.ts >= rec.start).slice(-REC_SLICE_MAX);
-      rec.net = ctx.netRing.filter((n) => n.ts >= rec.start).slice(-REC_SLICE_MAX);
+      rec.console = ctx.consoleRing.filter((c) => c.ts >= rec.start).slice(-REC_SLICE_MAX).map(plainConsoleEntry);
+      rec.net = ctx.netRing.filter((n) => n.ts >= rec.start).slice(-REC_SLICE_MAX).map(plainNetEntry);
       toast(t('record.done', { n: rec.events.length }));
     }
     save();

@@ -86,9 +86,24 @@ export function createBrokerConn(deps) {
 
   function brokerUrl() { return gm.get(GM_BROKER, DEFAULT_BROKER_URL); }
 
-  function sendFrame(obj) {
-    if (!ws || ws.readyState !== 1) return false;
-    try { ws.send(JSON.stringify(obj)); return true; } catch (e) { return false; }
+  // 发帧要区分三种失败：socket 不在、帧序列化失败、send 抛错。序列化失败曾
+  // 被一律报成 not_connected，于是 record 带环时界面说「broker 未连接」，而
+  // broker 明明连着。原因随返回值带回调用方。
+  function sendPayload(obj) {
+    if (!ws || ws.readyState !== 1) return 'not_connected';
+    let text;
+    try { text = JSON.stringify(obj); } catch (e) {
+      debugLog('frame not serializable:', e && e.message ? e.message : e);
+      return 'serialize_failed';
+    }
+    try { ws.send(text); return ''; } catch (e) { return 'send_failed'; }
+  }
+
+  function sendFrame(obj) { return sendPayload(obj) === ''; }
+
+  function failResult(code, extra) {
+    const message = code === 'not_connected' ? t('conn.notConnected') : t('conn.sendFailed');
+    return Object.assign({ ok: false, code, message }, extra || {});
   }
 
   // Does this CSP violation concern OUR broker socket? Unrelated page
@@ -336,9 +351,10 @@ export function createBrokerConn(deps) {
       const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'submit', resolve });
       const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-      if (!sendFrame(frameSubmit(id, promptText, targetName, record))) {
+      const failed = sendPayload(frameSubmit(id, promptText, targetName, record));
+      if (failed) {
         pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
+        resolve(failResult(failed));
         return;
       }
       setTimeout(() => {
@@ -357,9 +373,10 @@ export function createBrokerConn(deps) {
       const id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'compose', resolve });
       const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-      if (!sendFrame(frameCompose(id, promptText, targetName, record))) {
+      const failed = sendPayload(frameCompose(id, promptText, targetName, record));
+      if (failed) {
         pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
+        resolve(failResult(failed));
         return;
       }
       setTimeout(() => {
@@ -373,7 +390,7 @@ export function createBrokerConn(deps) {
       if (wsState !== 'on') { resolve([]); return; }
       const id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'targets', resolve });
-      if (!sendFrame(frameTargetsList(id))) { pending.delete(id); resolve([]); return; }
+      if (sendPayload(frameTargetsList(id))) { pending.delete(id); resolve([]); return; }
       setTimeout(() => {
         if (pending.has(id)) { pending.delete(id); resolve([]); }
       }, 5000);
@@ -386,7 +403,8 @@ export function createBrokerConn(deps) {
       if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
       const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'stage', resolve });
-      if (!sendFrame(frameStage(id, pick))) { pending.delete(id); resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
+      const failed = sendPayload(frameStage(id, pick));
+      if (failed) { pending.delete(id); resolve(failResult(failed)); return; }
       setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); } }, 10000);
     });
   }
@@ -396,7 +414,8 @@ export function createBrokerConn(deps) {
       if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', items: [] }); return; }
       const id = 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'baglist', resolve });
-      if (!sendFrame(frameBagList(id))) { pending.delete(id); resolve({ ok: false, code: 'not_connected', items: [] }); return; }
+      const failed = sendPayload(frameBagList(id));
+      if (failed) { pending.delete(id); resolve(failResult(failed, { items: [] })); return; }
       setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', items: [] }); } }, 10000);
     });
   }
@@ -407,9 +426,10 @@ export function createBrokerConn(deps) {
       const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'bagsubmit', resolve });
       const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-      if (!sendFrame(frameBagSubmit(id, promptText, targetName))) {
+      const failed = sendPayload(frameBagSubmit(id, promptText, targetName));
+      if (failed) {
         pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
+        resolve(failResult(failed));
         return;
       }
       setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); } }, 10000);
@@ -422,9 +442,10 @@ export function createBrokerConn(deps) {
       if (wsState !== 'on') { resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') }); return; }
       const id = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       pending.set(id, { kind: 'bagunstage', resolve });
-      if (!sendFrame(frameBagUnstage(id, entryId))) {
+      const failed = sendPayload(frameBagUnstage(id, entryId));
+      if (failed) {
         pending.delete(id);
-        resolve({ ok: false, code: 'not_connected', message: t('conn.notConnected') });
+        resolve(failResult(failed));
         return;
       }
       setTimeout(() => { if (pending.has(id)) { pending.delete(id); resolve({ ok: false, code: 'timeout', message: t('conn.noResponse') }); } }, 10000);

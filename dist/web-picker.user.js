@@ -1314,7 +1314,8 @@
     "conn.unreachable": { en: "Cannot reach broker: {url} (edit the address in connection settings)", zh: "broker 连不上: {url}（连接设置里可改地址）" },
     "conn.disconnected": { en: "Disconnected", zh: "已断开" },
     "conn.notConnected": { en: "broker not connected", zh: "broker 未连接" },
-    "conn.noResponse": { en: "broker no response", zh: "broker 无响应" }
+    "conn.noResponse": { en: "broker no response", zh: "broker 无响应" },
+    "conn.sendFailed": { en: "the page could not send this request (its payload is not serializable)", zh: "页面发不出这条请求（负载无法序列化）" }
   };
   var lang = (function detect() {
     const saved = gm.get(GM_LANG, "");
@@ -1391,14 +1392,28 @@
     function brokerUrl() {
       return gm2.get(GM_BROKER, DEFAULT_BROKER_URL);
     }
-    function sendFrame(obj) {
-      if (!ws || ws.readyState !== 1) return false;
+    function sendPayload(obj) {
+      if (!ws || ws.readyState !== 1) return "not_connected";
+      let text;
       try {
-        ws.send(JSON.stringify(obj));
-        return true;
+        text = JSON.stringify(obj);
       } catch (e) {
-        return false;
+        debugLog2("frame not serializable:", e && e.message ? e.message : e);
+        return "serialize_failed";
       }
+      try {
+        ws.send(text);
+        return "";
+      } catch (e) {
+        return "send_failed";
+      }
+    }
+    function sendFrame(obj) {
+      return sendPayload(obj) === "";
+    }
+    function failResult(code, extra) {
+      const message = code === "not_connected" ? t("conn.notConnected") : t("conn.sendFailed");
+      return Object.assign({ ok: false, code, message }, extra || {});
     }
     function matchesBroker(ev, url) {
       if (!ev || ev.violatedDirective !== "connect-src") return false;
@@ -1639,9 +1654,10 @@
         const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "submit", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        if (!sendFrame(frameSubmit(id, promptText, targetName, record))) {
+        const failed = sendPayload(frameSubmit(id, promptText, targetName, record));
+        if (failed) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          resolve(failResult(failed));
           return;
         }
         setTimeout(() => {
@@ -1661,9 +1677,10 @@
         const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "compose", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        if (!sendFrame(frameCompose(id, promptText, targetName, record))) {
+        const failed = sendPayload(frameCompose(id, promptText, targetName, record));
+        if (failed) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          resolve(failResult(failed));
           return;
         }
         setTimeout(() => {
@@ -1682,7 +1699,7 @@
         }
         const id = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "targets", resolve });
-        if (!sendFrame(frameTargetsList(id))) {
+        if (sendPayload(frameTargetsList(id))) {
           pending.delete(id);
           resolve([]);
           return;
@@ -1703,9 +1720,10 @@
         }
         const id = "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "stage", resolve });
-        if (!sendFrame(frameStage(id, pick))) {
+        const failed = sendPayload(frameStage(id, pick));
+        if (failed) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          resolve(failResult(failed));
           return;
         }
         setTimeout(() => {
@@ -1724,9 +1742,10 @@
         }
         const id = "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "baglist", resolve });
-        if (!sendFrame(frameBagList(id))) {
+        const failed = sendPayload(frameBagList(id));
+        if (failed) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", items: [] });
+          resolve(failResult(failed, { items: [] }));
           return;
         }
         setTimeout(() => {
@@ -1746,9 +1765,10 @@
         const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "bagsubmit", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        if (!sendFrame(frameBagSubmit(id, promptText, targetName))) {
+        const failed = sendPayload(frameBagSubmit(id, promptText, targetName));
+        if (failed) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          resolve(failResult(failed));
           return;
         }
         setTimeout(() => {
@@ -1767,9 +1787,10 @@
         }
         const id = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "bagunstage", resolve });
-        if (!sendFrame(frameBagUnstage(id, entryId))) {
+        const failed = sendPayload(frameBagUnstage(id, entryId));
+        if (failed) {
           pending.delete(id);
-          resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
+          resolve(failResult(failed));
           return;
         }
         setTimeout(() => {
@@ -4653,6 +4674,17 @@
       startUrlWatch();
       toast(t("record.started"));
     }
+    function plainNetEntry(n) {
+      const out = Object.assign({}, n);
+      delete out.sseStream;
+      if (out.sse && Array.isArray(out.sse.events)) {
+        out.sse = Object.assign({}, out.sse, { events: out.sse.events.map((ev) => Object.assign({}, ev)) });
+      }
+      return out;
+    }
+    function plainConsoleEntry(c) {
+      return Object.assign({}, c);
+    }
     function stop(discard) {
       if (status !== "rec" || !rec) return;
       stopUrlWatch();
@@ -4682,8 +4714,8 @@
         toast(t("record.discarded"));
       } else {
         status = "done";
-        rec.console = ctx.consoleRing.filter((c) => c.ts >= rec.start).slice(-REC_SLICE_MAX);
-        rec.net = ctx.netRing.filter((n) => n.ts >= rec.start).slice(-REC_SLICE_MAX);
+        rec.console = ctx.consoleRing.filter((c) => c.ts >= rec.start).slice(-REC_SLICE_MAX).map(plainConsoleEntry);
+        rec.net = ctx.netRing.filter((n) => n.ts >= rec.start).slice(-REC_SLICE_MAX).map(plainNetEntry);
         toast(t("record.done", { n: rec.events.length }));
       }
       save();
