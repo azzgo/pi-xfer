@@ -29,11 +29,12 @@ export function initSend(ctx) {
   function composeOffline() {
     const prompt = elPrompt.value.trim() || DEFAULT_PROMPT;
     const target = ctx.getComboSel() || gm.get(GM_TARGET, '') || '';
+    const record = ctx.getRecord ? ctx.getRecord() : null;
     const text = renderOfflineHandoffDoc({
       prompt,
       page: { url: location.href, title: document.title, ts: Date.now() },
       picks: loadBatch(),
-      record: ctx.getRecord ? ctx.getRecord() : null,
+      record,
       target,
     });
     if (!copyText(text)) { toast(t('send.clipboard')); return; }

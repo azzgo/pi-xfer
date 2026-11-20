@@ -305,23 +305,23 @@
       return "tab-" + Date.now().toString(36);
     }
   }
-  function frameSubmit(id, prompt, targetName, record2) {
+  function frameSubmit(id, prompt, targetName, record) {
     return frame(WIRE.KIND_SUBMIT, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      ...record2 ? { record: record2 } : {},
+      ...record ? { record } : {},
       target: { namespace: WIRE.NS_LOCAL, name: targetName }
     });
   }
-  function frameCompose(id, prompt, targetName, record2) {
+  function frameCompose(id, prompt, targetName, record) {
     return frame(WIRE.KIND_COMPOSE, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      ...record2 ? { record: record2 } : {},
+      ...record ? { record } : {},
       ...targetName ? { target: { namespace: WIRE.NS_LOCAL, name: targetName } } : {}
     });
   }
@@ -1671,7 +1671,7 @@
       gm2.set(autoLinkKey(location.origin), false);
     }
     const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：若本域已在设置勾选「本域名自动连接 broker」（白名单），页面刷新后连接会自动恢复；未在白名单时刷新后不会自动重连，page.request 可能返回 no_tabs/timeout，请提示用户手动重连或勾选白名单。重连/重试期间等几秒再试，上限 3 次。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。";
-    function submitToAgent(prompt, targetName, record2) {
+    function submitToAgent(prompt, targetName, record) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
           resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
@@ -1680,7 +1680,7 @@
         const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "submit", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        const failed = sendPayload(frameSubmit(id, promptText, targetName, record2));
+        const failed = sendPayload(frameSubmit(id, promptText, targetName, record));
         if (failed) {
           pending.delete(id);
           resolve(failResult(failed));
@@ -1694,7 +1694,7 @@
         }, 1e4);
       });
     }
-    function requestCompose(prompt, targetName, record2) {
+    function requestCompose(prompt, targetName, record) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
           resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
@@ -1703,7 +1703,7 @@
         const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "compose", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        const failed = sendPayload(frameCompose(id, promptText, targetName, record2));
+        const failed = sendPayload(frameCompose(id, promptText, targetName, record));
         if (failed) {
           pending.delete(id);
           resolve(failResult(failed));
@@ -3430,7 +3430,7 @@
     }
     return lines;
   }
-  function renderOfflineHandoffDoc({ prompt, page, picks, record: record2, target }) {
+  function renderOfflineHandoffDoc({ prompt, page, picks, record, target }) {
     const ts = page && page.ts || Date.now();
     const lines = [
       "# Web annotation handoff",
@@ -3454,7 +3454,7 @@
     list.forEach((pick, i) => {
       lines.push(...pickSection(pick || {}, i));
     });
-    if (record2) lines.push(...recordSection(record2));
+    if (record) lines.push(...recordSection(record));
     lines.push(
       "## Offline composition",
       "",
@@ -3492,11 +3492,12 @@
     function composeOffline() {
       const prompt = elPrompt.value.trim() || DEFAULT_PROMPT;
       const target = ctx.getComboSel() || gm.get(GM_TARGET, "") || "";
+      const record = ctx.getRecord ? ctx.getRecord() : null;
       const text = renderOfflineHandoffDoc({
         prompt,
         page: { url: location.href, title: document.title, ts: Date.now() },
         picks: loadBatch(),
-        record: ctx.getRecord ? ctx.getRecord() : null,
+        record,
         target
       });
       if (!copyText(text)) {
@@ -3511,8 +3512,8 @@
       const prompt = elPrompt.value.trim();
       const target = ctx.getComboSel();
       const hasPicks = loadBatch().length > 0;
-      const record2 = ctx.getRecord ? ctx.getRecord() : null;
-      if (!prompt && !hasPicks && !record2) {
+      const record = ctx.getRecord ? ctx.getRecord() : null;
+      if (!prompt && !hasPicks && !record) {
         toast(t("send.needContent"));
         return;
       }
@@ -3521,7 +3522,7 @@
         return;
       }
       toast(t("send.composing"));
-      const res = await conn.requestCompose(prompt, target, record2);
+      const res = await conn.requestCompose(prompt, target, record);
       if (!res.ok) {
         toast(t("send.composeFailed", { detail: res.code + (res.message ? " — " + res.message : "") }));
         return;
@@ -3531,12 +3532,12 @@
         return;
       }
       toast(t("send.copied", { n: res.text.length }));
-      clearLikeSend(record2);
+      clearLikeSend(record);
     }
-    function clearLikeSend(record2) {
+    function clearLikeSend(record) {
       elPrompt.value = "";
       ctx.clearBatch();
-      if (record2 && ctx.clearRecord) ctx.clearRecord();
+      if (record && ctx.clearRecord) ctx.clearRecord();
       ctx.closePanel();
     }
     async function doSend() {
@@ -3547,15 +3548,15 @@
         return;
       }
       const hasPicks = loadBatch().length > 0;
-      const record2 = ctx.getRecord ? ctx.getRecord() : null;
-      if (!prompt && !hasPicks && !record2) {
+      const record = ctx.getRecord ? ctx.getRecord() : null;
+      if (!prompt && !hasPicks && !record) {
         toast(t("send.needContent"));
         return;
       }
-      if (!hasPicks && !record2 && !confirm(t("send.promptOnly.confirm"))) return;
+      if (!hasPicks && !record && !confirm(t("send.promptOnly.confirm"))) return;
       elSend.disabled = true;
       elSend.textContent = t("send.sending");
-      const res = await conn.submitToAgent(prompt, target, record2);
+      const res = await conn.submitToAgent(prompt, target, record);
       elSend.disabled = false;
       elSend.textContent = t("sendbtn");
       if (res.ok) {
@@ -3567,7 +3568,7 @@
         }));
         elPrompt.value = "";
         ctx.clearBatch();
-        if (record2 && ctx.clearRecord) ctx.clearRecord();
+        if (record && ctx.clearRecord) ctx.clearRecord();
         ctx.closePanel();
       } else {
         toast(t("send.failed", { detail: res.code + (res.message ? " — " + res.message : "") }));
