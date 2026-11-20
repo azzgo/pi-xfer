@@ -1214,7 +1214,7 @@
     "fabrow.panel.title": { en: "Open the pick panel", zh: "打开标注面板" },
     "fabrow.record": { en: "Record", zh: "录制操作" },
     "fabrow.record.title": { en: "Start/stop recording", zh: "开始/停止录制" },
-    "fabrow.badge": { en: "Picks panel", zh: "打开标注面板" },
+    "fabrow.badge": { en: "Badge panel", zh: "badge 面板" },
     "cnt.title": { en: "Picked elements / record", zh: "已选元素 / 录制" },
     "panel.pick": { en: "⌖ Pick elements", zh: "⌖ 拾取元素" },
     "panel.pick.title": { en: "Start picking elements", zh: "开始拾取元素" },
