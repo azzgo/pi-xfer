@@ -22,12 +22,26 @@ import { initFab } from './ui/fab.js';
 import { initHotkeys } from './ui/hotkeys.js';
 import { initRecord } from './record.js';
 import { t, toggleLang } from './i18n.js';
+import { originEnabled, setOriginEnabled, isDefaultAllowedHost } from './storage.js';
 
 if (!window.__PI_WEBPICKER__) {
   window.__PI_WEBPICKER__ = true;
 
   try {
     installCapture();
+
+    // Injection whitelist (v1.16): only localhost / 127.* / IPv6 loopback are on
+    // by default; every other origin stays fully silent (no UI, no broker probe)
+    // until the user opts in from the script menu, which is registered before the
+    // gate so it is available even when the picker is off.
+    if (!originEnabled()) {
+      try {
+        GM_registerMenuCommand(t('menu.enableOrigin'), () => {
+          setOriginEnabled(true);
+          location.reload();
+        });
+      } catch (e) { /* menu registration unavailable */ }
+    } else {
 
     const ui = buildUI();
     const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
@@ -119,6 +133,10 @@ if (!window.__PI_WEBPICKER__) {
       GM_registerMenuCommand(t('menu.connect'), () => conn.connect());
       GM_registerMenuCommand(t('menu.disconnect'), () => conn.disconnect());
       GM_registerMenuCommand(t('menu.settings'), ctx.openSettings);
+      GM_registerMenuCommand(t('menu.disableOrigin'), () => {
+        setOriginEnabled(false);
+        ui.toast(t('toast.originDisabled', { origin: location.origin }));
+      });
       GM_registerMenuCommand(t('menu.revokeAuto'), () => {
         conn.revokeAutoLink();
         ui.toast(t('toast.autoRevoked', { origin: location.origin }));
@@ -158,6 +176,7 @@ if (!window.__PI_WEBPICKER__) {
         ui.toast(t('toast.fabSize', { size: next }));
       });
     } catch (e) { /* menu registration unavailable in this manager */ }
+    }
   } catch (err) {
     // Injection died (Trusted Types enforcement, a hostile page API, …). Stay
     // silent no longer: a plain-node message beats a userscript that vanished

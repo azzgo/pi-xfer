@@ -38,6 +38,7 @@ export function initSend(ctx) {
     });
     if (!copyText(text)) { toast(t('send.clipboard')); return; }
     toast(t('send.copiedOffline', { n: text.length }));
+    clearLikeSend(record);
   }
 
   async function copyHandoffPrompt() {
@@ -53,6 +54,17 @@ export function initSend(ctx) {
     if (!res.ok) { toast(t('send.composeFailed', { detail: res.code + (res.message ? ' — ' + res.message : '') })); return; }
     if (!copyText(res.text)) { toast(t('send.clipboard')); return; }
     toast(t('send.copied', { n: res.text.length }));
+    clearLikeSend(record);
+  }
+
+  // Copy prompt follows the send flow: the handoff now lives on the clipboard,
+  // so this page's draft is spent — prompt, picks, record and the panel itself
+  // all clear; reopening shows the empty state (same contract as doSend).
+  function clearLikeSend(record) {
+    elPrompt.value = '';
+    ctx.clearBatch();
+    if (record && ctx.clearRecord) ctx.clearRecord();
+    ctx.closePanel();
   }
 
   async function doSend() {

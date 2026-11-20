@@ -216,6 +216,27 @@
     } catch (e) {
     }
   }
+  var GM_ENABLED_ORIGINS = "wp.enabledOrigins";
+  function isDefaultAllowedHost(hostname) {
+    const h = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+    if (h === "localhost" || h.endsWith(".localhost")) return true;
+    if (/^127(?:\.\d{1,3}){3}$/.test(h)) return true;
+    if (h === "::1" || h === "::") return true;
+    if (/^::ffff:127(?:\.\d{1,3}){3}$/.test(h)) return true;
+    return h === "0:0:0:0:0:0:0:1";
+  }
+  function originEnabled() {
+    if (isDefaultAllowedHost(location.hostname)) return true;
+    const list = gm.get(GM_ENABLED_ORIGINS, []);
+    return Array.isArray(list) && list.indexOf(location.origin) >= 0;
+  }
+  function setOriginEnabled(on) {
+    const list = Array.isArray(gm.get(GM_ENABLED_ORIGINS, [])) ? gm.get(GM_ENABLED_ORIGINS, []) : [];
+    const i = list.indexOf(location.origin);
+    if (on && i < 0) list.push(location.origin);
+    if (!on && i >= 0) list.splice(i, 1);
+    gm.set(GM_ENABLED_ORIGINS, list);
+  }
 
   // src/core/wire.ts
   var WIRE_VERSION = 0;
@@ -284,23 +305,23 @@
       return "tab-" + Date.now().toString(36);
     }
   }
-  function frameSubmit(id, prompt, targetName, record) {
+  function frameSubmit(id, prompt, targetName, record2) {
     return frame(WIRE.KIND_SUBMIT, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      ...record ? { record } : {},
+      ...record2 ? { record: record2 } : {},
       target: { namespace: WIRE.NS_LOCAL, name: targetName }
     });
   }
-  function frameCompose(id, prompt, targetName, record) {
+  function frameCompose(id, prompt, targetName, record2) {
     return frame(WIRE.KIND_COMPOSE, {
       id,
       page: { url: location.href, title: document.title },
       picks: loadBatch(),
       prompt,
-      ...record ? { record } : {},
+      ...record2 ? { record: record2 } : {},
       ...targetName ? { target: { namespace: WIRE.NS_LOCAL, name: targetName } } : {}
     });
   }
@@ -1157,6 +1178,8 @@
     "menu.disconnect": { en: "Disconnect broker", zh: "断开 broker" },
     "menu.settings": { en: "Connection settings…", zh: "连接设置…" },
     "menu.revokeAuto": { en: "Disable auto-connect for this domain", zh: "关闭本域名的自动连接" },
+    "menu.enableOrigin": { en: "Enable picker on this site", zh: "在本站点启用 picker" },
+    "menu.disableOrigin": { en: "Disable picker on this site", zh: "在本站点停用 picker" },
     "menu.openPanel": { en: "Open pick panel", zh: "打开标注面板" },
     "menu.startPick": { en: "Start picking", zh: "开始拾取" },
     "menu.toggleRecord": { en: "Start/stop recording", zh: "开始/停止录制" },
@@ -1172,6 +1195,8 @@
     "toast.fabSize": { en: "Fab size: {size}", zh: "悬浮按钮大小：{size}" },
     "toast.fabHidden": { en: "Trigger hidden — hover the dot or use the menu to restore it", zh: "trigger 已隐藏 — 悬停小圆点或用菜单恢复" },
     "toast.fabShown": { en: "Trigger shown", zh: "trigger 已显示" },
+    "toast.originEnabled": { en: "Picker enabled on {origin} — injected", zh: "已在 {origin} 启用 picker — 已注入" },
+    "toast.originDisabled": { en: "Picker disabled on {origin} — reload to remove it", zh: "已在 {origin} 停用 picker — 刷新页面后移除" },
     "bar.cycle": { en: "cycle layer", zh: "切层" },
     "bar.prev": { en: "Previous layer", zh: "上一层" },
     "bar.next": { en: "Next layer", zh: "下一层" },
@@ -1189,6 +1214,7 @@
     "fabrow.panel.title": { en: "Open the pick panel", zh: "打开标注面板" },
     "fabrow.record": { en: "Record", zh: "录制操作" },
     "fabrow.record.title": { en: "Start/stop recording", zh: "开始/停止录制" },
+    "fabrow.badge": { en: "Picks panel", zh: "打开标注面板" },
     "cnt.title": { en: "Picked elements / record", zh: "已选元素 / 录制" },
     "panel.pick": { en: "⌖ Pick elements", zh: "⌖ 拾取元素" },
     "panel.pick.title": { en: "Start picking elements", zh: "开始拾取元素" },
@@ -1645,7 +1671,7 @@
       gm2.set(autoLinkKey(location.origin), false);
     }
     const PAGE_QUERY_RULE = "\n\n[页面查询规则] 反向查询本页（page.request：dom.query / dom.html / console.logs / framework.inspect / page.wait 等）随时可用：若本域已在设置勾选「本域名自动连接 broker」（白名单），页面刷新后连接会自动恢复；未在白名单时刷新后不会自动重连，page.request 可能返回 no_tabs/timeout，请提示用户手动重连或勾选白名单。重连/重试期间等几秒再试，上限 3 次。完成修改后请主动反向查询验证：dom.query 复查目标元素的最终状态，console.logs 检查是否引入新报错。若错误信息表明页面写操作已授权，可用 dom.click / dom.setValue 做交互式验证（如点击按钮、填写表单后复查状态）；返回 denied_op 则不要重试写操作。";
-    function submitToAgent(prompt, targetName, record) {
+    function submitToAgent(prompt, targetName, record2) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
           resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
@@ -1654,7 +1680,7 @@
         const id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "submit", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        const failed = sendPayload(frameSubmit(id, promptText, targetName, record));
+        const failed = sendPayload(frameSubmit(id, promptText, targetName, record2));
         if (failed) {
           pending.delete(id);
           resolve(failResult(failed));
@@ -1668,7 +1694,7 @@
         }, 1e4);
       });
     }
-    function requestCompose(prompt, targetName, record) {
+    function requestCompose(prompt, targetName, record2) {
       return new Promise((resolve) => {
         if (wsState !== "on") {
           resolve({ ok: false, code: "not_connected", message: t("conn.notConnected") });
@@ -1677,7 +1703,7 @@
         const id = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
         pending.set(id, { kind: "compose", resolve });
         const promptText = (prompt && prompt.trim() ? prompt.trim() : DEFAULT_PROMPT) + PAGE_QUERY_RULE;
-        const failed = sendPayload(frameCompose(id, promptText, targetName, record));
+        const failed = sendPayload(frameCompose(id, promptText, targetName, record2));
         if (failed) {
           pending.delete(id);
           resolve(failResult(failed));
@@ -2411,6 +2437,12 @@
             <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
           </button>
         </div>
+        <div class="frow">
+          <span class="flab">${t("fabrow.badge")}</span>
+          <button class="fbtn" id="frow-badge" title="${t("fabrow.badge")}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4h16v12H8l-4 4z"/></svg>
+          </button>
+        </div>
       </div>
       <button id="fab" title="${t("fab.hint")}">
         <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
@@ -2435,7 +2467,7 @@
     </div>
   `);
     const $ = (id) => root.getElementById(id);
-    const elHL = $("hl"), elGWrap = $("gwrap"), elPMarks = $("pmarks"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elFabStack = $("fabstack"), elFabRowPanel = $("frow-panel"), elFabRowRecord = $("frow-record"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
+    const elHL = $("hl"), elGWrap = $("gwrap"), elPMarks = $("pmarks"), elBadge = $("badge"), elInfo = $("info"), elBar = $("bar"), elGH = $("gh"), elGCLEAR = $("gclear"), elEscX = $("escx"), elFab = $("fab"), elFabStack = $("fabstack"), elFabRowPanel = $("frow-panel"), elFabRowRecord = $("frow-record"), elFabRowBadge = $("frow-badge"), elCnt = $("cnt"), elDot = $("dot"), elCard = $("card"), elSel = $("sel"), elRecBar = $("recbar"), elRecCount = $("reccount"), elRecBadge = $("recbadge"), elRecStop = $("recstop"), elRecDiscard = $("recdiscard"), elTxt = $("txt"), elOk = $("ok"), elCancel = $("cancel"), elToast = $("toast"), elPanel = $("panel"), elPH = $("ph"), elPlist = $("plist"), elPcount = $("pcount"), elPclose = $("pclose"), elBagEntry = $("bagentry"), elPrompt = $("prompt"), elTCombo = $("tcombo"), elTInput = $("tinput"), elTDrop = $("tdrop"), elTRefresh = $("trefresh"), elSend = $("sendbtn"), elClear = $("clearbtn"), elSendGroup = $("sendgroup"), elSendMore = $("sendmore"), elSendMenu = $("sendmenu"), elCopyPrompt = $("copyprompt"), elStage = $("stagetobroker"), elConn = $("connstate"), elConnText = $("conntext"), elSettings = $("settings"), elSendOffline = $("sendoffline"), elSUrl = $("sburl"), elSSave = $("ssave"), elSCancel = $("scancel"), elSProps = $("sprops"), elSAuto = $("sauto"), elSWrite = $("swrite");
     if (gm.get(GM_FAB_SIZE, "small") === "large") {
       elFab.classList.add("large");
       elFabStack.classList.add("large");
@@ -2500,6 +2532,7 @@
       elFabStack,
       elFabRowPanel,
       elFabRowRecord,
+      elFabRowBadge,
       elCnt,
       elDot,
       elCard,
@@ -3397,7 +3430,7 @@
     }
     return lines;
   }
-  function renderOfflineHandoffDoc({ prompt, page, picks, record, target }) {
+  function renderOfflineHandoffDoc({ prompt, page, picks, record: record2, target }) {
     const ts = page && page.ts || Date.now();
     const lines = [
       "# Web annotation handoff",
@@ -3421,7 +3454,7 @@
     list.forEach((pick, i) => {
       lines.push(...pickSection(pick || {}, i));
     });
-    if (record) lines.push(...recordSection(record));
+    if (record2) lines.push(...recordSection(record2));
     lines.push(
       "## Offline composition",
       "",
@@ -3471,14 +3504,15 @@
         return;
       }
       toast(t("send.copiedOffline", { n: text.length }));
+      clearLikeSend(record);
     }
     async function copyHandoffPrompt() {
       ctx.closeSendMenu();
       const prompt = elPrompt.value.trim();
       const target = ctx.getComboSel();
       const hasPicks = loadBatch().length > 0;
-      const record = ctx.getRecord ? ctx.getRecord() : null;
-      if (!prompt && !hasPicks && !record) {
+      const record2 = ctx.getRecord ? ctx.getRecord() : null;
+      if (!prompt && !hasPicks && !record2) {
         toast(t("send.needContent"));
         return;
       }
@@ -3487,7 +3521,7 @@
         return;
       }
       toast(t("send.composing"));
-      const res = await conn.requestCompose(prompt, target, record);
+      const res = await conn.requestCompose(prompt, target, record2);
       if (!res.ok) {
         toast(t("send.composeFailed", { detail: res.code + (res.message ? " — " + res.message : "") }));
         return;
@@ -3497,6 +3531,13 @@
         return;
       }
       toast(t("send.copied", { n: res.text.length }));
+      clearLikeSend(record2);
+    }
+    function clearLikeSend(record2) {
+      elPrompt.value = "";
+      ctx.clearBatch();
+      if (record2 && ctx.clearRecord) ctx.clearRecord();
+      ctx.closePanel();
     }
     async function doSend() {
       const prompt = elPrompt.value.trim();
@@ -3506,15 +3547,15 @@
         return;
       }
       const hasPicks = loadBatch().length > 0;
-      const record = ctx.getRecord ? ctx.getRecord() : null;
-      if (!prompt && !hasPicks && !record) {
+      const record2 = ctx.getRecord ? ctx.getRecord() : null;
+      if (!prompt && !hasPicks && !record2) {
         toast(t("send.needContent"));
         return;
       }
-      if (!hasPicks && !record && !confirm(t("send.promptOnly.confirm"))) return;
+      if (!hasPicks && !record2 && !confirm(t("send.promptOnly.confirm"))) return;
       elSend.disabled = true;
       elSend.textContent = t("send.sending");
-      const res = await conn.submitToAgent(prompt, target, record);
+      const res = await conn.submitToAgent(prompt, target, record2);
       elSend.disabled = false;
       elSend.textContent = t("sendbtn");
       if (res.ok) {
@@ -3526,7 +3567,7 @@
         }));
         elPrompt.value = "";
         ctx.clearBatch();
-        if (record && ctx.clearRecord) ctx.clearRecord();
+        if (record2 && ctx.clearRecord) ctx.clearRecord();
         ctx.closePanel();
       } else {
         toast(t("send.failed", { detail: res.code + (res.message ? " — " + res.message : "") }));
@@ -4184,7 +4225,7 @@
   function initFab(ctx) {
     const { ui, toast } = ctx;
     const { host, els } = ui;
-    const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elBar, elCard, elPanel, elPH } = els;
+    const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elFabRowBadge, elBar, elCard, elPanel, elPH } = els;
     const fabKey = fabHiddenKey(location.origin);
     let fabHidden = gm.get(fabKey, false) === true;
     function applyFabHidden() {
@@ -4250,6 +4291,10 @@
     elFabRowRecord.addEventListener("click", (e) => {
       e.stopPropagation();
       ctx.toggleRecord();
+    });
+    elFabRowBadge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      ctx.togglePanel();
     });
     window.addEventListener("contextmenu", (e) => {
       if (!ctx.isFabTarget(e)) return;
@@ -4772,133 +4817,147 @@
     window.__PI_WEBPICKER__ = true;
     try {
       installCapture();
-      const ui = buildUI();
-      const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
-      const pageTools = createPageTools({ gm, consoleRing, netRing, debugLog });
-      ctx.pageTools = pageTools;
-      const conn = createBrokerConn({
-        gm,
-        debugLog,
-        toast: ui.toast,
-        onState: (s) => {
-          ui.els.elDot.className = s === "on" ? "on" : s === "connecting" ? "connecting" : s === "blocked" ? "blocked" : "";
-          if (ctx.renderConnPill) ctx.renderConnPill(s);
-          if (s !== "on" && ctx.renderTargetCombo) ctx.renderTargetCombo();
-        },
-        onWelcome: () => {
-          if (ctx.refreshTargets) void ctx.refreshTargets();
-        },
-        onPageRequest: (f) => {
-          try {
-            pageTools.handlePageToolRequest(f, (id, ok, payload) => {
-              conn.sendFrame(framePageResponse(id, ok, payload));
-            });
-          } catch (err) {
-            debugLog("page.request dispatch failed:", err && err.message ? err.message : err);
-            conn.sendFrame(framePageResponse(f.id, false, "dispatch_failed: " + (err && err.message ? err.message : String(err))));
-          }
+      if (!originEnabled()) {
+        try {
+          GM_registerMenuCommand(t("menu.enableOrigin"), () => {
+            setOriginEnabled(true);
+            location.reload();
+          });
+        } catch (e) {
         }
-      });
-      ctx.conn = conn;
-      initPanel(ctx);
-      initPick(ctx);
-      initCombo(ctx);
-      initSend(ctx);
-      initBag(ctx);
-      ctx.setBagEntry(ctx.els.elBagEntry);
-      initSettings(ctx);
-      initFab(ctx);
-      ctx.consoleRing = consoleRing;
-      ctx.netRing = netRing;
-      initRecord(ctx);
-      initHotkeys(ctx);
-      ctx.refreshCount();
-      ctx.updateGroupUI();
-      ctx.renderTargetCombo();
-      if (ctx.renderSendAffordance) ctx.renderSendAffordance(conn.getState());
-      conn.maybeAutoConnect();
-      conn.maybeProbePolicyBlocked();
-      debugLog("ready — ⇧Enter group · ⌫ clear group · " + location.host);
-      window.__PI_WP_API__ = {
-        start: () => {
-          ctx.setActive(true);
-          return true;
-        },
-        stop: () => {
-          ctx.setActive(false);
-          return true;
-        },
-        panel: ctx.togglePanel,
-        record: () => ctx.toggleRecord(),
-        recordState: () => ctx.recState,
-        getRecord: () => ctx.getRecord(),
-        connect: () => conn.connect(),
-        disconnect: () => conn.disconnect(),
-        settings: ctx.openSettings,
-        send: (prompt, target) => conn.submitToAgent(prompt, target),
-        copyPrompt: ctx.copyHandoffPrompt,
-        targets: ctx.getTargets,
-        refreshTargets: () => ctx.refreshTargets(),
-        snapshot: () => loadBatch(),
-        tools: () => Object.keys(pageTools.PAGE_TOOLS),
-        consoleLog: () => consoleRing.slice(),
-        netLog: () => netRing.slice(),
-        frameworkProps: () => gm.get("wp.frameworkProps", false) === true,
-        setFrameworkProps: (on) => {
-          gm.set("wp.frameworkProps", !!on);
-          ui.els.elSProps.checked = !!on;
-          return !!on;
-        },
-        setDebug: (on) => {
-          gm.set(GM_DEBUG, !!on);
-          return !!on;
-        },
-        reinject: ui.reinjectTrigger
-      };
-      try {
-        GM_registerMenuCommand(t("menu.connect"), () => conn.connect());
-        GM_registerMenuCommand(t("menu.disconnect"), () => conn.disconnect());
-        GM_registerMenuCommand(t("menu.settings"), ctx.openSettings);
-        GM_registerMenuCommand(t("menu.revokeAuto"), () => {
-          conn.revokeAutoLink();
-          ui.toast(t("toast.autoRevoked", { origin: location.origin }));
-        });
-        GM_registerMenuCommand(t("menu.openPanel"), ctx.togglePanel);
-        GM_registerMenuCommand(t("menu.startPick"), () => ctx.setActive(true));
-        GM_registerMenuCommand(t("menu.toggleRecord"), () => ctx.toggleRecord());
-        let fabMenuItem = null;
-        const canReregisterMenu = () => typeof GM_unregisterMenuCommand === "function";
-        const refreshFabMenu = () => {
-          try {
-            if (fabMenuItem !== null) {
-              if (!canReregisterMenu()) return;
-              GM_unregisterMenuCommand(fabMenuItem);
+      } else {
+        const ui = buildUI();
+        const ctx = { ui, toast: ui.toast, root: ui.root, host: ui.host, els: ui.els };
+        const pageTools = createPageTools({ gm, consoleRing, netRing, debugLog });
+        ctx.pageTools = pageTools;
+        const conn = createBrokerConn({
+          gm,
+          debugLog,
+          toast: ui.toast,
+          onState: (s) => {
+            ui.els.elDot.className = s === "on" ? "on" : s === "connecting" ? "connecting" : s === "blocked" ? "blocked" : "";
+            if (ctx.renderConnPill) ctx.renderConnPill(s);
+            if (s !== "on" && ctx.renderTargetCombo) ctx.renderTargetCombo();
+          },
+          onWelcome: () => {
+            if (ctx.refreshTargets) void ctx.refreshTargets();
+          },
+          onPageRequest: (f) => {
+            try {
+              pageTools.handlePageToolRequest(f, (id, ok, payload) => {
+                conn.sendFrame(framePageResponse(id, ok, payload));
+              });
+            } catch (err) {
+              debugLog("page.request dispatch failed:", err && err.message ? err.message : err);
+              conn.sendFrame(framePageResponse(f.id, false, "dispatch_failed: " + (err && err.message ? err.message : String(err))));
             }
-            fabMenuItem = GM_registerMenuCommand(
-              t(ctx.isFabHidden() ? "menu.toggleFab.show" : "menu.toggleFab.hide"),
-              () => ctx.toggleFab()
-            );
-          } catch (e) {
           }
+        });
+        ctx.conn = conn;
+        initPanel(ctx);
+        initPick(ctx);
+        initCombo(ctx);
+        initSend(ctx);
+        initBag(ctx);
+        ctx.setBagEntry(ctx.els.elBagEntry);
+        initSettings(ctx);
+        initFab(ctx);
+        ctx.consoleRing = consoleRing;
+        ctx.netRing = netRing;
+        initRecord(ctx);
+        initHotkeys(ctx);
+        ctx.refreshCount();
+        ctx.updateGroupUI();
+        ctx.renderTargetCombo();
+        if (ctx.renderSendAffordance) ctx.renderSendAffordance(conn.getState());
+        conn.maybeAutoConnect();
+        conn.maybeProbePolicyBlocked();
+        debugLog("ready — ⇧Enter group · ⌫ clear group · " + location.host);
+        window.__PI_WP_API__ = {
+          start: () => {
+            ctx.setActive(true);
+            return true;
+          },
+          stop: () => {
+            ctx.setActive(false);
+            return true;
+          },
+          panel: ctx.togglePanel,
+          record: () => ctx.toggleRecord(),
+          recordState: () => ctx.recState,
+          getRecord: () => ctx.getRecord(),
+          connect: () => conn.connect(),
+          disconnect: () => conn.disconnect(),
+          settings: ctx.openSettings,
+          send: (prompt, target) => conn.submitToAgent(prompt, target),
+          copyPrompt: ctx.copyHandoffPrompt,
+          targets: ctx.getTargets,
+          refreshTargets: () => ctx.refreshTargets(),
+          snapshot: () => loadBatch(),
+          tools: () => Object.keys(pageTools.PAGE_TOOLS),
+          consoleLog: () => consoleRing.slice(),
+          netLog: () => netRing.slice(),
+          frameworkProps: () => gm.get("wp.frameworkProps", false) === true,
+          setFrameworkProps: (on) => {
+            gm.set("wp.frameworkProps", !!on);
+            ui.els.elSProps.checked = !!on;
+            return !!on;
+          },
+          setDebug: (on) => {
+            gm.set(GM_DEBUG, !!on);
+            return !!on;
+          },
+          reinject: ui.reinjectTrigger
         };
-        ctx.refreshFabMenu = refreshFabMenu;
-        refreshFabMenu();
-        GM_registerMenuCommand(t("menu.reinject"), () => {
-          ui.toast(ui.reinjectTrigger() ? t("toast.reinjected") : t("toast.reinjectStuck"));
-        });
-        GM_registerMenuCommand(t("menu.lang"), () => {
-          const lang2 = toggleLang();
-          ui.toast(t("toast.langSwitched"));
-          debugLog("language set to", lang2);
-        });
-        GM_registerMenuCommand(t("menu.fabSize"), () => {
-          const next = gm.get(GM_FAB_SIZE, "small") === "small" ? "large" : "small";
-          gm.set(GM_FAB_SIZE, next);
-          ui.els.elFab.classList.toggle("large", next === "large");
-          ui.els.elFabStack.classList.toggle("large", next === "large");
-          ui.toast(t("toast.fabSize", { size: next }));
-        });
-      } catch (e) {
+        try {
+          GM_registerMenuCommand(t("menu.connect"), () => conn.connect());
+          GM_registerMenuCommand(t("menu.disconnect"), () => conn.disconnect());
+          GM_registerMenuCommand(t("menu.settings"), ctx.openSettings);
+          GM_registerMenuCommand(t("menu.disableOrigin"), () => {
+            setOriginEnabled(false);
+            ui.toast(t("toast.originDisabled", { origin: location.origin }));
+          });
+          GM_registerMenuCommand(t("menu.revokeAuto"), () => {
+            conn.revokeAutoLink();
+            ui.toast(t("toast.autoRevoked", { origin: location.origin }));
+          });
+          GM_registerMenuCommand(t("menu.openPanel"), ctx.togglePanel);
+          GM_registerMenuCommand(t("menu.startPick"), () => ctx.setActive(true));
+          GM_registerMenuCommand(t("menu.toggleRecord"), () => ctx.toggleRecord());
+          let fabMenuItem = null;
+          const canReregisterMenu = () => typeof GM_unregisterMenuCommand === "function";
+          const refreshFabMenu = () => {
+            try {
+              if (fabMenuItem !== null) {
+                if (!canReregisterMenu()) return;
+                GM_unregisterMenuCommand(fabMenuItem);
+              }
+              fabMenuItem = GM_registerMenuCommand(
+                t(ctx.isFabHidden() ? "menu.toggleFab.show" : "menu.toggleFab.hide"),
+                () => ctx.toggleFab()
+              );
+            } catch (e) {
+            }
+          };
+          ctx.refreshFabMenu = refreshFabMenu;
+          refreshFabMenu();
+          GM_registerMenuCommand(t("menu.reinject"), () => {
+            ui.toast(ui.reinjectTrigger() ? t("toast.reinjected") : t("toast.reinjectStuck"));
+          });
+          GM_registerMenuCommand(t("menu.lang"), () => {
+            const lang2 = toggleLang();
+            ui.toast(t("toast.langSwitched"));
+            debugLog("language set to", lang2);
+          });
+          GM_registerMenuCommand(t("menu.fabSize"), () => {
+            const next = gm.get(GM_FAB_SIZE, "small") === "small" ? "large" : "small";
+            gm.set(GM_FAB_SIZE, next);
+            ui.els.elFab.classList.toggle("large", next === "large");
+            ui.els.elFabStack.classList.toggle("large", next === "large");
+            ui.toast(t("toast.fabSize", { size: next }));
+          });
+        } catch (e) {
+        }
       }
     } catch (err) {
       try {

@@ -9,7 +9,7 @@ import { makeDraggable } from './draggable.js';
 export function initFab(ctx) {
   const { ui, toast } = ctx;
   const { host, els } = ui;
-  const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elBar, elCard, elPanel, elPH } = els;
+  const { elFab, elFabStack, elFabRowPanel, elFabRowRecord, elFabRowBadge, elBar, elCard, elPanel, elPH } = els;
 
   const fabKey = fabHiddenKey(location.origin);
   let fabHidden = gm.get(fabKey, false) === true;
@@ -60,6 +60,7 @@ export function initFab(ctx) {
   }
   elFabRowPanel.addEventListener('click', (e) => { e.stopPropagation(); ctx.togglePanel(); });
   elFabRowRecord.addEventListener('click', (e) => { e.stopPropagation(); ctx.toggleRecord(); });
+  elFabRowBadge.addEventListener('click', (e) => { e.stopPropagation(); ctx.togglePanel(); });
   // 右键 = 直接开/收面板：不用先悬停等扇出、再点那一行。页面自己的右键菜单在
   // fab 上让位给这条捷径（capture 阶段拦掉，页面脚本收不到）。
   window.addEventListener('contextmenu', (e) => {

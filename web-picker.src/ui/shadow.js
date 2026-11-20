@@ -399,6 +399,12 @@ export function buildUI() {
             <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="6"/></svg>
           </button>
         </div>
+        <div class="frow">
+          <span class="flab">${t('fabrow.badge')}</span>
+          <button class="fbtn" id="frow-badge" title="${t('fabrow.badge')}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4h16v12H8l-4 4z"/></svg>
+          </button>
+        </div>
       </div>
       <button id="fab" title="${t('fab.hint')}">
         <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
@@ -426,7 +432,7 @@ export function buildUI() {
   const $ = (id) => root.getElementById(id);
   const elHL = $('hl'), elGWrap = $('gwrap'), elPMarks = $('pmarks'), elBadge = $('badge'), elInfo = $('info'), elBar = $('bar'), elGH = $('gh'),
         elGCLEAR = $('gclear'), elEscX = $('escx'),
-        elFab = $('fab'), elFabStack = $('fabstack'), elFabRowPanel = $('frow-panel'), elFabRowRecord = $('frow-record'),
+        elFab = $('fab'), elFabStack = $('fabstack'), elFabRowPanel = $('frow-panel'), elFabRowRecord = $('frow-record'), elFabRowBadge = $('frow-badge'),
         elCnt = $('cnt'), elDot = $('dot'), elCard = $('card'), elSel = $('sel'),
         elRecBar = $('recbar'), elRecCount = $('reccount'), elRecBadge = $('recbadge'),
         elRecStop = $('recstop'), elRecDiscard = $('recdiscard'),
@@ -484,7 +490,7 @@ export function buildUI() {
 
   const els = { elHL, elGWrap, elPMarks, elBadge, elInfo, elBar, elGH, elGCLEAR, elEscX,
     elRecBar, elRecCount, elRecBadge, elRecStop, elRecDiscard,
-    elFab, elFabStack, elFabRowPanel, elFabRowRecord, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
+    elFab, elFabStack, elFabRowPanel, elFabRowRecord, elFabRowBadge, elCnt, elDot, elCard, elSel, elTxt, elOk, elCancel, elToast,
     elPanel, elPH, elPlist, elPcount, elPclose, elBagEntry, elPrompt, elTCombo, elTInput,
     elTDrop, elTRefresh, elSend, elClear, elSendGroup, elSendMore, elSendMenu,
     elCopyPrompt, elStage, elConn, elConnText, elSettings, elSUrl, elSSave, elSCancel, elSProps, elSAuto, elSWrite,
