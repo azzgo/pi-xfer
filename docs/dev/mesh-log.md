@@ -26,7 +26,7 @@ humans and is never fed back into an agent's context.
 | Producer | Where it is wired | Records |
 |---|---|---|
 | RivetKit's own JS logger | `setup({ logging: { baseLogger: createMeshLogSink() } })` in `mesh-engine.ts` (`ensureNode`) | `starting rivetkit envoy`, api calls, engine/actor warnings, actor-scoped lines (`child({actorName, actorKey, …})` bindings are merged in) |
-| pi-xfer's mesh events | `logMeshEvent(...)` calls in `mesh.ts` (`up` / `down` / `send` / inbound / misroute) | node lifecycle, refusals (`mesh up refused — …`, pool mismatch), send/inbound ids and sizes, misroutes |
+| pi-xfer's mesh events | `logMeshEvent(...)` calls in `mesh.ts` (`up` / `down` / `send` / inbound / misroute) and in `mesh-engine.ts` (`ensureNode`'s pool step) | node lifecycle, refusals (`mesh up refused — …`, pool mismatch), send/inbound ids and sizes, misroutes, and `mesh pool` (`action=created|exists`) for the runner-config `up` resolved before registering |
 
 Everything lands in `mesh-log.ts`: `formatMeshLogLine` (logfmt),
 `appendMeshLogLine` (never throws — a broken log target must not take the mesh

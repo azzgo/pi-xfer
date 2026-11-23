@@ -432,11 +432,16 @@ describe("rivet engine wiring", () => {
     clientConfig?: Record<string, unknown>;
     getOrCreate: unknown[][];
     gets: unknown[][];
+    /** When set, `startAndWait` rejects with this message (the registry timeout path). */
+    startError?: string;
   }
   const fresh = (): Recorded => ({ runtimeReady: 0, started: 0, stopped: 0, resolved: 0, getOrCreate: [], gets: [] });
 
-  function fakeDeps(record: Recorded): RivetEngineDeps {
+  function fakeDeps(record: Recorded, options: { realPool?: boolean } = {}): RivetEngineDeps {
     return {
+      ...(options.realPool ? {} : {
+        ensurePool: async (config: { pool?: string }) => ({ pool: config.pool ?? "default", existed: true }),
+      }),
       ensureRuntimeReady: async () => { record.runtimeReady += 1; },
       importRivetkit: async () => ({
         actor: (definition: unknown) => ({ definition }),
@@ -444,7 +449,10 @@ describe("rivet engine wiring", () => {
         setup: (config: Record<string, unknown>) => {
           record.setup = config;
           return {
-            startAndWait: async () => { record.started += 1; },
+            startAndWait: async () => {
+              record.started += 1;
+              if (record.startError !== undefined) throw new Error(record.startError);
+            },
             shutdown: async () => { record.stopped += 1; },
           };
         },
@@ -1236,12 +1244,37 @@ describe("ensureRunnerPool", () => {
   it("creates the runner-config when the engine does not have it", async () => {
     const stub = stubFetch([
       { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: {} } },
+      { method: "GET", path: "/datacenters", status: 200, body: { datacenters: [{ name: "default" }] } },
       { method: "PUT", path: "/runner-configs/host-a", status: 200, body: {} },
     ]);
     try {
       const result = await ensureRunnerPool(config("host-a"));
       assert.deepEqual(result, { pool: "host-a", existed: false });
-      assert.deepEqual(stub.calls[1]?.body, { datacenters: { default: { normal: {} } } });
+      assert.deepEqual(stub.calls[2]?.body, { datacenters: { default: { normal: {} } } });
+    } finally { stub.restore(); }
+  });
+
+  it("covers every datacenter the engine actually runs", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: {} } },
+      { method: "GET", path: "/datacenters", status: 200, body: { datacenters: [{ name: "eu" }, { name: "us" }] } },
+      { method: "PUT", path: "/runner-configs/host-a", status: 200, body: {} },
+    ]);
+    try {
+      await ensureRunnerPool(config("host-a"));
+      assert.deepEqual(stub.calls[2]?.body, { datacenters: { eu: { normal: {} }, us: { normal: {} } } });
+    } finally { stub.restore(); }
+  });
+
+  it("falls back to the default datacenter when the engine does not list them", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: {} } },
+      { method: "PUT", path: "/runner-configs/host-a", status: 200, body: {} },
+    ]);
+    try {
+      await ensureRunnerPool(config("host-a"));
+      const put = stub.calls.find((call) => call.method === "PUT");
+      assert.deepEqual(put?.body, { datacenters: { default: { normal: {} } } });
     } finally { stub.restore(); }
   });
 
@@ -1258,6 +1291,140 @@ describe("ensureRunnerPool", () => {
 
   it("refuses when the config has no pool", async () => {
     await assert.rejects(() => ensureRunnerPool(config()), /no "pool"/);
+  });
+});
+
+describe("pool preprocessing before the envoy registers", () => {
+  function stubFetch(responses: Array<{ method: string; path: string; status: number; body?: unknown }>) {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init?: any) => {
+      const url = new URL(String(input));
+      calls.push({ method: init?.method ?? "GET", url: url.pathname + url.search, body: init?.body ? JSON.parse(init.body) : undefined });
+      const match = responses.find((r) => r.method === calls.at(-1)!.method && url.pathname === r.path);
+      if (!match) throw new Error(`unexpected ${calls.at(-1)!.method} ${url.pathname}`);
+      return new Response(match.body === undefined ? "" : JSON.stringify(match.body), { status: match.status });
+    }) as typeof fetch;
+    return { calls, restore: () => { globalThis.fetch = original; } };
+  }
+
+  function engineDeps(started: { count: number }, startError?: string): RivetEngineDeps {
+    return {
+      ensureRuntimeReady: async () => {},
+      importRivetkit: async () => ({
+        actor: (definition: unknown) => ({ definition }),
+        queue: () => ({}),
+        setup: () => ({
+          startAndWait: async () => {
+            started.count += 1;
+            if (startError !== undefined) throw new Error(startError);
+          },
+          shutdown: async () => {},
+        }),
+      }),
+      importClient: async () => ({
+        createClient: () => ({
+          getOrCreate: () => ({ resolve: async () => {} }),
+          get: () => ({ send: async () => {}, action: async () => "" }),
+        }),
+      }),
+    };
+  }
+
+  const config = (pool?: string) => ({ endpoint: "http://localhost:6420", namespace: "ison", ...(pool ? { pool } : {}) });
+
+  it("creates the missing runner-config before registering, and logs it", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: {} } },
+      { method: "GET", path: "/datacenters", status: 200, body: { datacenters: [{ name: "default" }] } },
+      { method: "PUT", path: "/runner-configs/host-a", status: 200, body: {} },
+    ]);
+    const started = { count: 0 };
+    const logPath = meshLogPath("pool-created");
+    try {
+      const engine = createRivetEngine(config("host-a"), () => {}, engineDeps(started), { logPath });
+      await engine.ensureNode("web");
+      assert.equal(started.count, 1, "the envoy is registered after the pool exists");
+      assert.deepEqual(stub.calls[2]?.body, { datacenters: { default: { normal: {} } } });
+      assert.match(fs.readFileSync(logPath, "utf-8"), /msg="mesh pool" pool=host-a namespace=ison action=created/);
+    } finally { stub.restore(); }
+  });
+
+  it("does not write a runner-config that already exists", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: { "host-a": { datacenters: {} } } } },
+    ]);
+    const started = { count: 0 };
+    try {
+      const engine = createRivetEngine(config("host-a"), () => {}, engineDeps(started));
+      await engine.ensureNode("web");
+      assert.equal(started.count, 1);
+      assert.equal(stub.calls.filter((call) => call.method === "PUT").length, 0);
+    } finally { stub.restore(); }
+  });
+
+  it("touches no engine endpoint when the config has no pool", async () => {
+    const stub = stubFetch([]);
+    const started = { count: 0 };
+    try {
+      const engine = createRivetEngine(config(), () => {}, engineDeps(started));
+      await engine.ensureNode("web");
+      assert.equal(started.count, 1);
+      assert.deepEqual(stub.calls, [], "the engine default pool needs no runner-config from us");
+    } finally { stub.restore(); }
+  });
+
+  it("stops before registering when the pool cannot be created, naming pool and namespace", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: {} } },
+      { method: "GET", path: "/datacenters", status: 200, body: { datacenters: [{ name: "default" }] } },
+      { method: "PUT", path: "/runner-configs/host-a", status: 403, body: { code: "forbidden" } },
+    ]);
+    const started = { count: 0 };
+    try {
+      const engine = createRivetEngine(config("host-a"), () => {}, engineDeps(started));
+      await assert.rejects(
+        () => engine.ensureNode("web"),
+        (err: any) =>
+          /pool "host-a" is not ready in namespace "ison"/.test(err.message) &&
+          /no_runner_config/.test(err.message) &&
+          /\/xfer mesh setup/.test(err.message),
+      );
+      assert.equal(started.count, 0, "a 30 s registration timeout is not attempted");
+    } finally { stub.restore(); }
+  });
+
+  it("explains the registry timeout with namespace, pool and the debug lever", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: { "host-a": { datacenters: {} } } } },
+    ]);
+    const started = { count: 0 };
+    try {
+      const engine = createRivetEngine(
+        config("host-a"),
+        () => {},
+        engineDeps(started, "RivetKit registry did not register with the Engine within 30000ms"),
+      );
+      await assert.rejects(
+        () => engine.ensureNode("web"),
+        (err: any) =>
+          /did not register with the Engine within 30000ms/.test(err.message) &&
+          /namespace "ison"/.test(err.message) &&
+          /pool "host-a" \(runner-config already present\)/.test(err.message) &&
+          /RIVET_LOG_LEVEL=debug/.test(err.message),
+      );
+    } finally { stub.restore(); }
+  });
+
+  it("passes through an unrelated start failure unchanged", async () => {
+    const stub = stubFetch([
+      { method: "GET", path: "/runner-configs", status: 200, body: { runner_configs: { "host-a": { datacenters: {} } } } },
+    ]);
+    const started = { count: 0 };
+    try {
+      const engine = createRivetEngine(config("host-a"), () => {}, engineDeps(started, "registry stopped before becoming ready"));
+      await assert.rejects(() => engine.ensureNode("web"), (err: any) => err.message === "registry stopped before becoming ready");
+    } finally { stub.restore(); }
   });
 });
 

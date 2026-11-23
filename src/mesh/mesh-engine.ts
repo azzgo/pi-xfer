@@ -196,6 +196,7 @@ export interface RivetEngineDeps {
   ensureRuntimeReady?: () => Promise<void>;
   importRivetkit?: () => Promise<any>;
   importClient?: () => Promise<any>;
+  ensurePool?: (config: MeshConfig) => Promise<{ pool: string; existed: boolean }>;
 }
 
 /**
@@ -260,7 +261,12 @@ export function createRivetEngine(
         ...(config.pool ? { envoy: { poolName: config.pool } } : {}),
       });
       const regAny = reg as unknown as { startAndWait(): Promise<void>; shutdown(): Promise<void> };
-      await regAny.startAndWait();
+      const pool = await ensurePoolReady(config, deps.ensurePool ?? ensureRunnerPool, options.logPath);
+      try {
+        await regAny.startAndWait();
+      } catch (err) {
+        throw envoyRegistrationError(err, config, pool);
+      }
       registry = regAny;
       const { createClient } = await (deps.importClient ?? (() => import("rivetkit/client")))();
       client = createClient(guardMeshConfig({ endpoint: config.endpoint, namespace: config.namespace, token: config.token }));
@@ -371,9 +377,16 @@ async function engineApi<T>(config: MeshConfig, method: string, path: string, bo
  */
 /**
  * Make sure the configured pool actually has a runner-config on the engine.
- * Without one, actors pinned to the pool queue forever — the node looks online
- * but nothing ever picks it up. Idempotent: an existing config is left as-is.
- * A config without `pool` is a no-op (the engine default runner-config covers it).
+ *
+ * A runner-config is **per namespace and per pool**: a fresh namespace starts
+ * with none, and the engine then refuses every envoy with
+ * `no_runner_config: Must create a runner config before connecting an envoy`.
+ * RivetKit's native runtime retries that refusal silently, so the only thing
+ * pi-xfer ever sees is `RivetKit registry did not register with the Engine
+ * within 30000ms` — which is why `up` now calls this before it registers.
+ *
+ * Idempotent: an existing config is left as-is. A config without `pool` is a
+ * no-op at the call sites (the engine's `default` pool covers it).
  */
 export async function ensureRunnerPool(config: MeshConfig): Promise<{ pool: string; existed: boolean }> {
   if (!config.pool) {
@@ -386,10 +399,94 @@ export async function ensureRunnerPool(config: MeshConfig): Promise<{ pool: stri
     `/runner-configs?runner_name=${encodeURIComponent(pool)}`,
   );
   if (Object.keys(existing.runner_configs ?? {}).includes(pool)) return { pool, existed: true };
+  const datacenters = await meshDatacenterNames(config);
   await engineApi(config, "PUT", `/runner-configs/${encodeURIComponent(pool)}`, {
-    datacenters: { default: { normal: {} } },
+    datacenters: Object.fromEntries(datacenters.map((name) => [name, { normal: {} }])),
   });
   return { pool, existed: false };
+}
+
+/**
+ * Datacenter names the pool's runner-config has to cover. The engine rejects a
+ * config that names a datacenter it does not run (`datacenter.not_found`), and
+ * leaves a datacenter out of the config that it does — so the names come from
+ * the engine, not from a guess. `default` is the fallback for engines that do
+ * not list datacenters at all (every single-datacenter deployment).
+ */
+async function meshDatacenterNames(config: MeshConfig): Promise<string[]> {
+  try {
+    const response = await engineApi<{ datacenters?: Array<{ name?: unknown }> }>(config, "GET", "/datacenters");
+    const names = (response.datacenters ?? [])
+      .map((datacenter) => datacenter.name)
+      .filter((name): name is string => typeof name === "string" && name !== "");
+    return names.length > 0 ? names : ["default"];
+  } catch {
+    return ["default"];
+  }
+}
+
+/**
+ * The pool half of `up`, decided before the envoy is registered: without a
+ * runner-config the engine refuses the registration and the client only reports
+ * a 30 s timeout, so a missing pool is repaired here and a pool that cannot be
+ * created stops `up` with the reason instead.
+ */
+async function ensurePoolReady(
+  config: MeshConfig,
+  ensurePool: (config: MeshConfig) => Promise<{ pool: string; existed: boolean }>,
+  logPath: string | undefined,
+): Promise<{ pool: string; existed: boolean } | null> {
+  if (!config.pool) return null;
+  const namespace = config.namespace ?? "default";
+  let result: { pool: string; existed: boolean };
+  try {
+    result = await ensurePool(config);
+  } catch (err) {
+    throw new Error(
+      `mesh: pool "${config.pool}" is not ready in namespace "${namespace}" on ${config.endpoint}, and creating its ` +
+      `runner-config failed: ${err instanceof Error ? err.message : String(err)}. The engine refuses an envoy whose pool ` +
+      `has no runner-config (no_runner_config), so registering anyway would only time out after 30 s. ` +
+      `Retry, or create it by hand: PUT /runner-configs/${config.pool}?namespace=${namespace} — /xfer mesh setup does the same.`,
+      { cause: err instanceof Error ? err : undefined },
+    );
+  }
+  logMeshEvent(logPath ?? MESH_LOG_PATH, "info", "mesh pool", {
+    pool: result.pool,
+    namespace,
+    action: result.existed ? "exists" : "created",
+  });
+  return result;
+}
+
+/** Engine error code for "no runner-config covers this envoy's pool". */
+export const NO_RUNNER_CONFIG_CODE = "no_runner_config";
+
+/**
+ * `startAndWait`'s own failure says nothing about *why* the engine never
+ * acknowledged the registration: the native runtime retries the handshake on a
+ * backoff and drops the engine's reason. Attach the facts the operator needs —
+ * namespace, pool, and the missing runner-config case — to the one message that
+ * reaches the screen.
+ */
+function envoyRegistrationError(
+  err: unknown,
+  config: MeshConfig,
+  pool: { pool: string; existed: boolean } | null,
+): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  const error = err instanceof Error ? err : new Error(message);
+  if (!/did not register with the Engine/.test(message)) return error;
+  const namespace = config.namespace ?? "default";
+  const poolText = pool
+    ? `pool "${pool.pool}" (runner-config ${pool.existed ? "already present" : "created just now"})`
+    : "the engine's default pool";
+  return new Error(
+    `${message} — this process's envoy never completed registration in namespace "${namespace}" on ${config.endpoint} ` +
+    `for ${poolText}. RivetKit retries that handshake silently, so the engine's own log holds the reason: re-run with ` +
+    `RIVET_LOG_LEVEL=debug, then check that the namespace exists and that the token may register runners in it. ` +
+    `A missing runner-config reads as ${NO_RUNNER_CONFIG_CODE} in the engine log.`,
+    { cause: error },
+  );
 }
 
 export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {

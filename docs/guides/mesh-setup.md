@@ -44,16 +44,24 @@ When the engine is up you need three things from your deployment:
 | **Namespace** (e.g. `default`) | Your engine's namespace setup | `namespace` |
 | **Token** (the admin token you configured) | Engine configuration — see the [configuration docs](https://rivet.dev/docs/deploy/self-host/control-plane/configuration/) | `token` (required by current engines — authentication is on by default since 2026-09-29; only an engine set to `auth.insecure_allow_unauthenticated: true` accepts anonymous traffic) |
 
-Note: a self-hosted engine may also require a one-time **runner config** per namespace before runners are accepted (see [Workers → Self-hosted](https://rivet.dev/actors/self-host/workers/)):
+A self-hosted engine also needs a **runner config** (now called a *pool*) for every pool a runner joins, **per
+namespace** — a namespace you just created has none, and the engine then refuses the runner with
+`no_runner_config: Must create a runner config before connecting an envoy with pool name …` (see
+[Workers → Self-hosted](https://rivet.dev/actors/self-host/workers/)). `/xfer mesh up` creates the pool's
+runner config when it is missing, and `/xfer mesh setup` does the same check explicitly; the manual call is:
 
 ```bash
-curl -X PUT "http://<engine-host>:6420/runner-configs/default?namespace=default" \
+curl -X PUT "http://<engine-host>:6420/runner-configs/<pool>?namespace=<namespace>" \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{"datacenters":{"default":{"normal":{}}}}'
 ```
 
-If `mesh up` connects and then the node fails to start, this is the usual suspect.
+Without it, `mesh up` is the confusing failure this guide used to leave you to: the client waits 30 s and
+reports `RivetKit registry did not register with the Engine within 30000ms`, because RivetKit retries the
+refused registration silently and the engine's own reason (`no_runner_config`) never reaches pi. `mesh up`
+now logs the pool step to `<xfer-dir>/mesh.log` (`msg="mesh pool" … action=created|exists`) and names the
+pool and namespace in that timeout when something else is wrong.
 
 ## Transport security is your responsibility
 
@@ -288,10 +296,10 @@ issue-tracker box, several dev Macs) give each machine its own pool:
    }
    ```
 
-3. **Create its runner-config once** — run `/xfer mesh setup` on that machine.
-   It parses the config, creates the pool's runner-config on the engine if
-   missing (the same PUT the `default` pool got in step 1), and confirms the
-   engine is reachable. Idempotent — safe to re-run at any time. The manual
+3. **Let `mesh up` create its runner-config** — it checks the engine first and
+   creates the pool if it is missing, so the config in step 2 is all you write.
+   `/xfer mesh setup` performs the same check on demand, together with a config
+   parse and an engine reachability probe; both are idempotent. The manual
    equivalent is still possible:
    `curl -X PUT "http://<engine>:6420/runner-configs/<pool>?namespace=<ns>" -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"datacenters":{"default":{"normal":{}}}}'`
 
@@ -435,6 +443,7 @@ Run `/xfer doctor` first — its **Mesh** line distinguishes config problems fro
 | Doctor: `engine unreachable at <endpoint>` | Engine down, wrong URL, or firewall | `curl <endpoint>/ui` from the same machine; check the engine container and any reverse proxy (it must tolerate long-lived WebSockets). |
 | `mesh up` fails with an auth error | Wrong or missing `token`/`namespace` | Re-copy the values — on Route A the dashboard's single string has to be split into `endpoint`, `namespace` and `token`, since credentials in the URL are refused. If `token` is a `$VAR`, check it is exported in the environment that starts pi. |
 | `mesh up`: node name already exists on the engine | A node with this xfer name was joined before (possibly from another machine) | `/xfer name <other>` and retry, or destroy the stale actor from the engine dashboard (`<endpoint>/ui`). |
+| `mesh up` waits ~30 s, then `RivetKit registry did not register with the Engine within 30000ms` | The engine refused this host's runner registration (most often `no_runner_config`: that namespace has no runner config for the configured `pool`; also possible: the token may not register runners there) | `mesh up` already creates a missing pool, so the message now names the namespace and pool it used. If it persists, launch pi with `RIVET_LOG_LEVEL=debug` for the engine's own reason, and check the namespace/pool in `<endpoint>/ui` — [Route B](#route-b-self-hosted-control-plane-vps--single-node) |
 | Node is up but the peer doesn't see it in `mesh list` | The two machines point at different engines or namespaces | Compare `endpoint` and `namespace` in both machines' configs — discovery is engine-side, so both must resolve to the same engine + namespace. |
 | A handoff arrives on the wrong machine | Every host shares the `default` pool, so the engine scheduled your Node's actor onto another machine's runner | Give each machine its own `pool` and create that pool's runner-config — [per-host pools](#per-host-runner-pools-mixed-fleets), [ADR 0017](../adr/0017-mesh-runner-pools.md). |
 | Send to an offline node errors after ~30 s | Target never came online | Durable queue buffering starts only once the target actor has been created (i.e. it joined at least once). Bring the target online first. |

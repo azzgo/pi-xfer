@@ -132,8 +132,9 @@ gateway 自己把 handoff 文档写到临时文件，与 `xfer_to` 完全一样�
 **loopback 端到端 mesh 测试**存在但默认跳过：它需要固定的 `rivet-engine` 二进制，
 而且第二个引擎必须有自己的 `guard` 端口和自己的数据库，否则它只会半工作，看起来像
 引擎坏了。`XFER_ENGINE_BINARY` 用于开启；共存的引擎的配方在
-`.agents/skills/verify/SKILL.md`（贡献者）中——注意 `runner-configs` 的 PUT 会被
-2.3.26 引擎拒绝，所以 loopback 引擎目前只适合读，不适合真实的 mesh 入队。
+`.agents/skills/verify/SKILL.md`（贡献者）中——`endpoint` 要指向引擎的 **guard**
+端口，而不是 API-peer 端口：peer 会拒绝公开 API 接受的 `runner-configs` PUT
+请求体，所以指向 `api_peer` 的 endpoint 读得动、却永远注册不上 runner。
 
 gateway 本身从不接触引擎，所以这里不加载 `mesh-guard.ts`——也不需要。mesh 代码路径
 在被 fork 的 CLI 里，它从测试继承 `NODE_TEST_CONTEXT`，因此与其他任何被启动的

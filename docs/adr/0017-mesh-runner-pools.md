@@ -36,9 +36,12 @@ Per-host pools, opt-in via `MeshConfig.pool`:
 - The adapter daemon exposes the same value as `--pool`, mirroring
   `--engine/--namespace/--token` (ADR 0015).
 
-Pool creation is **not** automated from the client: the engine needs a
-runner-config per pool before it accepts runners, and that stays the documented
-one-time `PUT /runner-configs/<pool>?namespace=<ns>` call in
+Pool creation was left un-automated at first: the engine needs a runner-config
+per pool before it accepts runners. P1 now automates it (see the amendment
+below).
+`mesh up` creates the pool's runner-config when the engine does not have it,
+and `/xfer mesh setup` does the same check on demand; the manual
+`PUT /runner-configs/<pool>?namespace=<ns>` call stays documented in
 [docs/guides/mesh-setup.md](../guides/mesh-setup.md).
 
 ## API evidence (rivetkit 2.3.26, pinned)
@@ -96,6 +99,46 @@ pool.
   — `namespace` semantics are untouched and orthogonal.
 - A pool with no runner-config accepts nothing; the symptom is a Node that
   connects but never starts. Documented in the guide.
+
+## Amendment: `up` ensures the pool (2026-11-23)
+
+The "pool creation is not automated" clause above did not survive contact with a
+second namespace. Runner configs are **per namespace and per pool**, so a
+namespace created after the first `mesh setup` contains none; the engine then
+refuses the runner with
+
+```
+no_runner_config: Must create a runner config before connecting an envoy with pool name {pool_name:?}
+```
+
+and RivetKit's native runtime answers that refusal by reconnecting on a backoff
+with nothing logged at error level. The only thing pi-xfer could see — and the
+only thing a user saw — was
+
+```
+RivetKit registry did not register with the Engine within 30000ms
+```
+
+which names neither the pool nor the namespace and reads like a token or config
+problem. Two tokens can be identical and the two commands still differ: `mesh
+status` is one REST round that works whether or not a pool exists, while `mesh up`
+must complete an envoy registration into a pool. Reproduced on a loopback 2.3.26
+engine: fresh namespace, `pool` set, no runner-config → 30 s timeout with no
+further message; after the runner-config exists → registration in 170 ms.
+
+So `createRivetEngine.ensureNode` now resolves the pool before it registers:
+
+- `pool` unset: nothing happens (the engine's `default` pool is the fallback).
+- `pool` set and its runner-config exists: nothing is written.
+- `pool` set and missing: `ensureRunnerPool` creates it, covering **every**
+  datacenter the engine lists (`GET /datacenters`), and `mesh.log` records
+  `msg="mesh pool" … action=created|exists`.
+- creation fails: `up` stops with the pool, the namespace and the failed call,
+  instead of burning 30 s on a registration the engine has already refused.
+
+The engine's error is still the reason the client message now carries namespace
+and pool and points at `RIVET_LOG_LEVEL=debug`; the endpoint name (`/runner-configs`)
+is unchanged, because engines before the `/pools` rename only speak that one.
 
 ## References
 

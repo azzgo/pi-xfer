@@ -45,16 +45,18 @@ Mesh 需要一个每台机器都能访问的 **Rivet 控制平面**（引擎）�
 | **Namespace**（例如 `default`） | 你引擎的 namespace 配置 | `namespace` |
 | **Token**（你配置的 admin token） | 引擎配置——见[配置文档](https://rivet.dev/docs/deploy/self-host/control-plane/configuration/) | `token`（当前引擎要求必填——自 2026-09-29 起认证默认开启；只有设为 `auth.insecure_allow_unauthenticated: true` 的引擎才接受匿名流量） |
 
-注意：自托管引擎还可能要求每个 namespace 先做一次性的 **runner config** 配置，之后才接受 runner（见 [Workers → 自托管](https://rivet.dev/actors/self-host/workers/)）：
+自托管引擎还要求每个 runner 所在的 pool（现在叫 *pool*，旧称 runner config）在每个 namespace 里各有一份配置——**一个刚建的 namespace 里一个都没有**，引擎随后会以
+`no_runner_config: Must create a runner config before connecting an envoy with pool name …` 拒绝该 runner（见 [Workers → 自托管](https://rivet.dev/actors/self-host/workers/)）。`/xfer mesh up` 会在缺失时自动创建该 pool 的 runner-config，`/xfer mesh setup` 也会显式做同样的检查；手动调用是：
 
 ```bash
-curl -X PUT "http://<engine-host>:6420/runner-configs/default?namespace=default" \
+curl -X PUT "http://<engine-host>:6420/runner-configs/<pool>?namespace=<namespace>" \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{"datacenters":{"default":{"normal":{}}}}'
 ```
 
-如果 `mesh up` 连上了、但节点随后启动失败，这通常就是嫌疑犯。
+没有它，`mesh up` 就是本指南以前留给你的那个迷惑失败：客户端等 30 秒，报
+`RivetKit registry did not register with the Engine within 30000ms`，因为 RivetKit 会静默重试被拒绝的注册，引擎自己的原因（`no_runner_config`）根本到不了 pi。现在 `mesh up` 会把 pool 这一步写进 `<xfer-dir>/mesh.log`（`msg="mesh pool" … action=created|exists`），并在别的原因导致该超时时把 namespace 和 pool 写进错误里。
 
 ## 传输安全是你的责任
 
@@ -266,10 +268,9 @@ actor 调度到*另一台*机器的 runner 上——handoff 随后就投递到�
    }
    ```
 
-3. **一次性创建它的 runner-config**——在那台机器上运行 `/xfer mesh setup`。
-   它会解析配置、在引擎上按需创建该 pool 的 runner-config（与第 1 步里 `default`
-   pool 得到的是同一个 PUT），并确认引擎可达。幂等——随时可以安全重跑。手工等价操作
-   也仍然可行：
+3. **让 `mesh up` 创建它的 runner-config**——它会先查引擎，缺失就创建该 pool，
+   所以第 2 步写的配置就是全部。`/xfer mesh setup` 可按需执行同样的检查，外加配置解析
+   和引擎可达性探测；两者都是幂等的。手工等价操作也仍然可行：
    `curl -X PUT "http://<engine>:6420/runner-configs/<pool>?namespace=<ns>" -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"datacenters":{"default":{"normal":{}}}}'`
 
 设了 `pool` 之后，本宿主的 runner 加入那个 pool，本 Node 的 actor 以
@@ -378,6 +379,7 @@ Adapter Daemon 接受相同的值作为 `--pool`（与 `--engine` 一起）。�
 | Doctor：`engine unreachable at <endpoint>` | 引擎挂了、URL 错了，或防火墙 | 从同一台机器 `curl <endpoint>/ui`；检查引擎容器和任何反向代理（它必须容忍长连接 WebSocket）。 |
 | `mesh up` 因认证错误失败 | `token`/`namespace` 错误或缺失 | 重新复制那些值——在路线 A 上，控制台的那一个字符串必须拆成 `endpoint`、`namespace` 和 `token`，因为 URL 里的凭据会被拒绝。如果 `token` 是 `$VAR`，检查它在启动 pi 的环境里已导出。 |
 | `mesh up`：节点名在引擎上已存在 | 一个用这个 xfer 名称的节点之前加入过（可能来自另一台机器） | `/xfer name <other>` 后重试，或者从引擎控制台（`<endpoint>/ui`）销毁那个陈旧的 actor。 |
+| `mesh up` 等约 30 秒后报 `RivetKit registry did not register with the Engine within 30000ms` | 引擎拒绝了本宿主的 runner 注册（最常见是 `no_runner_config`：该 namespace 里没有配置的 `pool` 对应的 runner-config；也可能：token 无权在那里注册 runner） | `mesh up` 已经会自动补建缺失的 pool，所以错误现在会写出它用的 namespace 和 pool。若仍然失败，用 `RIVET_LOG_LEVEL=debug` 启动 pi 看引擎自己的原因，并在 `<endpoint>/ui` 里核对 namespace / pool——见路线 B |
 | 节点已 up，但 peer 在 `mesh list` 里看不到它 | 两台机器指向不同的引擎或 namespace | 比较两台机器配置里的 `endpoint` 和 `namespace`——发现是引擎侧的，所以两者必须解析到同一个引擎 + namespace。 |
 | handoff 到了错误的机器 | 每个宿主共享 `default` pool，所以引擎把你 Node 的 actor 调度到了另一台机器的 runner 上 | 给每台机器自己的 `pool` 并创建该 pool 的 runner-config——per-host pools、[ADR 0017](../adr/0017-mesh-runner-pools.zh.md)。 |
 | 发给离线节点的发送在约 30 秒后报错 | 目标从未上线过 | 持久队列缓冲只在目标 actor 被创建之后才开始（即它至少加入过一次）。先把目标上线。 |

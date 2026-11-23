@@ -25,7 +25,7 @@ agent 的上下文。
 | 生产者 | 接在哪 | 记录什么 |
 |---|---|---|
 | RivetKit 自己的 JS logger | `mesh-engine.ts` 中 `ensureNode` 里的 `setup({ logging: { baseLogger: createMeshLogSink() } })` | `starting rivetkit envoy`、api 调用、engine/actor 警告、actor 作用域的行（`child({actorName, actorKey, …})` 的绑定会被合并进来） |
-| pi-xfer 自己的 mesh 事件 | `mesh.ts` 里的 `logMeshEvent(...)` 调用（`up` / `down` / `send` / inbound / misroute） | 节点生命周期、拒绝（`mesh up refused — …`、pool 不匹配）、发送/接收的 id 与大小、误路由 |
+| pi-xfer 自己的 mesh 事件 | `mesh.ts` 里的 `logMeshEvent(...)` 调用（`up` / `down` / `send` / inbound / misroute），以及 `mesh-engine.ts` 里 `ensureNode` 的 pool 步骤 | 节点生命周期、拒绝（`mesh up refused — …`、pool 不匹配）、发送/接收的 id 与大小、误路由，以及 `mesh pool`（`action=created|exists`）——记录 `up` 在注册前解析到的那份 runner-config |
 
 一切都落到 `mesh-log.ts`：`formatMeshLogLine`（logfmt）、`appendMeshLogLine`（永不抛错——
 日志目标坏掉不能把 mesh 拖下去）、`createMeshLogSink`（交给 RivetKit 的 logger）以及

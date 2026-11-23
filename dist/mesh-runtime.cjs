@@ -48925,7 +48925,12 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
         ...config3.pool ? { envoy: { poolName: config3.pool } } : {}
       });
       const regAny = reg;
-      await regAny.startAndWait();
+      const pool = await ensurePoolReady(config3, deps.ensurePool ?? ensureRunnerPool, options.logPath);
+      try {
+        await regAny.startAndWait();
+      } catch (err) {
+        throw envoyRegistrationError(err, config3, pool);
+      }
       registry2 = regAny;
       const { createClient: createClient2 } = await (deps.importClient ?? (() => Promise.resolve().then(() => (init_mod3(), mod_exports2))))();
       client = createClient2(guardMeshConfig({ endpoint: config3.endpoint, namespace: config3.namespace, token: config3.token }));
@@ -48987,6 +48992,63 @@ async function engineApi(config3, method2, path6, body) {
     throw new Error(`mesh engine ${method2} ${url2.pathname} failed: ${response.status} ${await response.text().catch(() => "")}`);
   }
   return await response.json();
+}
+async function ensureRunnerPool(config3) {
+  if (!config3.pool) {
+    throw new Error('mesh config has no "pool" — nothing to ensure (unset pool uses the engine default runner-config)');
+  }
+  const pool = config3.pool;
+  const existing = await engineApi(
+    config3,
+    "GET",
+    `/runner-configs?runner_name=${encodeURIComponent(pool)}`
+  );
+  if (Object.keys(existing.runner_configs ?? {}).includes(pool)) return { pool, existed: true };
+  const datacenters = await meshDatacenterNames(config3);
+  await engineApi(config3, "PUT", `/runner-configs/${encodeURIComponent(pool)}`, {
+    datacenters: Object.fromEntries(datacenters.map((name) => [name, { normal: {} }]))
+  });
+  return { pool, existed: false };
+}
+async function meshDatacenterNames(config3) {
+  try {
+    const response = await engineApi(config3, "GET", "/datacenters");
+    const names = (response.datacenters ?? []).map((datacenter) => datacenter.name).filter((name) => typeof name === "string" && name !== "");
+    return names.length > 0 ? names : ["default"];
+  } catch {
+    return ["default"];
+  }
+}
+async function ensurePoolReady(config3, ensurePool, logPath) {
+  if (!config3.pool) return null;
+  const namespace = config3.namespace ?? "default";
+  let result;
+  try {
+    result = await ensurePool(config3);
+  } catch (err) {
+    throw new Error(
+      `mesh: pool "${config3.pool}" is not ready in namespace "${namespace}" on ${config3.endpoint}, and creating its runner-config failed: ${err instanceof Error ? err.message : String(err)}. The engine refuses an envoy whose pool has no runner-config (no_runner_config), so registering anyway would only time out after 30 s. Retry, or create it by hand: PUT /runner-configs/${config3.pool}?namespace=${namespace} — /xfer mesh setup does the same.`,
+      { cause: err instanceof Error ? err : void 0 }
+    );
+  }
+  logMeshEvent(logPath ?? MESH_LOG_PATH, "info", "mesh pool", {
+    pool: result.pool,
+    namespace,
+    action: result.existed ? "exists" : "created"
+  });
+  return result;
+}
+var NO_RUNNER_CONFIG_CODE = "no_runner_config";
+function envoyRegistrationError(err, config3, pool) {
+  const message = err instanceof Error ? err.message : String(err);
+  const error62 = err instanceof Error ? err : new Error(message);
+  if (!/did not register with the Engine/.test(message)) return error62;
+  const namespace = config3.namespace ?? "default";
+  const poolText = pool ? `pool "${pool.pool}" (runner-config ${pool.existed ? "already present" : "created just now"})` : "the engine's default pool";
+  return new Error(
+    `${message} — this process's envoy never completed registration in namespace "${namespace}" on ${config3.endpoint} for ${poolText}. RivetKit retries that handshake silently, so the engine's own log holds the reason: re-run with RIVET_LOG_LEVEL=debug, then check that the namespace exists and that the token may register runners in it. A missing runner-config reads as ${NO_RUNNER_CONFIG_CODE} in the engine log.`,
+    { cause: error62 }
+  );
 }
 function meshPoolName(pool) {
   return pool || "default";

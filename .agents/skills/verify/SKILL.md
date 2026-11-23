@@ -221,7 +221,7 @@ must not share the first one's database. Two knobs, both easy to miss:
 ```bash
 BIN=~/.pi/xfer/cache/napi/<version>/engine-cli/node_modules/@rivetkit/engine-cli-<triple>/rivet-engine
 XDG_DATA_HOME=/tmp/mesh-local/xdg "$BIN" --config /tmp/mesh-local/engine.json start
-# then: {"endpoint": "http://127.0.0.1:7920", "namespace": "default", "token": "local-test"}
+# then: {"endpoint": "http://127.0.0.1:7921", "namespace": "default", "token": "local-test"}
 ```
 
 Why each line is there:
@@ -253,6 +253,7 @@ curl -s http://127.0.0.1:7920/health                                  # {"status
 grep -c "service crashed" /tmp/mesh-local/engine.log                  # must be 0
 curl -s -H 'Authorization: Bearer local-test' \
   "http://127.0.0.1:7920/actors?namespace=default&name=xfer-instance"  # {"actors":[]}
+curl -s http://127.0.0.1:7921/metadata                                 # the public API is the guard
 ```
 
 `/actors` **requires the `name` query param** — without it the engine answers
@@ -267,16 +268,24 @@ temporarily unavailable` while its JWT key-ring is still initialising. It
 recovers by itself. **One** such line is normal; a repeating one is the port
 collision above.
 
-#### Known gap: `runner-configs` PUT on 2.3.26
+#### Point `endpoint` at the guard port, not the API peer
 
-`mesh-engine.ts:ensureRunnerPool` sends
-`{"datacenters":{"default":{"normal":{}}}}`, and a 2.3.26 engine rejects it with
-`no variant of enum RunnerConfigKind found in flattened data`. That blocks
-`/xfer mesh setup` and any enqueue into a pool with no runner, so a loopback
-engine is currently good for **reads** — `/actors`, `/envoys`, `/health`,
-the listings and the preflight verdicts — and not yet for a real mesh enqueue.
-Do not conclude your change is broken when a loopback enqueue fails this way;
-check the engine version and this message first.
+A 2.3.26 engine serves two different APIs on two ports: the **guard** (7921) is
+the public API plus the envoy WebSocket, the **API peer** (7920) is the internal
+one. They do not accept the same bodies — `PUT /runner-configs/<pool>` with
+`{"datacenters":{"default":{"normal":{}}}}` is answered `200
+{"endpoint_config_changed":true}` by the guard and `400 no variant of enum
+RunnerConfigKind found in flattened data` by the peer. A config pointed at
+`api_peer` therefore reads fine (`/actors`, `/envoys`, `/health`, listings,
+preflight verdicts) and can never host a mesh node: `/envoys/connect` 404s there,
+and a runner-config write 400s with a message that looks like an engine bug.
+
+Point `endpoint` at the guard port and everything works — verified 2026-11-23:
+fresh namespace + `pool: arch` with no runner-config → `mesh up` fails with the
+30 s `RivetKit registry did not register with the Engine within 30000ms` (engine
+log: `no_runner_config`); after the runner-config exists → registration in
+170 ms. That is also how the missing-pool preprocessing in `ensureNode` was
+verified.
 
 #### Etiquette
 
