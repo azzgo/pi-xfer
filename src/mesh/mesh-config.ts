@@ -438,15 +438,12 @@ export function deserializeMeshKey(serialized: string | undefined): string[] {
   return parts;
 }
 
-/** Engine-side namespace slugs: letters, digits, and the separators an engine name may carry. */
 const NAMESPACE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-/** Could this string name a namespace on the engine? An authored `$ENV` expression cannot. */
 export function isNamespaceSlug(value: string): boolean {
   return NAMESPACE_RE.test(value.trim());
 }
 
-/** Trim + validate a namespace before it is used or written; throws with the reason. */
 export function normalizeNamespace(value: string): string {
   const trimmed = value.trim();
   if (trimmed === "") throw new Error("mesh namespace must not be empty");
@@ -458,27 +455,12 @@ export function normalizeNamespace(value: string): string {
   return trimmed;
 }
 
-/** What a namespace write did, so callers can report it without re-reading the file. */
 export interface NamespaceWrite {
   path: string;
   namespace: string;
-  /** The literal that was there before, or `null` when the key was absent. */
   previous: string | null;
 }
 
-/**
- * Write the **Default namespace** into `mesh.config.json`, and nothing else.
- *
- * The config is a hand-authored file that may carry `$ENV` interpolation, a
- * `!command` token and a `$schema` key; `parseMeshConfig` rebuilds an object and
- * would drop every one of those, so this edits the parsed JSON in place and
- * re-serializes: key order survives (a changed key keeps its position, a new one
- * appends), every other value is byte-for-byte what it was, and the file keeps
- * its mode. This is the single write path in the product — see ADR 0024.
- *
- * A `namespace` authored as an expression is **refused** rather than replaced:
- * turning a deployment decision into a literal is not a machine's call.
- */
 export function writeDefaultNamespace(configPath: string, namespace: string): NamespaceWrite {
   const next = normalizeNamespace(namespace);
   let text: string;
@@ -504,6 +486,8 @@ export function writeDefaultNamespace(configPath: string, namespace: string): Na
       `Change what that expression resolves to, or replace the value by hand. The file was not modified.`,
     );
   }
+  // Edited as JSON, not rebuilt from the parsed config: `$schema`, key order and
+  // any expression value have to survive a write (ADR 0024).
   const previous = typeof authored === "string" ? authored : null;
   obj.namespace = next;
   const serialized = `${JSON.stringify(obj, null, 2)}\n`;

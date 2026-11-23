@@ -5,6 +5,7 @@ import {
   emptyMatchNotice,
   escapeRow,
   filterRows,
+  moveIndex,
   namespaceRows,
   pickerHeader,
 } from "./namespace-picker.ts";
@@ -64,6 +65,19 @@ describe("namespace picker filtering", () => {
   it("returns every row while the filter is empty", () => {
     const rows = namespaceRows({ ...base, names: ["a", "b"] });
     assert.equal(filterRows(rows, "   ").length, rows.length);
+  });
+});
+
+describe("namespace picker movement", () => {
+  it("wraps at both ends, like SelectList", () => {
+    assert.equal(moveIndex(0, -1, 3), 2);
+    assert.equal(moveIndex(2, 1, 3), 0);
+    assert.equal(moveIndex(1, 1, 3), 2);
+  });
+
+  it("stays at zero when there is nothing to move through", () => {
+    assert.equal(moveIndex(0, 1, 0), 0);
+    assert.equal(moveIndex(0, -1, 0), 0);
   });
 });
 

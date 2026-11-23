@@ -360,6 +360,9 @@ A namespace separates Actors, queues and pools on one control plane. Your `mesh.
 /xfer mesh ns <name>     switch this session without opening the picker
 ```
 
+The list filters as you type — the filter matches anywhere in a name, so `agi` finds `staging` — and
+`↑`/`↓` or `ctrl+p`/`ctrl+n` move the selection, wrapping at either end; `pgup`/`pgdn` move a screen.
+
 Two consequences worth knowing before you try it:
 
 - **A switch needs `up` again**, and it is refused while the Node is online: the Node's actor lives in

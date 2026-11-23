@@ -163,11 +163,6 @@ export function meshSelfStatus(
   };
 }
 
-/**
- * The one spelling of "which namespace this read meant", so `/xfer mesh status`
- * and `/xfer mesh list` can never describe the same fact two ways. Empty when no
- * namespace is known (no readable config).
- */
 export function namespaceNote(info: MeshNamespaceInfo | null): string {
   if (info === null) return "";
   return info.source === "session"
@@ -175,7 +170,6 @@ export function namespaceNote(info: MeshNamespaceInfo | null): string {
     : ` — namespace ${info.effective}`;
 }
 
-/** The namespace row's detail: the Effective namespace, marked when it is a session override. */
 function namespaceDetail(info: MeshNamespaceInfo | null): string {
   if (info === null) return "(no mesh.config.json — the mesh is not configured)";
   return info.source === "session"

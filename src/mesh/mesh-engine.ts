@@ -365,8 +365,7 @@ async function engineApi<T>(
 ): Promise<T> {
   assertEndpointReachable(config.endpoint);
   const url = new URL(path, config.endpoint);
-  // Namespace-scoped by default: almost every route answers for one namespace.
-  // The few global ones (`/namespaces`) reject the parameter outright.
+  // Global routes (`/namespaces`) reject the namespace parameter.
   if (options.scoped !== false && config.namespace) url.searchParams.set("namespace", config.namespace);
   const headers: Record<string, string> = {};
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
@@ -378,24 +377,6 @@ async function engineApi<T>(
   return (await response.json()) as T;
 }
 
-/**
- * Live engine query without joining: the same REST listing MeshNode.list()
- * uses, for readers that only observe (the admin console) rather than
- * participate as a node.
- */
-/**
- * Make sure the configured pool actually has a runner-config on the engine.
- *
- * A runner-config is **per namespace and per pool**: a fresh namespace starts
- * with none, and the engine then refuses every envoy with
- * `no_runner_config: Must create a runner config before connecting an envoy`.
- * RivetKit's native runtime retries that refusal silently, so the only thing
- * pi-xfer ever sees is `RivetKit registry did not register with the Engine
- * within 30000ms` — which is why `up` now calls this before it registers.
- *
- * Idempotent: an existing config is left as-is. A config without `pool` is a
- * no-op at the call sites (the engine's `default` pool covers it).
- */
 export async function ensureRunnerPool(config: MeshConfig): Promise<{ pool: string; existed: boolean }> {
   if (!config.pool) {
     throw new Error('mesh config has no "pool" — nothing to ensure (unset pool uses the engine default runner-config)');
@@ -414,13 +395,6 @@ export async function ensureRunnerPool(config: MeshConfig): Promise<{ pool: stri
   return { pool, existed: false };
 }
 
-/**
- * Datacenter names the pool's runner-config has to cover. The engine rejects a
- * config that names a datacenter it does not run (`datacenter.not_found`), and
- * leaves a datacenter out of the config that it does — so the names come from
- * the engine, not from a guess. `default` is the fallback for engines that do
- * not list datacenters at all (every single-datacenter deployment).
- */
 async function meshDatacenterNames(config: MeshConfig): Promise<string[]> {
   try {
     const response = await engineApi<{ datacenters?: Array<{ name?: unknown }> }>(config, "GET", "/datacenters");
@@ -433,12 +407,6 @@ async function meshDatacenterNames(config: MeshConfig): Promise<string[]> {
   }
 }
 
-/**
- * The pool half of `up`, decided before the envoy is registered: without a
- * runner-config the engine refuses the registration and the client only reports
- * a 30 s timeout, so a missing pool is repaired here and a pool that cannot be
- * created stops `up` with the reason instead.
- */
 async function ensurePoolReady(
   config: MeshConfig,
   ensurePool: (config: MeshConfig) => Promise<{ pool: string; existed: boolean }>,
@@ -466,16 +434,8 @@ async function ensurePoolReady(
   return result;
 }
 
-/** Engine error code for "no runner-config covers this envoy's pool". */
 export const NO_RUNNER_CONFIG_CODE = "no_runner_config";
 
-/**
- * `startAndWait`'s own failure says nothing about *why* the engine never
- * acknowledged the registration: the native runtime retries the handshake on a
- * backoff and drops the engine's reason. Attach the facts the operator needs —
- * namespace, pool, and the missing runner-config case — to the one message that
- * reaches the screen.
- */
 function envoyRegistrationError(
   err: unknown,
   config: MeshConfig,
@@ -501,15 +461,8 @@ export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
   return fetchMeshNodes(config);
 }
 
-/** Budget for the namespace picker's one listing round — same order as the pre-send check. */
 export const NAMESPACE_LIST_TIMEOUT_MS = 2_500;
 
-/**
- * Every namespace this token can see on the engine, sorted. Used by the picker
- * only: a namespace switch must not depend on the listing (a scoped token is a
- * normal deployment), so a failure here is reported and the user is offered the
- * typed value instead.
- */
 export async function listNamespaces(config: MeshConfig, timeoutMs = NAMESPACE_LIST_TIMEOUT_MS): Promise<string[]> {
   const response = await withTimeout(
     engineApi<{ namespaces?: Array<{ name?: unknown }> }>(config, "GET", "/namespaces", undefined, { scoped: false }),

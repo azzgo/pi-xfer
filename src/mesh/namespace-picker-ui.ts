@@ -1,36 +1,25 @@
-/**
- * The namespace picker's terminal shell. Everything decided here is delegated to
- * `namespace-picker.ts`; this file only turns rows into a TUI component and maps
- * two keys onto two outcomes: **Enter** = this process, **ctrl+s** = the Default
- * namespace in `mesh.config.json` (ADR 0024).
- */
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, keyHint } from "@earendil-works/pi-coding-agent";
-import { Container, Input, SelectList, Text, type KeybindingsManager } from "@earendil-works/pi-tui";
+import { Container, Input, Key, SelectList, Text, matchesKey, type KeybindingsManager } from "@earendil-works/pi-tui";
 import {
   NAMESPACE_ESCAPE_VALUE,
   emptyMatchNotice,
   filterRows,
+  moveIndex,
   namespaceRows,
   pickerHeader,
   type NamespaceRow,
 } from "./namespace-picker.ts";
 
-/** Which of the two outcomes the picker resolved to. */
 export type NamespacePick = { kind: "session" | "default"; namespace: string };
 
 export interface NamespacePickerInput {
-  /** Namespaces the engine listed, sorted; ignored when `listingError` is set. */
   names: string[];
   current: string;
   defaultName: string;
   listingError: string | null;
 }
 
-/**
- * Open the picker and resolve to the chosen namespace, or `null` on cancel.
- * Caller owns the effects (session override or config write).
- */
 export function pickNamespaceWithUi(
   ctx: ExtensionContext,
   input: NamespacePickerInput,
@@ -65,13 +54,22 @@ function namespacePickerComponent(
   const hint = new Text(
     theme.fg(
       "dim",
-      `${keyHint("tui.select.confirm", "this session")} · ${keyHint("app.models.save", "save as default")} · ${keyHint("tui.select.cancel", "cancel")}`,
+      `↑↓ ctrl+p ctrl+n move · ${keyHint("tui.select.confirm", "this session")} · ${keyHint("app.models.save", "save as default")} · ${keyHint("tui.select.cancel", "cancel")}`,
     ),
   );
   container.addChild(hint);
   container.addChild(new DynamicBorder((str: string) => theme.fg("accent", str)));
 
   let selectList: SelectList;
+  let cursor = 0;
+  let rowCount = 0;
+  let visible = 1;
+
+  const move = (delta: number) => {
+    cursor = moveIndex(cursor, delta, rowCount);
+    selectList.setSelectedIndex(cursor);
+    tui.requestRender();
+  };
 
   const resolve = (kind: "session" | "default") => {
     const item = selectList?.getSelectedItem();
@@ -91,7 +89,10 @@ function namespacePickerComponent(
       typed,
     });
     const shown = filterRows(rows, typed);
-    selectList = new SelectList(shown.map(toSelectItem), Math.min(shown.length, 10), {
+    rowCount = shown.length;
+    cursor = 0;
+    visible = Math.max(1, Math.min(shown.length, 10));
+    selectList = new SelectList(shown.map(toSelectItem), visible, {
       selectedPrefix: (text) => theme.fg("accent", text),
       selectedText: (text) => theme.fg("accent", text),
       description: (text) => theme.fg("muted", text),
@@ -100,6 +101,7 @@ function namespacePickerComponent(
     });
     selectList.onSelect = () => resolve("session");
     selectList.onCancel = () => done(null);
+    // Filtering is ours (substring); SelectList only matches prefixes.
     selectList.setFilter("");
     listHost.clear();
     listHost.addChild(selectList);
@@ -138,6 +140,12 @@ function namespacePickerComponent(
         done(null);
         return;
       }
+      const up = keybindings.matches(data, "tui.select.up") || matchesKey(data, Key.ctrl("p"));
+      const down = keybindings.matches(data, "tui.select.down") || matchesKey(data, Key.ctrl("n"));
+      if (up) return move(-1);
+      if (down) return move(1);
+      if (keybindings.matches(data, "tui.select.pageUp")) return move(-visible);
+      if (keybindings.matches(data, "tui.select.pageDown")) return move(visible);
       filterInput.handleInput(data);
       rebuild();
       tui.requestRender();

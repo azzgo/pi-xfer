@@ -20,11 +20,6 @@ import { endpointForName, listPeers, peerDescription } from "./core/utils.ts";
 import { linkStatus, listLinks, listOwnLinks, planSshUp, probeRemote, sshDown, sshUp, type LinkInfo, type SshLinkOptions, type SshUpPlan, type SshUpResult } from "./link/ssh-link.ts";
 import { cachedHosts, cachedRemoteNames, isPrefetching, listSshHosts, prefetchRemoteNames, rememberRemoteNames, wantsProbe } from "./link/ssh-hosts.ts";
 
-/**
- * The one-shot notice after a namespace switch. The Identity line carries the
- * standing fact; this carries the *action* — a switch only takes effect on the
- * next `up`, and only when it actually changed anything.
- */
 function namespaceSwitchNotice(next: MeshNamespaceInfo, before: MeshNamespaceInfo): string {
   if (next.effective === before.effective) return `🌐 namespace unchanged — ${next.effective}`;
   const source = next.source === "session" ? ` (session override; config default: ${next.default})` : "";

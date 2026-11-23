@@ -40,11 +40,6 @@ export class XferController {
    * when the frame carried no hash. Read by the inbound server to shape its ack.
    */
   lastIntegrity?: "verified" | "mismatch";
-  /**
-   * What the Identity line appends after the name — the mesh installs its
-   * Effective namespace here, evaluated per print so a switch shows up without
-   * re-printing from scratch.
-   */
   private identitySuffix: () => string = () => "";
 
   constructor(pi: ExtensionAPI, state: XferState) {
@@ -52,12 +47,10 @@ export class XferController {
     this.state = state;
   }
 
-  /** Install the Identity line's suffix (the mesh's Effective namespace). */
   setIdentitySuffix(suffix: () => string): void {
     this.identitySuffix = suffix;
   }
 
-  /** Reprint the Identity line — after a rename or a namespace switch. */
   refreshIdentity(ctx: ExtensionContext): void {
     try {
       ctx.ui.setStatus("xfer", identityLine(this.state.identity?.name ?? "", this.identitySuffix()));

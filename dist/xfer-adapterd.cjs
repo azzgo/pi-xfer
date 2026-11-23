@@ -49729,7 +49729,6 @@ var MeshNode = class {
   logPath;
   engine = null;
   nodeName = null;
-  /** Effective-namespace override for this process only; never persisted (ADR 0024). */
   namespaceOverride = null;
   constructor(options) {
     this.configPath = options.configPath;
@@ -49756,12 +49755,6 @@ var MeshNode = class {
   config() {
     return this.configOverride ?? loadMeshConfig(this.configPath);
   }
-  /**
-   * The **Effective namespace** and where it came from, for the surfaces that
-   * must name the namespace they are about to read (Identity line, status,
-   * listings). `null` when there is no readable config at all: "no mesh" is a
-   * normal state, and a display path must never throw over a config file.
-   */
   namespaceInfo() {
     let config3;
     try {
@@ -49778,21 +49771,11 @@ var MeshNode = class {
       expression: config3.namespaceExpression !== void 0
     };
   }
-  /** Suffix for the Identity line: ` · <ns>` and ` (session)` when overridden; "" without a config. */
   identitySuffix() {
     const info = this.namespaceInfo();
     if (!info) return "";
     return ` · ${info.effective}${info.source === "session" ? " (session)" : ""}`;
   }
-  /**
-   * Namespaces this token can see, for the picker. May throw — the picker
-   * degrades, it does not fail.
-   *
-   * The listing itself is namespace-independent, so an unresolvable
-   * `namespace` expression must not block it: the picker is the one surface that
-   * can move the session off such a config, and refusing to list would leave the
-   * user with nothing to select.
-   */
   async namespaceCandidates() {
     let config3;
     try {
@@ -49806,12 +49789,6 @@ var MeshNode = class {
     }
     return listNamespaces(config3);
   }
-  /**
-   * Switch this process to another namespace. Refused while online: the Node's
-   * actor lives in the namespace it joined, and `down` is the only path that
-   * destroys an actor — a namespace switch must not do that on the user's behalf
-   * (ADR 0024).
-   */
   setNamespace(namespace) {
     const online = this.status();
     if (online.online) {
@@ -49825,13 +49802,11 @@ var MeshNode = class {
     this.namespaceOverride = next === info.default ? null : next;
     return this.namespaceInfo();
   }
-  /** Write the Default namespace (the only config write in the product) and drop any override. */
   writeDefaultNamespace(namespace) {
     const written = writeDefaultNamespace(this.configPath, namespace);
     this.namespaceOverride = null;
     return written;
   }
-  /** Resolved config with this process's namespace override applied — the one seam every engine call passes through. */
   async resolvedConfig() {
     const config3 = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
     return this.namespaceOverride ? { ...config3, namespace: this.namespaceOverride } : config3;

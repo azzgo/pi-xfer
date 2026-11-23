@@ -73,11 +73,6 @@ export async function listenServer(opts: {
   server: net.Server;
   path: string;
   name: string;
-  /**
-   * Appended to the Identity line — the mesh side supplies its Effective
-   * namespace here. Evaluated at print time, so a switch during the session is
-   * visible without re-listening.
-   */
   suffix?: () => string;
   notifyError: (message: string) => void;
   setStatus: (text: string) => void;

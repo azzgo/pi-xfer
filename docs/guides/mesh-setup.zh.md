@@ -327,6 +327,9 @@ namespace**）；一个会话可以在另一个里工作，而不碰这个文件
 /xfer mesh ns <name>     switch this session without opening the picker
 ```
 
+列表随输入过滤——匹配名字的任意位置，所以 `agi` 能找到 `staging`；`↑`/`↓` 或 `ctrl+p`/`ctrl+n`
+移动选择，到两端会环绕；`pgup`/`pgdn` 一次翻一屏。
+
 动手前值得知道的两点：
 
 - **切换后需要重新 `up`**，而且节点在线时切换会被拒绝：Node 的 actor 活在它加入时那个 namespace
