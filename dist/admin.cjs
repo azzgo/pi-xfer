@@ -1117,10 +1117,10 @@ function deriveActorStatus(actor) {
   if (actor.connectable_ts !== void 0 && actor.connectable_ts !== null) return "Running";
   return "Pending";
 }
-async function engineApi(config, method, path9, body) {
+async function engineApi(config, method, path9, body, options = {}) {
   assertEndpointReachable(config.endpoint);
   const url = new URL(path9, config.endpoint);
-  if (config.namespace) url.searchParams.set("namespace", config.namespace);
+  if (options.scoped !== false && config.namespace) url.searchParams.set("namespace", config.namespace);
   const headers = {};
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
   if (body !== void 0) headers["Content-Type"] = "application/json";

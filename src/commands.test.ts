@@ -452,12 +452,14 @@ function stubMesh(overrides: Partial<{
   down: () => Promise<void>;
   setDescription: (text: string) => Promise<string>;
   describe: (target: string) => Promise<{ name: string; description: string }>;
+  namespaceInfo: () => { effective: string; default: string; source: "session" | "config"; expression: boolean } | null;
 }> = {}) {
   const calls: string[] = [];
   return {
     calls,
     status: overrides.status ?? (() => ({ online: false })),
     config: () => ({ endpoint: "http://localhost:6420", pool: "host-a" }),
+    namespaceInfo: overrides.namespaceInfo ?? (() => ({ effective: "default", default: "default", source: "config", expression: false })),
     list: overrides.list ?? (async () => { calls.push("list"); return [{ name: "phone", actorId: "a1" }]; }),
     state: overrides.state ?? (async () => { calls.push("state"); return { nodes: [{ name: "phone", actorId: "a1", status: "Sleeping" }], envoys: [] }; }),
     preflight: async (target: string) => { calls.push(`preflight ${target}`); return { target, state: "Sleeping", pool: "host-a", warning: null }; },
@@ -613,7 +615,7 @@ describe("xfer command: mesh subcommand", () => {
     const mesh = stubMesh();
     const h = harness({ mesh });
     assert.deepEqual((h.completions("mesh") ?? []).map((i) => i.value), ["mesh"]);
-    assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "setup", "status", "up"]);
+    assert.deepEqual((h.completions("mesh ") ?? []).map((i) => i.label).sort(), ["down", "list", "ns", "setup", "status", "up"]);
   });
 });
 

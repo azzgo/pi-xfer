@@ -37,6 +37,9 @@ export default function (pi: ExtensionAPI) {
     configPath: MESH_CONFIG_PATH,
     deliver: (msg) => controller.deliverInbound(msg, "mesh"),
   });
+  // The Identity line carries the Effective namespace (CONTEXT.md): the mesh owns
+  // that value, the controller owns the line.
+  controller.setIdentitySuffix(() => mesh.identitySuffix());
 
   /**
    * True when `target` is an ssh Link rather than an agent on this machine.

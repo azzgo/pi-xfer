@@ -5,10 +5,12 @@ import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { MeshNode, loadMeshRuntimeBundle, MESH_RUNTIME_BUNDLE } from "./mesh.ts";
 import {
+  normalizeNamespace,
   parseMeshConfig,
   resolveMeshConfig,
   runTokenCommand,
   serializeMeshKey,
+  writeDefaultNamespace,
   deserializeMeshKey,
   XFER_INSTANCE_ACTOR,
 } from "./mesh-config.ts";
@@ -25,6 +27,7 @@ import {
   deriveActorStatus,
   deriveMeshNodeState,
   ensureRunnerPool,
+  listNamespaces,
   listMeshNodes,
   listMeshState,
   meshListing,
@@ -1660,5 +1663,158 @@ describe("mesh guard: the real transport paths refuse to leave the machine in a 
       assert.deepEqual((await listMeshNodes({ endpoint: "http://127.0.0.1:6420" })).map((n) => n.name), ["phone"]);
       assert.deepEqual(stub.calls.sort(), ["/actors"]);
     } finally { stub.restore(); disarm(); }
+  });
+});
+
+describe("default namespace write", () => {
+  const authored = () => ({
+    $schema: "https://example.invalid/mesh.config.schema.json",
+    endpoint: "http://localhost:6420",
+    namespace: "old",
+    token: "!pass show token/x",
+    pool: "host-a",
+  });
+
+  it("rewrites only the namespace key and keeps everything else, order included", () => {
+    const configPath = writeConfig(authored());
+    fs.chmodSync(configPath, 0o640);
+    const result = writeDefaultNamespace(configPath, "  new-ns  ");
+    assert.deepEqual(result, { path: configPath, namespace: "new-ns", previous: "old" });
+    const text = fs.readFileSync(configPath, "utf-8");
+    assert.deepEqual(JSON.parse(text), { ...authored(), namespace: "new-ns" });
+    assert.deepEqual(Object.keys(JSON.parse(text)), ["$schema", "endpoint", "namespace", "token", "pool"]);
+    assert.equal(fs.statSync(configPath).mode & 0o777, 0o640, "the file keeps its mode");
+    assert.equal(text.includes("!pass show token/x"), true, "a token expression is never evaluated");
+  });
+
+  it("appends the key when the config has none (the engine default was implicit)", () => {
+    const configPath = writeConfig({ endpoint: "http://localhost:6420" });
+    assert.equal(writeDefaultNamespace(configPath, "fresh").previous, null);
+    assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf-8")), { endpoint: "http://localhost:6420", namespace: "fresh" });
+  });
+
+  it("refuses to replace an authored expression and leaves the bytes alone", () => {
+    const configPath = writeConfig({ endpoint: "http://localhost:6420", namespace: "$MESH_NS" });
+    const before = fs.readFileSync(configPath, "utf-8");
+    assert.throws(() => writeDefaultNamespace(configPath, "literal"), /refusing to replace an expression with the literal "literal"/);
+    assert.equal(fs.readFileSync(configPath, "utf-8"), before, "a refused write changes nothing");
+  });
+
+  it("refuses a command value, which is not a namespace", () => {
+    const configPath = writeConfig({ endpoint: "http://localhost:6420", namespace: "!pass show ns" });
+    assert.throws(() => writeDefaultNamespace(configPath, "literal"), /refusing to replace an expression/);
+  });
+
+  it("rejects empty and non-slug namespaces before touching the file", () => {
+    const configPath = writeConfig(authored());
+    const before = fs.readFileSync(configPath, "utf-8");
+    assert.throws(() => writeDefaultNamespace(configPath, "   "), /must not be empty/);
+    assert.throws(() => writeDefaultNamespace(configPath, "has space"), /not a valid engine slug/);
+    assert.throws(() => writeDefaultNamespace(configPath, "-leading"), /not a valid engine slug/);
+    assert.equal(fs.readFileSync(configPath, "utf-8"), before);
+    assert.equal(normalizeNamespace(" ok.ns_1-2 "), "ok.ns_1-2");
+  });
+
+  it("reports a missing config as unconfigured instead of creating one", () => {
+    const configPath = path.join(tmpDir, "absent-mesh.config.json");
+    assert.throws(() => writeDefaultNamespace(configPath, "x"), /mesh not configured/);
+    assert.equal(fs.existsSync(configPath), false);
+  });
+});
+
+describe("mesh namespace override", () => {
+  const configPath = (ns?: string, extra: Record<string, unknown> = {}) =>
+    writeConfig({ endpoint: "http://localhost:6420", ...(ns ? { namespace: ns } : {}), ...extra });
+
+  it("reports the Default namespace from the config, and \"default\" when the file says nothing", () => {
+    const node = makeNode(configPath(undefined), fakeEngine(fakeState()));
+    assert.deepEqual(node.namespaceInfo(), { effective: "default", default: "default", source: "config", expression: false });
+    const named = makeNode(configPath("prod"), fakeEngine(fakeState()));
+    assert.deepEqual(named.namespaceInfo(), { effective: "prod", default: "prod", source: "config", expression: false });
+  });
+
+  it("reports null (no mesh) instead of throwing when there is no readable config", () => {
+    const node = makeNode(path.join(tmpDir, "nope.config.json"), fakeEngine(fakeState()));
+    assert.equal(node.namespaceInfo(), null);
+    assert.equal(node.identitySuffix(), "", "the Identity line stays a bare name");
+  });
+
+  it("switches for this process only, and the config file keeps its Default namespace", () => {
+    const file = configPath("prod");
+    const node = makeNode(file, fakeEngine(fakeState()));
+    const next = node.setNamespace(" staging ");
+    assert.deepEqual(next, { effective: "staging", default: "prod", source: "session", expression: false });
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf-8")).namespace, "prod");
+    assert.equal(node.identitySuffix(), " · staging (session)");
+  });
+
+  it("drops the override when the chosen namespace IS the default (no third state)", () => {
+    const node = makeNode(configPath("prod"), fakeEngine(fakeState()));
+    node.setNamespace("other");
+    assert.deepEqual(node.setNamespace("prod"), { effective: "prod", default: "prod", source: "config", expression: false });
+  });
+
+  it("refuses to switch while online, naming down as the next step", async () => {
+    const node = makeNode(configPath("prod"), fakeEngine(fakeState()));
+    await node.up("web");
+    assert.throws(() => node.setNamespace("other"), /run \/xfer mesh down first/);
+    assert.equal(node.namespaceInfo()?.effective, "prod", "a refused switch changes nothing");
+  });
+
+  it("hands the override to the engine and records where it came from", async () => {
+    const configs: any[] = [];
+    const logPath = meshLogPath("ns-up");
+    const node = new MeshNode({
+      configPath: configPath("prod"),
+      deliver: () => {},
+      logPath,
+      engineFactory: (config) => { configs.push(config); return fakeEngine(fakeState()); },
+    });
+    node.setNamespace("staging");
+    await node.up("web");
+    assert.equal(configs[0].namespace, "staging");
+    assert.match(fs.readFileSync(logPath, "utf-8"), /msg="mesh up" node=web .*namespace=staging namespaceSource=session/);
+  });
+
+  it("writes the Default namespace and drops the override in one step", () => {
+    const file = configPath("prod");
+    const node = makeNode(file, fakeEngine(fakeState()));
+    node.setNamespace("staging");
+    const written = node.writeDefaultNamespace("staging");
+    assert.equal(written.previous, "prod");
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf-8")).namespace, "staging");
+    assert.deepEqual(node.namespaceInfo(), { effective: "staging", default: "staging", source: "config", expression: false });
+  });
+
+  it("still lists namespaces when the authored expression cannot resolve", async () => {
+    const node = makeNode(configPath(undefined, { namespace: "$XFER_TEST_MISSING_NS" }), fakeEngine(fakeState()));
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ namespaces: [{ name: "dev" }] }), { status: 200 })) as typeof fetch;
+    try {
+      assert.deepEqual(await node.namespaceCandidates(), ["dev"]);
+    } finally { globalThis.fetch = original; }
+  });
+
+  it("never expands a namespace expression for display — it shows what is authored", () => {
+    const node = makeNode(configPath(undefined, { namespace: "$MESH_NS" }), fakeEngine(fakeState()));
+    assert.deepEqual(node.namespaceInfo(), { effective: "$MESH_NS", default: "$MESH_NS", source: "config", expression: true });
+  });
+});
+
+describe("namespace listing", () => {
+  it("returns the engine's namespaces sorted", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ namespaces: [{ name: "prod" }, { name: "dev" }] }), { status: 200 })) as typeof fetch;
+    try {
+      assert.deepEqual(await listNamespaces({ endpoint: "http://localhost:6420" }), ["dev", "prod"]);
+    } finally { globalThis.fetch = original; }
+  });
+
+  it("rejects instead of pretending it listed nothing (the picker degrades from the error)", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("forbidden", { status: 403 })) as typeof fetch;
+    try {
+      await assert.rejects(() => listNamespaces({ endpoint: "http://localhost:6420" }), /403/);
+    } finally { globalThis.fetch = original; }
   });
 });

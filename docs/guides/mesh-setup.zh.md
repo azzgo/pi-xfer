@@ -315,6 +315,28 @@ Adapter Daemon 接受相同的值作为 `--pool`（与 `--engine` 一起）。�
 
 本地侧步骤（`mesh.config.json` 解析、`mesh up` 在名字冲突时的拒绝、doctor 的 Mesh 行）是针对本仓库的代码验证的；完整的双机投递回路在撰写本指南时没有重跑，取决于你的控制平面部署。
 
+## 第 3b 步 —— 在另一个 namespace 里工作
+
+namespace 在一个控制面上分隔 Actor、队列和 pool。你的 `mesh.config.json` 指明其中一个（**Default
+namespace**）；一个会话可以在另一个里工作，而不碰这个文件：
+
+```text
+/xfer mesh ns            pick from the engine's namespaces
+   enter                 use it in this session only (gone when pi exits)
+   ctrl+s                write it into mesh.config.json as the new default
+/xfer mesh ns <name>     switch this session without opening the picker
+```
+
+动手前值得知道的两点：
+
+- **切换后需要重新 `up`**，而且节点在线时切换会被拒绝：Node 的 actor 活在它加入时那个 namespace
+  里，而 `/xfer mesh down` 是本产品唯一会销毁 actor 的路径——namespace 切换不能替你销毁。
+- **你所在的 namespace 是看得见的**：footer 的身份行显示 `📡 <name> · <namespace>`，与配置不同
+  时带 `(session)`；`/xfer mesh status` 与 `list` 也会写出它们查询的 namespace。所以切换不用问就
+  知道，而且按设计是临时的——一次 reload 就回到 Default namespace。
+- 一个从未配置过 pool 的 namespace 会在下一次 `up` 时自动补上（见上面的第 2 步）：加入一个全新的
+  namespace 不会因为缺 runner-config 而失败。
+
 ## 第 4 步 —— 描述一个节点处理什么
 
 `/xfer desc <text>` 为**这个**节点写一条简短的、自我声明的能力说明——那种你希望被发过来的请求（“处理 Postgres 迁移评审”、“支付服务的 on-call”）。不带参数的 `/xfer desc` 会清除它。

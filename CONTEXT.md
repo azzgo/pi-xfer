@@ -10,8 +10,24 @@ _Avoid_: network, cluster, swarm, overlay
 One actor on the Mesh engine — one name, one outbound engine connection, one independent participant. The unit of joining, addressing, and liveness; host-agnostic (a pi instance and an Adapter Daemon join the same way).
 _Avoid_: peer (reserved for local socket discovery), bridge, worker, session
 
+**Namespace**:
+The engine-side isolation scope. Actors, durable queues and runner-configs are all partitioned by it, so a name means nothing without one — the same pool name in two namespaces is two unrelated configs, and a Node joining a namespace it was never set up in has no runner to land on.
+_Avoid_: ns (command alias only), tenant, workspace, environment
+
+**Default namespace**:
+The `namespace` written in `mesh.config.json` — what every new process starts from, and the only value a write can change.
+_Avoid_: current namespace, home namespace
+
+**Effective namespace**:
+The namespace this process actually talks to: the Default namespace, or the in-memory override chosen for this process with `/xfer mesh ns`. It is what every query, listing, registration and namespace write means, and it dies with the process.
+_Avoid_: session namespace, active namespace (session is the pi session's word, not this one)
+
+**Identity line**:
+The footer line carrying this Node's name and, when the mesh is configured, its Effective namespace. One line, one fact each: it never says whether the mesh is online.
+_Avoid_: status bar, footer, presence line
+
 **Runner / pool**:
-A live process on a machine that can host a Node's actor, and the named group of them on the engine (`runner_name_selector`; an absent name is the engine's `default` pool). A Node's actor only ever runs inside a runner from its own pool — a Node whose pool has none is on the engine but cannot receive anything.
+A live process on a machine that can host a Node's actor, and the named group of them on the engine (`runner_name_selector`; an absent name is the engine's `default` pool). A Node's actor only ever runs inside a runner from its own pool — a Node whose pool has none is on the engine but cannot receive anything. Pools are **per namespace**: a namespace created later starts with no pools at all, which is why joining a fresh one needs its own runner-config before an envoy is accepted.
 _Avoid_: worker, envoy (the engine's own word for it — keep it in engine-facing code only), host
 
 **Delivery verdict**:

@@ -356,10 +356,18 @@ export async function sendMeshHandoff(
 }
 
 /** Engine REST call (snake_case responses), mirroring rivetkit's internal apiCall. */
-async function engineApi<T>(config: MeshConfig, method: string, path: string, body?: unknown): Promise<T> {
+async function engineApi<T>(
+  config: MeshConfig,
+  method: string,
+  path: string,
+  body?: unknown,
+  options: { scoped?: boolean } = {},
+): Promise<T> {
   assertEndpointReachable(config.endpoint);
   const url = new URL(path, config.endpoint);
-  if (config.namespace) url.searchParams.set("namespace", config.namespace);
+  // Namespace-scoped by default: almost every route answers for one namespace.
+  // The few global ones (`/namespaces`) reject the parameter outright.
+  if (options.scoped !== false && config.namespace) url.searchParams.set("namespace", config.namespace);
   const headers: Record<string, string> = {};
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -491,6 +499,26 @@ function envoyRegistrationError(
 
 export function listMeshNodes(config: MeshConfig): Promise<MeshNodeInfo[]> {
   return fetchMeshNodes(config);
+}
+
+/** Budget for the namespace picker's one listing round — same order as the pre-send check. */
+export const NAMESPACE_LIST_TIMEOUT_MS = 2_500;
+
+/**
+ * Every namespace this token can see on the engine, sorted. Used by the picker
+ * only: a namespace switch must not depend on the listing (a scoped token is a
+ * normal deployment), so a failure here is reported and the user is offered the
+ * typed value instead.
+ */
+export async function listNamespaces(config: MeshConfig, timeoutMs = NAMESPACE_LIST_TIMEOUT_MS): Promise<string[]> {
+  const response = await withTimeout(
+    engineApi<{ namespaces?: Array<{ name?: unknown }> }>(config, "GET", "/namespaces", undefined, { scoped: false }),
+    timeoutMs,
+  );
+  return (response.namespaces ?? [])
+    .map((namespace) => namespace.name)
+    .filter((name): name is string => typeof name === "string" && name !== "")
+    .sort((a, b) => a.localeCompare(b));
 }
 
 /**

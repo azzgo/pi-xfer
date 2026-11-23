@@ -466,7 +466,70 @@ function deserializeMeshKey(serialized) {
   parts.push(current);
   return parts;
 }
-var import_node_child_process, fs3, XFER_INSTANCE_ACTOR, HANDOFF_QUEUE, ENV_VAR_NAME_RE, ENV_VAR_NAME_PREFIX_RE, TOKEN_COMMAND_TIMEOUT_MS;
+function isNamespaceSlug(value) {
+  return NAMESPACE_RE.test(value.trim());
+}
+function normalizeNamespace(value) {
+  const trimmed = value.trim();
+  if (trimmed === "") throw new Error("mesh namespace must not be empty");
+  if (!isNamespaceSlug(trimmed)) {
+    throw new Error(
+      `mesh namespace "${trimmed}" is not a valid engine slug — letters, digits, "." "_" "-" only (a namespace is an engine-side name, not free text)`
+    );
+  }
+  return trimmed;
+}
+function writeDefaultNamespace(configPath, namespace) {
+  const next = normalizeNamespace(namespace);
+  let text;
+  try {
+    text = fs3.readFileSync(configPath, "utf-8");
+  } catch {
+    throw new Error(`mesh not configured — create ${configPath} ({ endpoint, namespace?, token?, pool? })`);
+  }
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`mesh config is not valid JSON: ${configPath} — ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error(`mesh config must be a JSON object: ${configPath}`);
+  }
+  const obj = raw;
+  const authored = obj.namespace;
+  if (typeof authored === "string" && (isCommandValue(authored) || isTemplateValue(authored))) {
+    throw new Error(
+      `mesh config "namespace" is authored as ${JSON.stringify(authored)} — refusing to replace an expression with the literal "${next}". Change what that expression resolves to, or replace the value by hand. The file was not modified.`
+    );
+  }
+  const previous = typeof authored === "string" ? authored : null;
+  obj.namespace = next;
+  const serialized = `${JSON.stringify(obj, null, 2)}
+`;
+  const mode = fileMode(configPath) ?? 384;
+  const temp = `${configPath}.${process.pid}.tmp`;
+  fs3.writeFileSync(temp, serialized, { encoding: "utf-8", mode: 384 });
+  try {
+    fs3.chmodSync(temp, mode);
+    fs3.renameSync(temp, configPath);
+  } catch (err) {
+    try {
+      fs3.rmSync(temp, { force: true });
+    } catch {
+    }
+    throw err;
+  }
+  return { path: configPath, namespace: next, previous };
+}
+function fileMode(file2) {
+  try {
+    return fs3.statSync(file2).mode & 511;
+  } catch {
+    return null;
+  }
+}
+var import_node_child_process, fs3, XFER_INSTANCE_ACTOR, HANDOFF_QUEUE, ENV_VAR_NAME_RE, ENV_VAR_NAME_PREFIX_RE, TOKEN_COMMAND_TIMEOUT_MS, NAMESPACE_RE;
 var init_mesh_config = __esm({
   "src/mesh/mesh-config.ts"() {
     import_node_child_process = require("node:child_process");
@@ -477,6 +540,7 @@ var init_mesh_config = __esm({
     ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
     ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
     TOKEN_COMMAND_TIMEOUT_MS = 1e4;
+    NAMESPACE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
   }
 });
 
@@ -48898,6 +48962,7 @@ __export(mesh_engine_exports, {
   MAX_NODE_DESCRIPTION: () => MAX_NODE_DESCRIPTION,
   MeshPreflightError: () => MeshPreflightError,
   MeshSendError: () => MeshSendError,
+  NAMESPACE_LIST_TIMEOUT_MS: () => NAMESPACE_LIST_TIMEOUT_MS,
   NO_ENVOYS_ERROR: () => NO_ENVOYS_ERROR,
   NO_RUNNER_CONFIG_CODE: () => NO_RUNNER_CONFIG_CODE,
   PREFLIGHT_TIMEOUT_MS: () => PREFLIGHT_TIMEOUT_MS,
@@ -48913,6 +48978,7 @@ __export(mesh_engine_exports, {
   listMeshNodes: () => listMeshNodes,
   listMeshRunners: () => listMeshRunners,
   listMeshState: () => listMeshState,
+  listNamespaces: () => listNamespaces,
   meshDuplicateLogLine: () => meshDuplicateLogLine,
   meshListing: () => meshListing,
   meshPoolName: () => meshPoolName,
@@ -49087,10 +49153,10 @@ async function sendMeshHandoff(config3, target2, message, timeoutMs = QUEUE_SEND
   }
   return preflight;
 }
-async function engineApi(config3, method2, path14, body) {
+async function engineApi(config3, method2, path14, body, options = {}) {
   assertEndpointReachable(config3.endpoint);
   const url3 = new URL(path14, config3.endpoint);
-  if (config3.namespace) url3.searchParams.set("namespace", config3.namespace);
+  if (options.scoped !== false && config3.namespace) url3.searchParams.set("namespace", config3.namespace);
   const headers = {};
   if (config3.token) headers.Authorization = `Bearer ${config3.token}`;
   if (body !== void 0) headers["Content-Type"] = "application/json";
@@ -49158,6 +49224,13 @@ function envoyRegistrationError(err, config3, pool) {
 }
 function listMeshNodes(config3) {
   return fetchMeshNodes(config3);
+}
+async function listNamespaces(config3, timeoutMs = NAMESPACE_LIST_TIMEOUT_MS) {
+  const response = await withTimeout(
+    engineApi(config3, "GET", "/namespaces", void 0, { scoped: false }),
+    timeoutMs
+  );
+  return (response.namespaces ?? []).map((namespace) => namespace.name).filter((name) => typeof name === "string" && name !== "").sort((a, b) => a.localeCompare(b));
 }
 async function destroyMeshNode(config3, actorId) {
   await engineApi(config3, "DELETE", `/actors/${encodeURIComponent(actorId)}`);
@@ -49321,7 +49394,7 @@ function meshSendFailureFields(err) {
   const failure2 = classifyMeshSendFailure(err);
   return { verdict: failure2.kind, code: failure2.code };
 }
-var DELIVERED_WINDOW_SIZE, MAX_NODE_DESCRIPTION, NO_ENVOYS_ERROR, QUEUE_SEND_TIMEOUT_MS, NO_RUNNER_CONFIG_CODE, PREFLIGHT_TIMEOUT_MS, MeshPreflightError, ACTOR_READY_TIMEOUT_CODE, MeshSendError;
+var DELIVERED_WINDOW_SIZE, MAX_NODE_DESCRIPTION, NO_ENVOYS_ERROR, QUEUE_SEND_TIMEOUT_MS, NO_RUNNER_CONFIG_CODE, NAMESPACE_LIST_TIMEOUT_MS, PREFLIGHT_TIMEOUT_MS, MeshPreflightError, ACTOR_READY_TIMEOUT_CODE, MeshSendError;
 var init_mesh_engine = __esm({
   "src/mesh/mesh-engine.ts"() {
     init_mesh_config();
@@ -49334,6 +49407,7 @@ var init_mesh_engine = __esm({
     NO_ENVOYS_ERROR = "no_envoys";
     QUEUE_SEND_TIMEOUT_MS = 3e4;
     NO_RUNNER_CONFIG_CODE = "no_runner_config";
+    NAMESPACE_LIST_TIMEOUT_MS = 2500;
     PREFLIGHT_TIMEOUT_MS = 6e3;
     MeshPreflightError = class extends Error {
       target;
@@ -49655,6 +49729,8 @@ var MeshNode = class {
   logPath;
   engine = null;
   nodeName = null;
+  /** Effective-namespace override for this process only; never persisted (ADR 0024). */
+  namespaceOverride = null;
   constructor(options) {
     this.configPath = options.configPath;
     this.configOverride = options.config;
@@ -49680,6 +49756,86 @@ var MeshNode = class {
   config() {
     return this.configOverride ?? loadMeshConfig(this.configPath);
   }
+  /**
+   * The **Effective namespace** and where it came from, for the surfaces that
+   * must name the namespace they are about to read (Identity line, status,
+   * listings). `null` when there is no readable config at all: "no mesh" is a
+   * normal state, and a display path must never throw over a config file.
+   */
+  namespaceInfo() {
+    let config3;
+    try {
+      config3 = this.configOverride ?? loadMeshConfig(this.configPath);
+    } catch {
+      return null;
+    }
+    const authored = config3.namespace ?? config3.namespaceExpression ?? "default";
+    const override = this.namespaceOverride;
+    return {
+      effective: override ?? authored,
+      default: authored,
+      source: override ? "session" : "config",
+      expression: config3.namespaceExpression !== void 0
+    };
+  }
+  /** Suffix for the Identity line: ` · <ns>` and ` (session)` when overridden; "" without a config. */
+  identitySuffix() {
+    const info = this.namespaceInfo();
+    if (!info) return "";
+    return ` · ${info.effective}${info.source === "session" ? " (session)" : ""}`;
+  }
+  /**
+   * Namespaces this token can see, for the picker. May throw — the picker
+   * degrades, it does not fail.
+   *
+   * The listing itself is namespace-independent, so an unresolvable
+   * `namespace` expression must not block it: the picker is the one surface that
+   * can move the session off such a config, and refusing to list would leave the
+   * user with nothing to select.
+   */
+  async namespaceCandidates() {
+    let config3;
+    try {
+      config3 = await this.resolvedConfig();
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      if (!text.includes('mesh config "namespace"')) throw err;
+      const base = this.configOverride ?? loadMeshConfig(this.configPath);
+      const { namespace: _namespace, namespaceExpression: _expression, ...rest } = base;
+      config3 = await resolveMeshConfig(rest);
+    }
+    return listNamespaces(config3);
+  }
+  /**
+   * Switch this process to another namespace. Refused while online: the Node's
+   * actor lives in the namespace it joined, and `down` is the only path that
+   * destroys an actor — a namespace switch must not do that on the user's behalf
+   * (ADR 0024).
+   */
+  setNamespace(namespace) {
+    const online = this.status();
+    if (online.online) {
+      throw new Error(
+        `mesh is online as "${online.name}" in namespace "${this.namespaceInfo()?.effective ?? "?"}" — run /xfer mesh down first (down is the only path that destroys this Node's actor)`
+      );
+    }
+    const info = this.namespaceInfo();
+    if (!info) throw new Error(`mesh not configured — create ${this.configPath} ({ endpoint, namespace?, token?, pool? })`);
+    const next = normalizeNamespace(namespace);
+    this.namespaceOverride = next === info.default ? null : next;
+    return this.namespaceInfo();
+  }
+  /** Write the Default namespace (the only config write in the product) and drop any override. */
+  writeDefaultNamespace(namespace) {
+    const written = writeDefaultNamespace(this.configPath, namespace);
+    this.namespaceOverride = null;
+    return written;
+  }
+  /** Resolved config with this process's namespace override applied — the one seam every engine call passes through. */
+  async resolvedConfig() {
+    const config3 = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
+    return this.namespaceOverride ? { ...config3, namespace: this.namespaceOverride } : config3;
+  }
   /** Live engine listing of all mesh nodes (no cache). */
   async list() {
     return this.requireEngine().listNodes();
@@ -49692,7 +49848,7 @@ var MeshNode = class {
    */
   async state() {
     if (this.engine) return this.engine.state();
-    return listMeshState(await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath)));
+    return listMeshState(await this.resolvedConfig());
   }
   /** One node's verdict, joined against its pool's live runners. */
   async nodeState(target2) {
@@ -49703,8 +49859,7 @@ var MeshNode = class {
   /** Pre-send check for a target; rejects with MeshPreflightError when it cannot receive. */
   async preflight(target2) {
     if (this.engine) return this.engine.preflight(target2);
-    const config3 = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
-    return preflightMeshSend(config3, target2);
+    return preflightMeshSend(await this.resolvedConfig(), target2);
   }
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
@@ -49719,11 +49874,12 @@ var MeshNode = class {
   async up(name) {
     const current = this.status();
     if (current.online) throw new Error(`mesh is already online as "${current.name}" — /xfer mesh down first`);
-    const config3 = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
+    const config3 = await this.resolvedConfig();
     const session = {
       node: name,
       endpoint: config3.endpoint,
       namespace: config3.namespace ?? "default",
+      namespaceSource: this.namespaceOverride ? "session" : "config",
       pool: config3.pool ?? "(default)",
       nativeLogLevel: process.env.RIVET_LOG_LEVEL ?? "silent"
     };

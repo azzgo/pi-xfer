@@ -2,13 +2,21 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as url from "node:url";
-import { loadMeshConfig, resolveMeshConfig, type MeshConfig } from "./mesh-config.ts";
+import {
+  loadMeshConfig,
+  normalizeNamespace,
+  resolveMeshConfig,
+  writeDefaultNamespace as writeConfigNamespace,
+  type MeshConfig,
+  type NamespaceWrite,
+} from "./mesh-config.ts";
 import {
   deriveMeshNodeState,
   findMeshNode,
   listMeshState,
   meshSendFailureFields,
   preflightMeshSend,
+  listNamespaces,
   type MeshEngine,
   type MeshHandoffMessage,
   type MeshListing,
@@ -60,6 +68,18 @@ export interface MeshNodeOptions {
   ) => MeshEngine | Promise<MeshEngine>;
 }
 
+/**
+ * What the surfaces need to name a namespace honestly: the Effective one, the
+ * Default one it came from, and whether the difference is this process's doing.
+ */
+export interface MeshNamespaceInfo {
+  effective: string;
+  default: string;
+  source: "session" | "config";
+  /** True when `mesh.config.json` spells `namespace` as an expression a write must not replace. */
+  expression: boolean;
+}
+
 export type MeshStatus =
   | { online: false }
   | { online: true; name: string };
@@ -76,6 +96,8 @@ export class MeshNode {
   private readonly logPath: string;
   private engine: MeshEngine | null = null;
   private nodeName: string | null = null;
+  /** Effective-namespace override for this process only; never persisted (ADR 0024). */
+  private namespaceOverride: string | null = null;
 
   constructor(options: MeshNodeOptions) {
     this.configPath = options.configPath;
@@ -105,6 +127,93 @@ export class MeshNode {
     return this.configOverride ?? loadMeshConfig(this.configPath);
   }
 
+  /**
+   * The **Effective namespace** and where it came from, for the surfaces that
+   * must name the namespace they are about to read (Identity line, status,
+   * listings). `null` when there is no readable config at all: "no mesh" is a
+   * normal state, and a display path must never throw over a config file.
+   */
+  namespaceInfo(): MeshNamespaceInfo | null {
+    let config: MeshConfig;
+    try {
+      config = this.configOverride ?? loadMeshConfig(this.configPath);
+    } catch {
+      return null;
+    }
+    const authored = config.namespace ?? config.namespaceExpression ?? "default";
+    const override = this.namespaceOverride;
+    return {
+      effective: override ?? authored,
+      default: authored,
+      source: override ? "session" : "config",
+      expression: config.namespaceExpression !== undefined,
+    };
+  }
+
+  /** Suffix for the Identity line: ` · <ns>` and ` (session)` when overridden; "" without a config. */
+  identitySuffix(): string {
+    const info = this.namespaceInfo();
+    if (!info) return "";
+    return ` · ${info.effective}${info.source === "session" ? " (session)" : ""}`;
+  }
+
+  /**
+   * Namespaces this token can see, for the picker. May throw — the picker
+   * degrades, it does not fail.
+   *
+   * The listing itself is namespace-independent, so an unresolvable
+   * `namespace` expression must not block it: the picker is the one surface that
+   * can move the session off such a config, and refusing to list would leave the
+   * user with nothing to select.
+   */
+  async namespaceCandidates(): Promise<string[]> {
+    let config: MeshConfig;
+    try {
+      config = await this.resolvedConfig();
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      if (!text.includes("mesh config \"namespace\"")) throw err;
+      const base = this.configOverride ?? loadMeshConfig(this.configPath);
+      const { namespace: _namespace, namespaceExpression: _expression, ...rest } = base;
+      config = await resolveMeshConfig(rest);
+    }
+    return listNamespaces(config);
+  }
+
+  /**
+   * Switch this process to another namespace. Refused while online: the Node's
+   * actor lives in the namespace it joined, and `down` is the only path that
+   * destroys an actor — a namespace switch must not do that on the user's behalf
+   * (ADR 0024).
+   */
+  setNamespace(namespace: string): MeshNamespaceInfo {
+    const online = this.status();
+    if (online.online) {
+      throw new Error(
+        `mesh is online as "${online.name}" in namespace "${this.namespaceInfo()?.effective ?? "?"}" — ` +
+        `run /xfer mesh down first (down is the only path that destroys this Node's actor)`,
+      );
+    }
+    const info = this.namespaceInfo();
+    if (!info) throw new Error(`mesh not configured — create ${this.configPath} ({ endpoint, namespace?, token?, pool? })`);
+    const next = normalizeNamespace(namespace);
+    this.namespaceOverride = next === info.default ? null : next;
+    return this.namespaceInfo()!;
+  }
+
+  /** Write the Default namespace (the only config write in the product) and drop any override. */
+  writeDefaultNamespace(namespace: string): NamespaceWrite {
+    const written = writeConfigNamespace(this.configPath, namespace);
+    this.namespaceOverride = null;
+    return written;
+  }
+
+  /** Resolved config with this process's namespace override applied — the one seam every engine call passes through. */
+  private async resolvedConfig(): Promise<MeshConfig> {
+    const config = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
+    return this.namespaceOverride ? { ...config, namespace: this.namespaceOverride } : config;
+  }
+
   /** Live engine listing of all mesh nodes (no cache). */
   async list(): Promise<MeshNodeInfo[]> {
     return this.requireEngine().listNodes();
@@ -118,7 +227,7 @@ export class MeshNode {
    */
   async state(): Promise<MeshListing> {
     if (this.engine) return this.engine.state();
-    return listMeshState(await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath)));
+    return listMeshState(await this.resolvedConfig());
   }
 
   /** One node's verdict, joined against its pool's live runners. */
@@ -131,8 +240,7 @@ export class MeshNode {
   /** Pre-send check for a target; rejects with MeshPreflightError when it cannot receive. */
   async preflight(target: string): Promise<MeshPreflight> {
     if (this.engine) return this.engine.preflight(target);
-    const config = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
-    return preflightMeshSend(config, target);
+    return preflightMeshSend(await this.resolvedConfig(), target);
   }
   /**
    * Bring this instance online as `name`, adopting a same-name actor that is
@@ -147,11 +255,12 @@ export class MeshNode {
   async up(name: string): Promise<void> {
     const current = this.status();
     if (current.online) throw new Error(`mesh is already online as "${current.name}" — /xfer mesh down first`);
-    const config = await resolveMeshConfig(this.configOverride ?? loadMeshConfig(this.configPath));
+    const config = await this.resolvedConfig();
     const session = {
       node: name,
       endpoint: config.endpoint,
       namespace: config.namespace ?? "default",
+      namespaceSource: this.namespaceOverride ? "session" : "config",
       pool: config.pool ?? "(default)",
       nativeLogLevel: process.env.RIVET_LOG_LEVEL ?? "silent",
     };

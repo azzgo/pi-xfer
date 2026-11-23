@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import { MAX_FRAME_BYTES } from "../core/constants.ts";
 import type { XferNotifyMessage } from "../core/types.ts";
+import { identityLine } from "./identity-line.ts";
 
 /** Routes an incoming handoff into the user's session (ack is sent after). */
 export interface InboundDelivery {
@@ -72,6 +73,12 @@ export async function listenServer(opts: {
   server: net.Server;
   path: string;
   name: string;
+  /**
+   * Appended to the Identity line — the mesh side supplies its Effective
+   * namespace here. Evaluated at print time, so a switch during the session is
+   * visible without re-listening.
+   */
+  suffix?: () => string;
   notifyError: (message: string) => void;
   setStatus: (text: string) => void;
   onListening: () => void;
@@ -90,7 +97,7 @@ export async function listenServer(opts: {
       server.off("error", onError);
       try { fs.chmodSync(opts.path, 0o600); } catch { /* best effort */ }
       opts.onListening();
-      try { opts.setStatus(`📡 ${opts.name}`); } catch { /* best effort */ }
+      try { opts.setStatus(identityLine(opts.name, opts.suffix?.() ?? "")); } catch { /* best effort */ }
       resolve();
     };
     server.on("error", onRuntimeError);

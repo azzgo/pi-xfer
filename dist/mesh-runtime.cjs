@@ -48980,10 +48980,10 @@ function createRivetEngine(config3, onHandoff, deps = {}, options = {}) {
   };
   return engine;
 }
-async function engineApi(config3, method2, path6, body) {
+async function engineApi(config3, method2, path6, body, options = {}) {
   assertEndpointReachable(config3.endpoint);
   const url2 = new URL(path6, config3.endpoint);
-  if (config3.namespace) url2.searchParams.set("namespace", config3.namespace);
+  if (options.scoped !== false && config3.namespace) url2.searchParams.set("namespace", config3.namespace);
   const headers = {};
   if (config3.token) headers.Authorization = `Bearer ${config3.token}`;
   if (body !== void 0) headers["Content-Type"] = "application/json";

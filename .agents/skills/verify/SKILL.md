@@ -260,6 +260,17 @@ curl -s http://127.0.0.1:7921/metadata                                 # the pub
 `500 internal_error` with `meta=null`, which reads as "the engine is broken"
 when it is only a missing parameter.
 
+#### An interactive session against a loopback engine needs `RIVET_RUN_SERVICES=0`
+
+RivetKit treats any `127.0.0.1` endpoint as a local engine and tries to spawn the
+**Services** binary next to it. Without that binary, `mesh up` fails with
+`start_failed: Services failed to start: process exited with status exit status: 1`
+— which reads like a broken engine. Launch the session as
+`NODE_TEST_CONTEXT=1 RIVET_RUN_SERVICES=0 XFER_MESH_CONFIG=/tmp/mesh-local/mesh.json pi -ne -e ./`:
+`NODE_TEST_CONTEXT` makes `resolveMeshConfigPath` honour `XFER_MESH_CONFIG` (loopback
+is still allowed by the guard), and `RIVET_RUN_SERVICES=0` keeps the runtime from
+spawning Services it does not need.
+
 #### Expect the guard to crash once at startup
 
 A fresh engine logs one
@@ -281,7 +292,7 @@ preflight verdicts) and can never host a mesh node: `/envoys/connect` 404s there
 and a runner-config write 400s with a message that looks like an engine bug.
 
 Point `endpoint` at the guard port and everything works — verified 2026-11-23:
-fresh namespace + `pool: arch` with no runner-config → `mesh up` fails with the
+fresh namespace + a `pool` of your own with no runner-config → `mesh up` fails with the
 30 s `RivetKit registry did not register with the Engine within 30000ms` (engine
 log: `no_runner_config`); after the runner-config exists → registration in
 170 ms. That is also how the missing-pool preprocessing in `ensureNode` was
@@ -301,6 +312,13 @@ verified.
 - Everything above is still governed by *Never verify against a live
   deployment*: loopback is allowed and free, `~/.pi/xfer/mesh.config.json` is
   not.
+- **A verification record carries placeholders, never the deployment's own
+  values.** A real engine address, namespace or pool name belongs to whoever
+  runs that machine: write `<engine-host>` / `<namespace>` / `<pool>` in the
+  guide, the ADR, the skill or the commit message, and keep the concrete value
+  in your own report to the user. `.gitleaks.toml` fails CI on a private-network
+  address under `docs/`; a personal slug looks like any other word, so that half
+  is discipline only.
 
 ## Manual smoke checklist (release)
 

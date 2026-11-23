@@ -348,6 +348,30 @@ On each machine, in a pi session:
 
 Local-side steps (`mesh.config.json` parsing, `mesh up` refusal on name conflict, doctor's Mesh line) are verified against the code in this repo; the full two-machine delivery loop was not re-run while writing this guide and depends on your control plane deployment.
 
+## Step 3b — Work in another namespace
+
+A namespace separates Actors, queues and pools on one control plane. Your `mesh.config.json` names one
+(the **Default namespace**); a session can work in a different one without touching the file:
+
+```text
+/xfer mesh ns            pick from the engine's namespaces
+   enter                 use it in this session only (gone when pi exits)
+   ctrl+s                write it into mesh.config.json as the new default
+/xfer mesh ns <name>     switch this session without opening the picker
+```
+
+Two consequences worth knowing before you try it:
+
+- **A switch needs `up` again**, and it is refused while the Node is online: the Node's actor lives in
+  the namespace it joined, and `/xfer mesh down` is the only path that destroys an actor — a namespace
+  switch must not do that for you.
+- **The namespace you are in is on screen.** The footer Identity line reads
+  `📡 <name> · <namespace>`, with `(session)` when it differs from the config, and
+  `/xfer mesh status` / `list` name the namespace they queried. A switch is therefore visible without
+  asking, and temporary by design — a reload returns to the Default namespace.
+- A namespace that never had a pool gets one on the next `up` (Step 2 above): joining a fresh namespace
+  does not fail on a missing runner-config.
+
 ## Step 4 — Describe what a node handles
 
 `/xfer desc <text>` writes a short, self-declared capability note for **this** node — the kind of request you want sent its way ("handles Postgres migration reviews", "on-call for the payments service"). `/xfer desc` with no argument clears it.

@@ -18,3 +18,18 @@ commits = [
 paths = [
   '''^\.agents/skills/verify/SKILL\.md$''',
 ]
+
+# Deployment values must not reach documentation. Verification records are
+# written from a real session, which is exactly where a real engine address is
+# easiest to paste into a guide, an ADR or a skill. Only private-network IPv4 is
+# mechanical here — a personal namespace *slug* looks like any other word, so
+# that half stays a discipline (use `<namespace>` / `<pool>` placeholders).
+[[rules]]
+id = "documented-deployment-address"
+description = "A real private-network address in documentation — use <engine-host>"
+path = '''^(?:docs/|\.agents/|README|CONTEXT)'''
+regex = '''\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b'''
+  # The vendored archify skill ships its own test fixtures; they are sample
+  # data for its renderers, not documentation of a deployment.
+  [rules.allowlist]
+  paths = ['''^\.agents/skills/archify/''']

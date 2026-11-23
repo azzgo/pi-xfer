@@ -8,6 +8,7 @@ import { XFER_DIR } from "../core/constants.ts";
 import { readSenderCwdStamp, senderCwdInstruction } from "./sender-cwd-stamp.ts";
 import { DEFAULT_HANDOFF_KIND, readHandoffKind } from "../core/handoff-kind.ts";
 import { createServer, listenServer } from "./server.ts";
+import { identityLine } from "./identity-line.ts";
 import { XferState } from "./state.ts";
 import type { XferNotifyMessage } from "../core/types.ts";
 import { claimEndpoint } from "../link/endpoint-claim.ts";
@@ -39,10 +40,28 @@ export class XferController {
    * when the frame carried no hash. Read by the inbound server to shape its ack.
    */
   lastIntegrity?: "verified" | "mismatch";
+  /**
+   * What the Identity line appends after the name — the mesh installs its
+   * Effective namespace here, evaluated per print so a switch shows up without
+   * re-printing from scratch.
+   */
+  private identitySuffix: () => string = () => "";
 
   constructor(pi: ExtensionAPI, state: XferState) {
     this.pi = pi;
     this.state = state;
+  }
+
+  /** Install the Identity line's suffix (the mesh's Effective namespace). */
+  setIdentitySuffix(suffix: () => string): void {
+    this.identitySuffix = suffix;
+  }
+
+  /** Reprint the Identity line — after a rename or a namespace switch. */
+  refreshIdentity(ctx: ExtensionContext): void {
+    try {
+      ctx.ui.setStatus("xfer", identityLine(this.state.identity?.name ?? "", this.identitySuffix()));
+    } catch { /* best effort: the session may be shutting down */ }
   }
 
   /** Route one inbound frame into the session. */
@@ -155,6 +174,7 @@ export class XferController {
       path: identity.endpoint,
       name: identity.name,
       notifyError: (message) => ctx.ui.notify(message, "error"),
+      suffix: () => this.identitySuffix(),
       setStatus: (text) => ctx.ui.setStatus("xfer", text),
       onListening: () => this.state.writeMetadata(true),
     });
@@ -241,7 +261,7 @@ export class XferController {
       ctx.ui.notify(`❌ Failed to rename xfer: ${error instanceof Error ? error.message : String(error)}`, "error");
       return;
     }
-    ctx.ui.setStatus("xfer", `📡 ${newName}`);
+    ctx.ui.setStatus("xfer", identityLine(newName, this.identitySuffix()));
     ctx.ui.notify(`✅ Renamed to "${newName}"`, "info");
   }
 

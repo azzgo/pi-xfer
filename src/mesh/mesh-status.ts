@@ -9,6 +9,7 @@
  * of these words: a node listed by the engine is a node the engine knows about,
  * and a missing `/envoys` answer is ignorance, not absence.
  */
+import type { MeshNamespaceInfo } from "./mesh.ts";
 import {
   deriveMeshNodeState,
   meshPoolName,
@@ -162,8 +163,28 @@ export function meshSelfStatus(
   };
 }
 
+/**
+ * The one spelling of "which namespace this read meant", so `/xfer mesh status`
+ * and `/xfer mesh list` can never describe the same fact two ways. Empty when no
+ * namespace is known (no readable config).
+ */
+export function namespaceNote(info: MeshNamespaceInfo | null): string {
+  if (info === null) return "";
+  return info.source === "session"
+    ? ` — namespace ${info.effective} (session override; config default: ${info.default})`
+    : ` — namespace ${info.effective}`;
+}
+
+/** The namespace row's detail: the Effective namespace, marked when it is a session override. */
+function namespaceDetail(info: MeshNamespaceInfo | null): string {
+  if (info === null) return "(no mesh.config.json — the mesh is not configured)";
+  return info.source === "session"
+    ? `${info.effective} (session override; config default: ${info.default})`
+    : info.effective;
+}
+
 /** `/xfer mesh status`: this host's answer to "can anything reach me?". */
-export function meshStatusLines(status: MeshSelfStatus, endpoint: string): string[] {
+export function meshStatusLines(status: MeshSelfStatus, endpoint: string, namespace: MeshNamespaceInfo | null = null): string[] {
   const runnerDetail = !status.envoysKnown
     ? `the engine did not answer /envoys — whether pool "${status.pool}" has a runner is unknown`
     : status.poolHasRunner
@@ -171,6 +192,7 @@ export function meshStatusLines(status: MeshSelfStatus, endpoint: string): strin
       : `no runner in pool "${status.pool}" — this machine cannot receive a handoff`;
   const runnerGlyph = !status.envoysKnown ? "?" : status.poolHasRunner ? "●" : "○";
   const entries: Array<[string, string, string]> = [
+    ["●", "namespace", namespaceDetail(namespace)],
     status.online
       ? ["●", "this node", `"${status.name}" — online in this session (actor reachable through the engine)`]
       : ["○", "this node", "not up in this session — nothing runs here until /xfer mesh up (its actor, if any, is not consuming its queue)"],

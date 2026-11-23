@@ -11,14 +11,25 @@ import { BrokerManager } from "./broker/broker-manager.ts";
 import { doctorSeverity, formatDoctorReport, runDoctor } from "./core/doctor.ts";
 import { collectGarbage } from "./core/gc.ts";
 import { MESH_CONFIG_PATH, readPackageVersion } from "./core/constants.ts";
-import type { MeshNode } from "./mesh/mesh.ts";
+import type { MeshNamespaceInfo, MeshNode } from "./mesh/mesh.ts";
 import { ensureRunnerPool, listMeshNodes } from "./mesh/mesh-engine.ts";
-import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTableLines, meshUnreachableLines } from "./mesh/mesh-status.ts";
+import { meshLegendLine, meshSelfAdvice, meshSelfStatus, meshStatusLines, meshTableLines, meshUnreachableLines, namespaceNote } from "./mesh/mesh-status.ts";
 import { loadMeshConfig, resolveMeshConfig } from "./mesh/mesh-config.ts";
 import { XFER_DIR } from "./core/constants.ts";
 import { endpointForName, listPeers, peerDescription } from "./core/utils.ts";
 import { linkStatus, listLinks, listOwnLinks, planSshUp, probeRemote, sshDown, sshUp, type LinkInfo, type SshLinkOptions, type SshUpPlan, type SshUpResult } from "./link/ssh-link.ts";
 import { cachedHosts, cachedRemoteNames, isPrefetching, listSshHosts, prefetchRemoteNames, rememberRemoteNames, wantsProbe } from "./link/ssh-hosts.ts";
+
+/**
+ * The one-shot notice after a namespace switch. The Identity line carries the
+ * standing fact; this carries the *action* — a switch only takes effect on the
+ * next `up`, and only when it actually changed anything.
+ */
+function namespaceSwitchNotice(next: MeshNamespaceInfo, before: MeshNamespaceInfo): string {
+  if (next.effective === before.effective) return `🌐 namespace unchanged — ${next.effective}`;
+  const source = next.source === "session" ? ` (session override; config default: ${next.default})` : "";
+  return `🌐 namespace → ${next.effective}${source}\n   next: /xfer mesh up`;
+}
 
 /** Options for `registerXferCommand`. */
 export interface XferCommandOptions {
@@ -242,7 +253,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         const subPrefix = prefix.slice("mesh ".length).replace(/^\s+/, "");
         const items: AutocompleteItem[] = [
           { value: "mesh up", label: "up", description: "Bring this instance online as its xfer name (needs mesh.config.json)" },
-          { value: "mesh status", label: "status", description: "This node's mesh state: online, pool, runner in that pool, engine reachability" },
+          { value: "mesh status", label: "status", description: "This node's mesh state: namespace, online, pool, runner in that pool, engine reachability" },
+          { value: "mesh ns", label: "ns", description: "Switch mesh namespace (Enter: this session · ctrl+s: write the default)" },
           { value: "mesh down", label: "down", description: "Destroy this node and go offline" },
           { value: "mesh list", label: "list", description: "List mesh nodes (live engine query)" },
           { value: "mesh setup", label: "setup", description: "Verify mesh.config.json works: parse config, ensure the pool's runner-config, query the engine" },
@@ -620,7 +632,8 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         if (!sub || sub === "help") {
           ctx.ui.notify(
             "🌐 /xfer mesh               — this help\n" +
-            "   /xfer mesh status       — this node's state: online, pool, runner in that pool, engine reachability\n" +
+            "   /xfer mesh status       — this node's state: namespace, online, pool, runner in that pool, engine reachability\n" +
+            "   /xfer mesh ns [<name>]  — switch namespace: Enter = this session, ctrl+s = write it as the default\n" +
             "   /xfer mesh up           — bring this instance online (as its xfer name)\n" +
             "   /xfer mesh down         — destroy this node and go offline\n" +
             "   /xfer mesh list         — every mesh node with its delivery verdict (live engine query)\n" +
@@ -656,6 +669,82 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
           }
           return;
         }
+        if (sub === "ns" || sub === "namespace") {
+          if (!mesh.namespaceInfo()) {
+            try {
+              mesh.config();
+            } catch (err) {
+              ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+              return;
+            }
+            ctx.ui.notify("❌ Mesh namespace is unavailable — check mesh.config.json with /xfer mesh setup", "error");
+            return;
+          }
+          const online = mesh.status();
+          if (online.online) {
+            ctx.ui.notify(
+              `❌ Mesh is online as "${online.name}" in namespace "${mesh.namespaceInfo()?.effective ?? "?"}" — ` +
+              `run /xfer mesh down first (down is the only path that destroys this node's actor)`,
+              "error",
+            );
+            return;
+          }
+          const before = mesh.namespaceInfo()!;
+          const target = parts.slice(2).join(" ").trim();
+          if (target !== "") {
+            try {
+              mesh.setNamespace(target);
+            } catch (err) {
+              ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+              return;
+            }
+            controller.refreshIdentity(ctx);
+            ctx.ui.notify(namespaceSwitchNotice(mesh.namespaceInfo()!, before), "info");
+            return;
+          }
+          if (ctx.mode !== "tui") {
+            ctx.ui.notify("Mesh namespace picker needs interactive mode — use /xfer mesh ns <name>", "error");
+            return;
+          }
+          let names: string[] = [];
+          let listingError: string | null = null;
+          try {
+            names = await mesh.namespaceCandidates();
+          } catch (err) {
+            listingError = err instanceof Error ? err.message : String(err);
+          }
+          const { pickNamespaceWithUi } = await import("./mesh/namespace-picker-ui.ts");
+          const pick = await pickNamespaceWithUi(ctx, {
+            names,
+            current: before.effective,
+            defaultName: before.default,
+            listingError,
+          });
+          if (!pick) return;
+          if (pick.kind === "session") {
+            try {
+              mesh.setNamespace(pick.namespace);
+            } catch (err) {
+              ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+              return;
+            }
+            controller.refreshIdentity(ctx);
+            ctx.ui.notify(namespaceSwitchNotice(mesh.namespaceInfo()!, before), "info");
+            return;
+          }
+          try {
+            const written = mesh.writeDefaultNamespace(pick.namespace);
+            controller.refreshIdentity(ctx);
+            ctx.ui.notify(
+              `💾 Default namespace → "${written.namespace}" (${MESH_CONFIG_PATH})\n` +
+              `   only the namespace key was written; this session uses it — next: /xfer mesh up`,
+              "info",
+            );
+          } catch (err) {
+            ctx.ui.notify(`❌ ${err instanceof Error ? err.message : String(err)}`, "error");
+          }
+          return;
+        }
         if (sub === "list") {
           try {
             const listing = await mesh.state();
@@ -663,11 +752,12 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             const selfName = status.online ? status.name : null;
             const lines = meshTableLines(listing, selfName);
             const advice = meshSelfAdvice(meshSelfStatus(listing, { online: status.online, name: selfName }, mesh.config().pool));
+            const note = namespaceNote(mesh.namespaceInfo());
             ctx.ui.notify(
               listing.nodes.length
-                ? `🌐 Mesh nodes (${listing.nodes.length}):\n${lines.join("\n")}\n${meshLegendLine()}` +
+                ? `🌐 Mesh nodes (${listing.nodes.length})${note}:\n${lines.join("\n")}\n${meshLegendLine()}` +
                   (advice ? `\n⚠️ ${advice}` : "")
-                : `🌐 No mesh nodes on the engine (${MESH_CONFIG_PATH}) — bring one up with /xfer mesh up`,
+                : `🌐 No mesh nodes on the engine${note} (${MESH_CONFIG_PATH}) — bring one up with /xfer mesh up`,
               "info",
             );
           } catch (err) {
@@ -682,7 +772,11 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
             const listing = await mesh.state();
             const config = mesh.config();
             const selfStatus = meshSelfStatus(listing, { online: status.online, name: status.online ? status.name : null }, config.pool);
-            ctx.ui.notify(`🌐 Mesh status — ${shown.join(", ")}\n${meshStatusLines(selfStatus, config.endpoint).join("\n")}`, "info");
+            ctx.ui.notify(
+              `🌐 Mesh status — ${shown.join(", ")}${namespaceNote(mesh.namespaceInfo())}\n` +
+              `${meshStatusLines(selfStatus, config.endpoint, mesh.namespaceInfo()).join("\n")}`,
+              "info",
+            );
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
             ctx.ui.notify(
@@ -695,7 +789,7 @@ export function registerXferCommand(pi: ExtensionAPI, controller: XferController
         if (sub === "setup") {
           try {
             const config = await resolveMeshConfig(loadMeshConfig(MESH_CONFIG_PATH));
-            const lines = [`✓ config OK (${MESH_CONFIG_PATH}) — engine ${config.endpoint}`];
+            const lines = [`✓ config OK (${MESH_CONFIG_PATH}) — engine ${config.endpoint}${namespaceNote(mesh.namespaceInfo())}`];
             if (config.pool) {
               const { existed } = await ensureRunnerPool(config);
               lines.push(existed ? `✓ runner-config "${config.pool}" already exists` : `✓ created runner-config "${config.pool}"`);
