@@ -26,7 +26,7 @@
 import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { encodeAgentName, metadataForName } from "../core/utils.ts";
+import { metadataForName, socketStem } from "../core/utils.ts";
 
 /** Options read by every ssh-link operation (tests inject these). */
 export interface SshLinkOptions {
@@ -137,7 +137,7 @@ export function linkStatus(link: LinkInfo): "up" | "dead" | "foreign" {
 }
 
 function localSock(name: string, opts: SshLinkOptions): string {
-  return path.join(opts.xferDir, `${encodeAgentName(name)}.sock`);
+  return path.join(opts.xferDir, `${socketStem(name)}.sock`);
 }
 
 /**
@@ -169,7 +169,7 @@ function killLink(link: LinkInfo, opts: SshLinkOptions): void {
  */
 async function removeReverseMarker(link: LinkInfo, opts: SshLinkOptions): Promise<void> {
   if (!link.reverseAs || !link.remoteDir) return;
-  const target = `${link.remoteDir}/${encodeAgentName(link.reverseAs)}.json`;
+  const target = `${link.remoteDir}/${socketStem(link.reverseAs)}.json`;
   try {
     await sshCapture(link.host, `rm -f ${JSON.stringify(target)}`, opts.keyPath);
   } catch { /* the remote's gc is the fallback */ }
@@ -364,7 +364,7 @@ export async function sshUp(host: string, opts: SshLinkOptions): Promise<SshUpRe
 
   if (plan.existing) killLink(plan.existing, opts);
 
-  const remoteSock = (name: string) => `${plan.remoteDir}/${encodeAgentName(name)}.sock`;
+  const remoteSock = (name: string) => `${plan.remoteDir}/${socketStem(name)}.sock`;
   const forwards: string[] = [];
   for (const name of plan.names) {
     forwards.push("-L", `${localSock(name, opts)}:${remoteSock(name)}`);
@@ -526,7 +526,7 @@ async function writeReverseMarker(plan: SshUpPlan, opts: SshLinkOptions): Promis
     host: opts.myName,
     role: "reverse",
   });
-  const target = `${plan.remoteDir}/${encodeAgentName(plan.reverseAs)}.json`;
+  const target = `${plan.remoteDir}/${socketStem(plan.reverseAs)}.json`;
   // printf with a single-quoted JSON body: no shell expansion of the payload.
   const body = marker.replace(/'/g, `'\\''`);
   await sshCapture(

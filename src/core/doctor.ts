@@ -25,7 +25,7 @@ import { planGc } from "./gc.ts";
 import type { MeshConfig } from "../mesh/mesh-config.ts";
 import { loadMeshConfig, resolveMeshConfig } from "../mesh/mesh-config.ts";
 import { listMeshNodes, type MeshNodeInfo } from "../mesh/mesh-engine.ts";
-import { decodeAgentName, displayPath, listPeers, withTimeout } from "./utils.ts";
+import { displayPath, listPeers, nameForStem, withTimeout } from "./utils.ts";
 
 /** pass = healthy (including "opt-in service not started"), warn = off but self-healing, fail = broken. */
 export type DoctorStatus = "pass" | "warn" | "fail";
@@ -142,7 +142,7 @@ function socketDirCheck(xferDir: string): DoctorCheck {
 
 async function peersCheck(deps: DoctorDeps): Promise<DoctorCheck> {
   const { zombies } = await planGc(deps.xferDir);
-  const zombieNames = zombies.map((z) => decodeAgentName(z.name));
+  const zombieNames = zombies.map((z) => nameForStem(z.name, deps.xferDir));
   const online = listPeers(deps.myName, deps.xferDir).filter((peer) => !zombieNames.includes(peer.xferName));
   const listed = online.length > 0 ? `${online.length} online: ${online.map((p) => p.xferName).join(", ")}` : "no peers online (only this session)";
   if (zombies.length > 0) {

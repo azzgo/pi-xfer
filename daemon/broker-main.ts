@@ -54,7 +54,7 @@ import { ERR, FROM_WEB_PICKER, WIRE } from "../src/core/wire.ts";
 import { renderBagHandoffDoc, renderHandoffDoc, type HandoffPageInfo, type HandoffPick, type HandoffRecord } from "../src/core/handoff-doc.ts";
 import { createMeshDescriber } from "../src/mesh/mesh-describer.ts";
 import { listTargetsWithDescriptions } from "../src/core/targets.ts";
-import { encodeAgentName, isEntryPoint, pidAlive } from "../src/core/utils.ts";
+import { isEntryPoint, pidAlive, socketStem } from "../src/core/utils.ts";
 import { attachWsServer, type WsConnection } from "../src/broker/ws-server.ts";
 import { WIRE_VERSION } from "../src/core/wire.ts";
 
@@ -254,7 +254,7 @@ function pushXferNotify(
   msg: { type: string; msg_id: string; [key: string]: unknown },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const endpoint = path.join(xferDir, `${encodeAgentName(target)}.sock`);
+    const endpoint = path.join(xferDir, `${socketStem(target)}.sock`);
     if (!fs.existsSync(endpoint)) {
       reject(Object.assign(new Error(`peer "${target}" not found`), { code: ERR_TARGET_NOT_FOUND }));
       return;

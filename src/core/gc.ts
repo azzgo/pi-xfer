@@ -18,6 +18,7 @@
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
+import { socketStem } from "./utils.ts";
 
 export type GcReason = "dead-pid" | "orphan-sock" | "unreadable-json" | "dead-link";
 
@@ -209,8 +210,8 @@ export async function planGc(xferDir: string): Promise<GcReport> {
       if (Array.isArray(rec.names)) names = rec.names.filter((n): n is string => typeof n === "string");
     } catch { /* unreadable: leave it for a human */ }
 
-    const sockets = names.map(n => path.join(xferDir, `${encodeURIComponent(n)}.sock`));
-    for (const name of names) claimedByLink.add(name);
+    const sockets = names.map(n => path.join(xferDir, `${socketStem(n)}.sock`));
+    for (const name of names) claimedByLink.add(socketStem(name));
 
     if (pid !== undefined && !processAlive(pid)) {
       // Keep only the entries that still exist, so the report is about reality.
@@ -225,7 +226,7 @@ export async function planGc(xferDir: string): Promise<GcReport> {
         ...(owned.length > 0 ? { ownedSockets: owned } : {}),
       });
       for (const name of names) {
-        const at = alive.indexOf(name);
+        const at = alive.indexOf(socketStem(name));
         if (at >= 0) alive.splice(at, 1);
       }
     } else {

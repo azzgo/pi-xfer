@@ -195,6 +195,7 @@ var net = __toESM(require("node:net"), 1);
 var path5 = __toESM(require("node:path"), 1);
 
 // src/core/utils.ts
+var import_node_crypto = require("node:crypto");
 var fs3 = __toESM(require("node:fs"), 1);
 var path4 = __toESM(require("node:path"), 1);
 
@@ -280,9 +281,6 @@ function readModulePackageVersion(moduleDirname) {
 }
 
 // src/core/utils.ts
-function encodeAgentName(name) {
-  return encodeURIComponent(name);
-}
 function decodeAgentName(name) {
   try {
     return decodeURIComponent(name);
@@ -290,8 +288,32 @@ function decodeAgentName(name) {
     return name;
   }
 }
-function endpointForName(name, xferDir = XFER_DIR) {
-  return path4.join(xferDir, `${encodeAgentName(name)}.sock`);
+var MAX_ENCODED_STEM = 64;
+var HASHED_STEM_PREFIX = "+";
+function socketStem(name) {
+  const encoded = encodeURIComponent(name);
+  if (encoded.length <= MAX_ENCODED_STEM) return encoded;
+  return HASHED_STEM_PREFIX + (0, import_node_crypto.createHash)("sha256").update(name, "utf-8").digest("hex").slice(0, 16);
+}
+function isHashedStem(stem) {
+  return stem.startsWith(HASHED_STEM_PREFIX);
+}
+function metadataForName(name, xferDir = XFER_DIR) {
+  return path4.join(xferDir, `${socketStem(name)}.json`);
+}
+function readMetadataFile(file) {
+  try {
+    const raw = JSON.parse(fs3.readFileSync(file, "utf-8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return raw;
+  } catch {
+    return {};
+  }
+}
+function nameForStem(stem, xferDir = XFER_DIR) {
+  if (!isHashedStem(stem)) return decodeAgentName(stem);
+  const recorded = readMetadataFile(path4.join(xferDir, `${stem}.json`)).xferName;
+  return typeof recorded === "string" && recorded !== "" ? recorded : stem;
 }
 function isEntryPoint(names) {
   const invoked = process.argv[1];
@@ -307,26 +329,23 @@ function pidAlive(pid) {
   }
 }
 function readPeerMetadata(xferName, xferDir = XFER_DIR) {
-  try {
-    const raw = JSON.parse(fs3.readFileSync(path4.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-    const value = raw;
-    return {
-      ...typeof value.sessionName === "string" ? { sessionName: value.sessionName } : {},
-      ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
-      ...typeof value.model === "string" ? { model: value.model } : {},
-      ...typeof value.status === "string" ? { status: value.status } : {},
-      ...typeof value.pid === "number" ? { pid: value.pid } : {},
-      ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {},
-      ...value.via === "ssh" ? {
-        via: "ssh",
-        host: typeof value.host === "string" ? value.host : "",
-        ...value.role === "reverse" || value.role === "import" ? { role: value.role } : {}
-      } : {}
-    };
-  } catch {
-    return {};
-  }
+  return projectMetadata(readMetadataFile(metadataForName(xferName, xferDir)));
+}
+function projectMetadata(value) {
+  return {
+    ...typeof value.xferName === "string" ? { xferName: value.xferName } : {},
+    ...typeof value.sessionName === "string" ? { sessionName: value.sessionName } : {},
+    ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
+    ...typeof value.model === "string" ? { model: value.model } : {},
+    ...typeof value.status === "string" ? { status: value.status } : {},
+    ...typeof value.pid === "number" ? { pid: value.pid } : {},
+    ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {},
+    ...value.via === "ssh" ? {
+      via: "ssh",
+      host: typeof value.host === "string" ? value.host : "",
+      ...value.role === "reverse" || value.role === "import" ? { role: value.role } : {}
+    } : {}
+  };
 }
 async function withTimeout(promise, ms) {
   let timer;
@@ -342,12 +361,17 @@ async function withTimeout(promise, ms) {
 function listPeers(myName, xferDir = XFER_DIR) {
   try {
     fs3.mkdirSync(xferDir, { recursive: true, mode: 448 });
-    const names = fs3.readdirSync(xferDir).filter((f) => f.endsWith(".sock")).map((f) => decodeAgentName(f.replace(/\.sock$/, ""))).filter((n) => n !== myName);
-    return [...new Set(names)].map((xferName) => ({
-      xferName,
-      endpoint: endpointForName(xferName),
-      ...readPeerMetadata(xferName, xferDir)
-    })).sort((a, b) => a.xferName.localeCompare(b.xferName));
+    const peers = /* @__PURE__ */ new Map();
+    for (const file of fs3.readdirSync(xferDir).filter((f) => f.endsWith(".sock"))) {
+      const xferName = nameForStem(file.slice(0, -".sock".length), xferDir);
+      if (xferName === myName || peers.has(xferName)) continue;
+      peers.set(xferName, {
+        xferName,
+        endpoint: path4.join(xferDir, file),
+        ...readPeerMetadata(xferName, xferDir)
+      });
+    }
+    return [...peers.values()].sort((a, b) => a.xferName.localeCompare(b.xferName));
   } catch {
     return [];
   }
@@ -775,8 +799,8 @@ async function planGc(xferDir) {
       if (Array.isArray(rec.names)) names = rec.names.filter((n) => typeof n === "string");
     } catch {
     }
-    const sockets = names.map((n) => path6.join(xferDir, `${encodeURIComponent(n)}.sock`));
-    for (const name of names) claimedByLink.add(name);
+    const sockets = names.map((n) => path6.join(xferDir, `${socketStem(n)}.sock`));
+    for (const name of names) claimedByLink.add(socketStem(name));
     if (pid !== void 0 && !processAlive(pid)) {
       const owned = sockets.filter((p) => fs5.existsSync(p));
       zombies.push({
@@ -789,7 +813,7 @@ async function planGc(xferDir) {
         ...owned.length > 0 ? { ownedSockets: owned } : {}
       });
       for (const name of names) {
-        const at = alive.indexOf(name);
+        const at = alive.indexOf(socketStem(name));
         if (at >= 0) alive.splice(at, 1);
       }
     } else {

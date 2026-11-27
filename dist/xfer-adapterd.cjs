@@ -156,11 +156,33 @@ function decodeAgentName(name) {
     return name;
   }
 }
+function socketStem(name) {
+  const encoded = encodeURIComponent(name);
+  if (encoded.length <= MAX_ENCODED_STEM) return encoded;
+  return HASHED_STEM_PREFIX + (0, import_node_crypto.createHash)("sha256").update(name, "utf-8").digest("hex").slice(0, 16);
+}
+function isHashedStem(stem) {
+  return stem.startsWith(HASHED_STEM_PREFIX);
+}
 function endpointForName(name, xferDir = XFER_DIR) {
-  return path3.join(xferDir, `${encodeAgentName(name)}.sock`);
+  return path3.join(xferDir, `${socketStem(name)}.sock`);
 }
 function metadataForName(name, xferDir = XFER_DIR) {
-  return path3.join(xferDir, `${encodeAgentName(name)}.json`);
+  return path3.join(xferDir, `${socketStem(name)}.json`);
+}
+function readMetadataFile(file2) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file2, "utf-8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return raw;
+  } catch {
+    return {};
+  }
+}
+function nameForStem(stem, xferDir = XFER_DIR) {
+  if (!isHashedStem(stem)) return decodeAgentName(stem);
+  const recorded = readMetadataFile(path3.join(xferDir, `${stem}.json`)).xferName;
+  return typeof recorded === "string" && recorded !== "" ? recorded : stem;
 }
 function isEntryPoint(names) {
   const invoked = process.argv[1];
@@ -168,26 +190,23 @@ function isEntryPoint(names) {
   return names.includes(path3.basename(invoked));
 }
 function readPeerMetadata(xferName, xferDir = XFER_DIR) {
-  try {
-    const raw = JSON.parse(fs.readFileSync(path3.join(xferDir, `${encodeAgentName(xferName)}.json`), "utf-8"));
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-    const value = raw;
-    return {
-      ...typeof value.sessionName === "string" ? { sessionName: value.sessionName } : {},
-      ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
-      ...typeof value.model === "string" ? { model: value.model } : {},
-      ...typeof value.status === "string" ? { status: value.status } : {},
-      ...typeof value.pid === "number" ? { pid: value.pid } : {},
-      ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {},
-      ...value.via === "ssh" ? {
-        via: "ssh",
-        host: typeof value.host === "string" ? value.host : "",
-        ...value.role === "reverse" || value.role === "import" ? { role: value.role } : {}
-      } : {}
-    };
-  } catch {
-    return {};
-  }
+  return projectMetadata(readMetadataFile(metadataForName(xferName, xferDir)));
+}
+function projectMetadata(value) {
+  return {
+    ...typeof value.xferName === "string" ? { xferName: value.xferName } : {},
+    ...typeof value.sessionName === "string" ? { sessionName: value.sessionName } : {},
+    ...typeof value.cwd === "string" ? { cwd: value.cwd } : {},
+    ...typeof value.model === "string" ? { model: value.model } : {},
+    ...typeof value.status === "string" ? { status: value.status } : {},
+    ...typeof value.pid === "number" ? { pid: value.pid } : {},
+    ...typeof value.startedAt === "number" ? { startedAt: value.startedAt } : {},
+    ...value.via === "ssh" ? {
+      via: "ssh",
+      host: typeof value.host === "string" ? value.host : "",
+      ...value.role === "reverse" || value.role === "import" ? { role: value.role } : {}
+    } : {}
+  };
 }
 async function withTimeout(promise2, ms) {
   let timer;
@@ -200,12 +219,15 @@ async function withTimeout(promise2, ms) {
     clearTimeout(timer);
   }
 }
-var fs, path3;
+var import_node_crypto, fs, path3, MAX_ENCODED_STEM, HASHED_STEM_PREFIX;
 var init_utils = __esm({
   "src/core/utils.ts"() {
+    import_node_crypto = require("node:crypto");
     fs = __toESM(require("node:fs"), 1);
     path3 = __toESM(require("node:path"), 1);
     init_constants();
+    MAX_ENCODED_STEM = 64;
+    HASHED_STEM_PREFIX = "+";
   }
 });
 
@@ -49685,7 +49707,7 @@ function listTargets(xferDir = XFER_DIR) {
   }
   return entries.filter((file2) => file2.endsWith(".sock")).map((sockFile) => {
     const base = sockFile.replace(/\.sock$/, "");
-    return { name: decodeAgentName(base), ...readSiblingMetadata(path5.join(xferDir, `${base}.json`)) };
+    return { name: nameForStem(base, xferDir), ...readSiblingMetadata(path5.join(xferDir, `${base}.json`)) };
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -50103,6 +50125,7 @@ init_utils();
 
 // src/core/gc.ts
 var net3 = __toESM(require("node:net"), 1);
+init_utils();
 function processAlive(pid) {
   try {
     process.kill(pid, 0);
